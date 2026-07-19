@@ -25,12 +25,23 @@ func (termCaseChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 			if seg.Type != document.SegmentProse {
 				continue
 			}
-			if idx := strings.Index(strings.ToLower(seg.Text), strings.ToLower(e.Term)); idx >= 0 {
-				actual := seg.Text[idx : idx+len(e.Term)]
+			text := seg.Text
+			lowerText := strings.ToLower(text)
+			lowerTerm := strings.ToLower(e.Term)
+			idx := 0
+			for {
+				pos := strings.Index(lowerText[idx:], lowerTerm)
+				if pos < 0 {
+					break
+				}
+				actualStart := idx + pos
+				actualEnd := actualStart + len(e.Term)
+				actual := text[actualStart:actualEnd]
 				if actual != *e.CanonicalCase {
 					path := ctx.Document.Source
-					out = append(out, report.Finding{RuleID: termCaseChecker{}.ID(), RuleVersion: 1, Checker: termCaseChecker{}.ID(), CheckerVersion: 1, Enforcement: "enforced", Severity: "warning", Path: &path, Range: &report.FindingRange{StartByte: seg.Range.Start.Byte + idx, EndByte: seg.Range.Start.Byte + idx + len(actual), StartLine: seg.Range.Start.Line, StartColumn: seg.Range.Start.Column + idx, EndLine: seg.Range.Start.Line, EndColumn: seg.Range.Start.Column + idx + len(actual)}, Evidence: fmt.Sprintf("canonical case is %q", *e.CanonicalCase), Message: "Term case does not match canonical form.", Confidence: 1})
+					out = append(out, report.Finding{RuleID: termCaseChecker{}.ID(), RuleVersion: 1, Checker: termCaseChecker{}.ID(), CheckerVersion: 1, Enforcement: "enforced", Severity: "warning", Path: &path, Range: &report.FindingRange{StartByte: seg.Range.Start.Byte + actualStart, EndByte: seg.Range.Start.Byte + actualEnd, StartLine: seg.Range.Start.Line, StartColumn: seg.Range.Start.Column, EndLine: seg.Range.End.Line, EndColumn: seg.Range.End.Column}, Evidence: fmt.Sprintf("canonical case is %q", *e.CanonicalCase), Message: "Term case does not match canonical form.", Confidence: 1})
 				}
+				idx = actualEnd
 			}
 		}
 	}

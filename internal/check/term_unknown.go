@@ -22,13 +22,24 @@ func (termUnknownChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 		if seg.Type != document.SegmentProse {
 			continue
 		}
-		for i, word := range strings.Fields(seg.Text) {
+		text := seg.Text
+		pos := 0
+		for _, word := range strings.Fields(text) {
+			wordIdx := strings.Index(text[pos:], word)
+			if wordIdx < 0 {
+				continue
+			}
+			wordByteStart := pos + wordIdx
+			wordByteEnd := wordByteStart + len(word)
+
 			clean := strings.TrimFunc(word, func(r rune) bool { return !unicode.IsLetter(r) && !unicode.IsDigit(r) })
 			if clean == "" || ctx.Profile.Dict.Lookup(clean) != nil {
+				pos = wordByteEnd
 				continue
 			}
 			path := ctx.Document.Source
-			out = append(out, report.Finding{RuleID: termUnknownChecker{}.ID(), RuleVersion: 1, Checker: termUnknownChecker{}.ID(), CheckerVersion: 1, Enforcement: "candidate", Severity: "info", Path: &path, Range: &report.FindingRange{StartByte: seg.Range.Start.Byte + i, EndByte: seg.Range.Start.Byte + i + len(word), StartLine: seg.Range.Start.Line, StartColumn: seg.Range.Start.Column + i, EndLine: seg.Range.Start.Line, EndColumn: seg.Range.Start.Column + i + len(word)}, Evidence: fmt.Sprintf("Unknown term: %s", clean), Message: fmt.Sprintf("Unknown term: %s", clean), Confidence: 1})
+			out = append(out, report.Finding{RuleID: termUnknownChecker{}.ID(), RuleVersion: 1, Checker: termUnknownChecker{}.ID(), CheckerVersion: 1, Enforcement: "candidate", Severity: "info", Path: &path, Range: &report.FindingRange{StartByte: seg.Range.Start.Byte + wordByteStart, EndByte: seg.Range.Start.Byte + wordByteEnd, StartLine: seg.Range.Start.Line, StartColumn: seg.Range.Start.Column, EndLine: seg.Range.End.Line, EndColumn: seg.Range.End.Column}, Evidence: fmt.Sprintf("Unknown term: %s", clean), Message: fmt.Sprintf("Unknown term: %s", clean), Confidence: 1})
+			pos = wordByteEnd
 		}
 	}
 	return out, nil
