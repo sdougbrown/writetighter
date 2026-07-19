@@ -1,0 +1,36 @@
+{
+  "claims": {
+    "certification": "none",
+    "issue": null,
+    "standard": null
+  },
+  "display_name": "Software Documentation English",
+  "format_version": 1,
+  "id": "software-docs-en",
+  "language": "en",
+  "license": {
+    "spdx": "LicenseRef-Private-Research"
+  },
+  "payloads": {
+    "dictionary.json": {
+      "sha256": "2696b343ec3a5f04d362898d819d6045521f327b708b5c0a758717ab69e8c549"
+    },
+    "rules.json": {
+      "sha256": "62b5c3eb2afc4b3290cb007485895afd3ec383c2055cb2a887b813dc039d9589"
+    }
+  },
+  "provenance": [
+    {
+      "license": "LicenseRef-Private-Research",
+      "name": "software-dictionary",
+      "release": "b936ec93acd12508dbce57c55e15e6bb5acc2516",
+      "source_url": "https://github.com/sdougbrown/software-dictionary"
+    }
+  ],
+  "supported_kinds": [
+    "description",
+    "procedure",
+    "pr"
+  ],
+  "version": "0.1.0"
+}

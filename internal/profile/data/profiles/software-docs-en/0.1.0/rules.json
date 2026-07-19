@@ -1,0 +1,18 @@
+{
+  "format_version": 1,
+  "rules": [
+    {
+      "enabled": true,
+      "enforcement": "enforced",
+      "id": "CORE.SENTENCE_LENGTH",
+      "parameters": {
+        "description_max_words": 25,
+        "pr_max_words": 25,
+        "procedure_max_words": 20
+      },
+      "severity": "warning",
+      "version": 1
+    }
+  ],
+  "unknown_term_policy": "candidate"
+}

@@ -7,6 +7,7 @@ import (
 	"os"
 
 	"github.com/sdougbrown/writetighter/internal/app"
+	"github.com/sdougbrown/writetighter/internal/profile"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }
@@ -138,7 +139,12 @@ func runVersion(args []string) int {
 		usageErr("not implemented")
 		return 2
 	}
-	payload := map[string]any{"version": "0.1.0", "commit": "unknown", "embedded_profiles": []any{}}
+	r, _ := profile.LoadEmbedded()
+	profiles := []any{}
+	if r != nil {
+		profiles = append(profiles, map[string]any{"id": string(r.ID), "version": string(r.Version), "sha256": r.SHA256})
+	}
+	payload := map[string]any{"version": "0.1.0", "commit": "unknown", "embedded_profiles": profiles}
 	_ = json.NewEncoder(os.Stdout).Encode(payload)
 	return 0
 }

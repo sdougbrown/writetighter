@@ -20,8 +20,9 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
-func TestRunExplainMissingImpl(t *testing.T) {
-	if got := run([]string{"explain", "CORE.TEST"}); got != 2 {
-		t.Fatalf("got %d", got)
+func TestRunExplain(t *testing.T) {
+	// explain with a valid rule ID now works (resolves embedded profile, prints)
+	if got := run([]string{"explain", "CORE.TEST"}); got != 0 {
+		t.Fatalf("expected exit 0, got %d", got)
 	}
 }

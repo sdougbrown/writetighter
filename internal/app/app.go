@@ -4,8 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/sdougbrown/writetighter/internal/document"
+	"github.com/sdougbrown/writetighter/internal/profile"
 	"github.com/sdougbrown/writetighter/internal/report"
 )
 
@@ -35,6 +37,10 @@ func (a *App) RunCheck(params CheckParams) error {
 	if err != nil {
 		return err
 	}
+	r, err := profile.Resolve(params.Profile)
+	if err != nil {
+		return err
+	}
 	var sourcePath *string
 	if !params.Stdin && len(params.Paths) > 0 {
 		sourcePath = &params.Paths[0]
@@ -43,7 +49,7 @@ func (a *App) RunCheck(params CheckParams) error {
 		SchemaVersion: 1,
 		ToolVersion:   "0.1.0",
 		Source:        report.SourceInfo{Kind: params.Kind, Path: sourcePath},
-		Profile:       report.ProfileInfo{ID: "software-docs-en", Version: "0.1.0", SHA256: "placeholder"},
+		Profile:       report.ProfileInfo{ID: string(r.ID), Version: string(r.Version), SHA256: r.SHA256},
 		TermBase:      report.TermBaseInfo{SHA256: "placeholder"},
 		Status:        "checked",
 		Claims:        report.ClaimsInfo{Certification: "unknown"},
@@ -60,15 +66,47 @@ func (a *App) RunCheck(params CheckParams) error {
 
 func (a *App) RunExplain(_ string) error { return errors.New("not implemented") }
 
-func (a *App) RunExplainWithOptions(_ string, _ string, _ string) error {
-	return errors.New("not implemented")
+func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {
+	_, err := profile.Resolve(profileSpec)
+	if err != nil {
+		return err
+	}
+	_, err = fmt.Fprintln(os.Stdout, term, format)
+	return err
 }
 
-func (a *App) RunProfileInstall(_ string) error { return errors.New("not implemented") }
+func (a *App) RunProfileInstall(spec string) error {
+	_, err := profile.InstallBundle(spec)
+	return err
+}
 
-func (a *App) RunProfileList() error { return errors.New("not implemented") }
+func (a *App) RunProfileList() error {
+	embedded, err := profile.LoadEmbedded()
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stdout, "embedded  %s@%s  sha256:%s\n", embedded.ID, embedded.Version, embedded.SHA256)
+	return nil
+}
 
-func (a *App) RunProfileVerify(_ string) error { return errors.New("not implemented") }
+func (a *App) RunProfileVerify(spec string) error {
+	if info, err := os.Stat(spec); err == nil && info.IsDir() {
+		result := profile.VerifyBundle(spec)
+		if !result.Valid {
+			return fmt.Errorf("profile verification failed")
+		}
+		return nil
+	}
+	if strings.Contains(spec, "@") {
+		resolution, err := profile.Resolve(spec)
+		if err != nil {
+			return fmt.Errorf("profile not found: %s", spec)
+		}
+		fmt.Fprintf(os.Stderr, "Profile %s@%s resolved (embedded): SHA256=%s\n", resolution.ID, resolution.Version, resolution.SHA256)
+		return nil
+	}
+	return fmt.Errorf("profile not found: %s", spec)
+}
 
 func renderReport(r *report.Report, format string) (string, error) {
 	switch format {
