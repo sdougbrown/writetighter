@@ -1,11 +1,14 @@
 package app
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/sdougbrown/writetighter/internal/check"
+	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/profile"
 	"github.com/sdougbrown/writetighter/internal/report"
@@ -33,13 +36,43 @@ type App struct{}
 func New() *App { return &App{} }
 
 func (a *App) RunCheck(params CheckParams) error {
-	_, err := document.CollectInputs(params.Paths, params.Stdin)
+	docs, err := document.CollectInputs(params.Paths, params.Stdin)
 	if err != nil {
 		return err
 	}
 	r, err := profile.Resolve(params.Profile)
 	if err != nil {
 		return err
+	}
+	var terms []config.TermEntry
+	enabled := check.Enabled(r)
+	findings := []report.Finding{}
+	profileRuleEnabled := map[string]bool{}
+	for _, rule := range r.Rules.Rules {
+		profileRuleEnabled[rule.ID] = rule.Enabled
+	}
+
+	allCheckers := check.All()
+	coverage := make([]report.RuleCoverage, 0, len(allCheckers))
+	for _, c := range allCheckers {
+		state := "disabled"
+		if profileRuleEnabled[c.ID()] {
+			state = "enabled"
+		}
+		coverage = append(coverage, report.RuleCoverage{ID: c.ID(), Version: c.Version(), State: state})
+	}
+	for _, doc := range docs {
+		if params.Kind != "" {
+			doc.Kind = params.Kind
+		}
+		ctx := &check.RunContext{Document: doc, Profile: r, Terms: terms}
+		for _, c := range enabled {
+			more, err := c.Run(ctx)
+			if err != nil {
+				return err
+			}
+			findings = append(findings, more...)
+		}
 	}
 	var sourcePath *string
 	if !params.Stdin && len(params.Paths) > 0 {
@@ -53,8 +86,8 @@ func (a *App) RunCheck(params CheckParams) error {
 		TermBase:      report.TermBaseInfo{SHA256: "placeholder"},
 		Status:        "checked",
 		Claims:        report.ClaimsInfo{Certification: "unknown"},
-		Coverage:      report.CoverageInfo{Rules: []report.RuleCoverage{}, LLM: "not-requested"},
-		Findings:      []report.Finding{},
+		Coverage:      report.CoverageInfo{Rules: coverage, LLM: "not-requested"},
+		Findings:      findings,
 	}
 	formatted, err := renderReport(reportModel, params.Format)
 	if err != nil {
@@ -71,8 +104,17 @@ func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {
 	if err != nil {
 		return err
 	}
-	_, err = fmt.Fprintln(os.Stdout, term, format)
-	return err
+	if c := check.Get(term); c != nil {
+		switch format {
+		case "json":
+			data := map[string]any{"id": c.ID(), "version": c.Version()}
+			return json.NewEncoder(os.Stdout).Encode(data)
+		default:
+			_, err = fmt.Fprintf(os.Stdout, "%s v%d\n", c.ID(), c.Version())
+			return err
+		}
+	}
+	return fmt.Errorf("rule not found: %s", term)
 }
 
 func (a *App) RunProfileInstall(spec string) error {

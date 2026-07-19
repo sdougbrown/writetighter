@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/sdougbrown/writetighter/internal/app"
 	"github.com/sdougbrown/writetighter/internal/profile"
@@ -76,16 +77,30 @@ func runCheck(args []string) int {
 }
 
 func runExplain(args []string) int {
-	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	profile := fs.String("profile", "", "")
-	format := fs.String("format", "human", "")
-	fs.Usage = func() {}
-	if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
+	profile := ""
+	format := "human"
+	ruleID := ""
+
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--profile" && i+1 < len(args):
+			profile = args[i+1]
+			i++
+		case args[i] == "--format" && i+1 < len(args):
+			format = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--"):
+			// unknown flag, skip
+		default:
+			ruleID = args[i]
+		}
+	}
+
+	if ruleID == "" {
 		usageErr("not implemented")
 		return 2
 	}
-	if err := app.New().RunExplainWithOptions(fs.Arg(0), *profile, *format); err != nil {
+	if err := app.New().RunExplainWithOptions(ruleID, profile, format); err != nil {
 		usageErr(err.Error())
 		return 2
 	}
