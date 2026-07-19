@@ -134,8 +134,6 @@ func (a *App) RunCheck(params CheckParams) error {
 	llmState := "not-requested"
 	if params.LLM {
 		llmState = "requested"
-	}
-	if params.LLM {
 		fmt.Fprintf(os.Stderr, "llm host: %s\n", llm.Host(params.LLMBaseURL))
 		advisorConfig := llm.Config{BaseURL: params.LLMBaseURL, Model: params.LLMModel, ResponseMode: params.LLMResponseMode, Timeout: llm.DefaultTimeout}
 		more, err := llm.Advisor(context.Background(), advisorConfig, docs[0], r, findings)
@@ -143,7 +141,7 @@ func (a *App) RunCheck(params CheckParams) error {
 			fmt.Fprintf(os.Stderr, "llm advisor failed: %v\n", err)
 			llmState = "failed"
 		} else if err != nil {
-			return err
+			return fmt.Errorf("%w: %v", ErrRequireLLM, err)
 		} else {
 			findings = append(findings, more...)
 			llmState = "success"

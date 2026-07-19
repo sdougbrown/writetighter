@@ -42,7 +42,7 @@ type Message struct {
 }
 
 type ResponseFormat struct {
-	Type       string     `json:"type"`
+	Type       string      `json:"type"`
 	JSONSchema *JSONSchema `json:"json_schema,omitempty"`
 }
 
