@@ -16,6 +16,11 @@ import (
 	"github.com/sdougbrown/writetighter/internal/report"
 )
 
+var (
+	version = "0.1.0"
+	commit  = "unknown"
+)
+
 type CheckParams struct {
 	Paths           []string
 	Stdin           bool
@@ -94,7 +99,7 @@ func (a *App) RunCheck(params CheckParams) error {
 	}
 	reportModel := &report.Report{
 		SchemaVersion: 1,
-		ToolVersion:   "0.1.0",
+		ToolVersion:   version,
 		Source:        report.SourceInfo{Kind: params.Kind, Path: sourcePath},
 		Profile:       report.ProfileInfo{ID: string(r.ID), Version: string(r.Version), SHA256: r.SHA256},
 		TermBase:      report.TermBaseInfo{SHA256: "placeholder"},
