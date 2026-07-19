@@ -196,7 +196,6 @@ func (a *App) RunCheck(params CheckParams) error {
 	return nil
 }
 
-func (a *App) RunExplain(_ string) error { return errors.New("not implemented") }
 
 func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {
 	if format != "human" && format != "json" {
