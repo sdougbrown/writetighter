@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 )
@@ -11,9 +12,18 @@ type VerifyResult struct {
 }
 
 func LoadBundle(dir string) (*Resolution, error) {
-	m, _ := os.ReadFile(filepath.Join(dir, "manifest.json"))
-	d, _ := os.ReadFile(filepath.Join(dir, "dictionary.json"))
-	r, _ := os.ReadFile(filepath.Join(dir, "rules.json"))
+	m, err := os.ReadFile(filepath.Join(dir, "manifest.json"))
+	if err != nil {
+		return nil, fmt.Errorf("reading manifest: %w", err)
+	}
+	d, err := os.ReadFile(filepath.Join(dir, "dictionary.json"))
+	if err != nil {
+		return nil, fmt.Errorf("reading dictionary: %w", err)
+	}
+	r, err := os.ReadFile(filepath.Join(dir, "rules.json"))
+	if err != nil {
+		return nil, fmt.Errorf("reading rules: %w", err)
+	}
 	return loadBundleFromBytes(dir, m, d, r)
 }
 func LoadEmbedded() (*Resolution, error) { return loadEmbeddedBundle() }
