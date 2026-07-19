@@ -1,6 +1,7 @@
 package app
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"github.com/sdougbrown/writetighter/internal/check"
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/document"
+	"github.com/sdougbrown/writetighter/internal/llm"
 	"github.com/sdougbrown/writetighter/internal/profile"
 	"github.com/sdougbrown/writetighter/internal/report"
 )
@@ -72,6 +74,18 @@ func (a *App) RunCheck(params CheckParams) error {
 				return err
 			}
 			findings = append(findings, more...)
+		}
+	}
+	if params.LLM {
+		fmt.Fprintf(os.Stderr, "llm host: %s\n", llm.Host(params.LLMBaseURL))
+		advisorConfig := llm.Config{BaseURL: params.LLMBaseURL, Model: params.LLMModel, ResponseMode: params.LLMResponseMode, Timeout: llm.DefaultTimeout}
+		more, err := llm.Advisor(context.Background(), advisorConfig, docs[0], r, findings)
+		if err != nil && !params.RequireLLM {
+			fmt.Fprintf(os.Stderr, "llm advisor failed: %v\n", err)
+		} else if err != nil {
+			return err
+		} else {
+			findings = more
 		}
 	}
 	var sourcePath *string
