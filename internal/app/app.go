@@ -17,8 +17,8 @@ import (
 )
 
 var (
-	version = "0.1.0"
-	commit  = "unknown"
+	Version = "0.1.0"
+	Commit  = "unknown"
 )
 
 type CheckParams struct {
@@ -97,15 +97,32 @@ func (a *App) RunCheck(params CheckParams) error {
 	if !params.Stdin && len(params.Paths) > 0 {
 		sourcePath = &params.Paths[0]
 	}
+	llmState := "not-requested"
+	if params.LLM {
+		llmState = "requested"
+	}
+	claims := report.ClaimsInfo{}
+	if r.Manifest != nil {
+		claims = report.ClaimsInfo{
+			Standard:      r.Manifest.Claims.Standard,
+			Issue:         r.Manifest.Claims.Issue,
+			Certification: r.Manifest.Claims.Certification,
+		}
+	}
+	termBaseHash := "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+	if len(terms) > 0 {
+		tbData, _ := json.Marshal(terms)
+		termBaseHash = "sha256:" + profile.SHA256Bytes(tbData)
+	}
 	reportModel := &report.Report{
 		SchemaVersion: 1,
-		ToolVersion:   version,
+		ToolVersion:   Version,
 		Source:        report.SourceInfo{Kind: params.Kind, Path: sourcePath},
 		Profile:       report.ProfileInfo{ID: string(r.ID), Version: string(r.Version), SHA256: r.SHA256},
-		TermBase:      report.TermBaseInfo{SHA256: "placeholder"},
+		TermBase:      report.TermBaseInfo{SHA256: termBaseHash},
 		Status:        "checked",
-		Claims:        report.ClaimsInfo{Certification: "unknown"},
-		Coverage:      report.CoverageInfo{Rules: coverage, LLM: "not-requested"},
+		Claims:        claims,
+		Coverage:      report.CoverageInfo{Rules: coverage, LLM: llmState},
 		Findings:      findings,
 	}
 	formatted, err := renderReport(reportModel, params.Format)

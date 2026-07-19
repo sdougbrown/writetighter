@@ -159,7 +159,7 @@ func runVersion(args []string) int {
 	if r != nil {
 		profiles = append(profiles, map[string]any{"id": string(r.ID), "version": string(r.Version), "sha256": r.SHA256})
 	}
-	payload := map[string]any{"version": "0.1.0", "commit": "unknown", "embedded_profiles": profiles}
+	payload := map[string]any{"version": app.Version, "commit": app.Commit, "embedded_profiles": profiles}
 	_ = json.NewEncoder(os.Stdout).Encode(payload)
 	return 0
 }
