@@ -4,8 +4,6 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/profile"
@@ -16,25 +14,6 @@ type termDiscouragedChecker struct{}
 
 func (termDiscouragedChecker) ID() string   { return "CORE.TERM_DISCOURAGED" }
 func (termDiscouragedChecker) Version() int { return 1 }
-
-// hasWordBoundary reports whether position pos in s satisfies word-boundary context.
-// atEnd=true means pos is right after the match end; atEnd=false means pos is the match start.
-func hasWordBoundary(s string, pos int, atEnd bool) bool {
-	if atEnd {
-		if pos >= len(s) {
-			return true
-		}
-		r, _ := utf8.DecodeRuneInString(s[pos:])
-		return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-	}
-	if pos <= 0 {
-		return true
-	}
-	_, size := utf8.DecodeLastRuneInString(s[:pos])
-	r := rune(s[pos-1])
-	_ = size
-	return !unicode.IsLetter(r) && !unicode.IsDigit(r)
-}
 
 func (termDiscouragedChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 	if ctx == nil || ctx.Document == nil || ctx.Profile == nil || ctx.Profile.Dict == nil {
@@ -57,28 +36,12 @@ func (termDiscouragedChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 		if seg.Type != document.SegmentProse {
 			continue
 		}
-		lowerText := strings.ToLower(seg.Text)
-
 		// Track covered byte positions to avoid overlapping matches.
-		covered := make([]bool, len(lowerText))
+		covered := make([]bool, len(seg.Text))
 
 		for _, entry := range terms {
-			needle := strings.ToLower(entry.Term)
-			start := 0
-			for {
-				pos := strings.Index(lowerText[start:], needle)
-				if pos < 0 {
-					break
-				}
-				actualPos := start + pos
-				matchEnd := actualPos + len(needle)
-
-				// Check word boundaries.
-				if !hasWordBoundary(lowerText, actualPos, false) ||
-					!hasWordBoundary(lowerText, matchEnd, true) {
-					start = actualPos + 1
-					continue
-				}
+			for _, match := range insensitiveMatches(seg.Text, entry.Term) {
+				actualPos, matchEnd := match[0], match[1]
 
 				// Check if any position in this match range is already covered.
 				skip := false
@@ -89,7 +52,6 @@ func (termDiscouragedChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 					}
 				}
 				if skip {
-					start = actualPos + 1
 					continue
 				}
 
@@ -109,19 +71,16 @@ func (termDiscouragedChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 					Severity:       "warning",
 					Path:           &path,
 					Range: &report.FindingRange{
-						StartByte:   seg.Range.Start.Byte + actualPos,
-						EndByte:     seg.Range.Start.Byte + matchEnd,
-						StartLine:   seg.Range.Start.Line,
-						StartColumn: seg.Range.Start.Column + actualPos,
-						EndLine:     seg.Range.Start.Line,
-						EndColumn:   seg.Range.Start.Column + matchEnd,
+						StartByte: seg.Range.Start.Byte + actualPos,
+						EndByte:   seg.Range.Start.Byte + matchEnd,
+						StartLine: seg.Range.Start.Line, StartColumn: codePointColumn(seg.Text, actualPos, seg.Range.Start.Column),
+						EndLine: seg.Range.Start.Line, EndColumn: codePointColumn(seg.Text, matchEnd, seg.Range.Start.Column),
 					},
 					Evidence:   fmt.Sprintf("'%s' is discouraged; use '%s' instead", entry.Term, suggestion),
 					Message:    entry.Reason,
 					Suggestion: &suggestion,
 					Confidence: 1,
 				})
-				start = matchEnd
 			}
 		}
 	}

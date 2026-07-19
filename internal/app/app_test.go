@@ -3,6 +3,7 @@ package app
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -132,6 +133,23 @@ func TestRunCheckFailOnWarning(t *testing.T) {
 	err := runCheckWithParams(params)
 	if err != ErrFailThreshold {
 		t.Fatalf("expected ErrFailThreshold, got %v", err)
+	}
+}
+
+func TestRunCheckFailOnWarningRendersCompletedReport(t *testing.T) {
+	path := writeTempFile(t, strings.Repeat("word ", 30)+".")
+	buf := captureStdout(t, func() {
+		err := runCheckWithParams(CheckParams{Paths: []string{path}, Kind: "description", Format: "json", FailOn: "warning"})
+		if !errors.Is(err, ErrFailThreshold) {
+			t.Fatalf("expected threshold error, got %v", err)
+		}
+	})
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatalf("expected completed JSON report: %v", err)
+	}
+	if got["status"] != "checked" {
+		t.Fatalf("unexpected report: %#v", got)
 	}
 }
 
@@ -509,7 +527,7 @@ func TestNewReturnsNonNull(t *testing.T) {
 
 // --- Edge case: no config files ---
 
-func TestRunCheckNoConfigFiles(t *testing.T) {
+func TestRunCheckExplicitMissingConfigFails(t *testing.T) {
 	text := "simple text."
 	path := writeTempFile(t, text)
 
@@ -521,8 +539,8 @@ func TestRunCheckNoConfigFiles(t *testing.T) {
 		ConfigPath: "/nonexistent/config.yaml",
 	}
 	err := runCheckWithParams(params)
-	if err != nil {
-		t.Fatalf("unexpected error with nonexistent config path: %v", err)
+	if err == nil {
+		t.Fatal("expected explicit missing config to fail")
 	}
 }
 
@@ -535,5 +553,34 @@ func TestProfileResolveEmbedded(t *testing.T) {
 	}
 	if r == nil {
 		t.Fatal("resolved profile is nil")
+	}
+}
+
+func TestRunCheckRejectsSymlinkPath(t *testing.T) {
+	realPath := writeTempFile(t, "test content")
+	symPath := filepath.Join(t.TempDir(), "link.txt")
+	if err := os.Symlink(realPath, symPath); err != nil {
+		t.Skip("symlink creation not supported")
+	}
+	err := runCheckWithParams(CheckParams{Paths: []string{symPath}, Kind: "description", Format: "json", FailOn: "none"})
+	if err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("expected symlink error, got %v", err)
+	}
+}
+
+func TestRunCheckLLMOptionalFailurePreservesReport(t *testing.T) {
+	// With a connection that will fail, optional LLM should still produce a report.
+	params := CheckParams{
+		Paths:      []string{writeTempFile(t, "simple text.")},
+		Kind:       "description",
+		Format:     "json",
+		FailOn:     "none",
+		LLM:        true,
+		LLMBaseURL: "http://127.0.0.1:1",
+		LLMModel:   "test",
+	}
+	err := runCheckWithParams(params)
+	if err != nil {
+		t.Fatalf("expected no error from optional LLM failure, got %v", err)
 	}
 }

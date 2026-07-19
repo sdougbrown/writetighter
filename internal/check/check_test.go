@@ -226,3 +226,46 @@ func TestProcedureMultiAction(t *testing.T) {
 		t.Fatal("expected procedure multi action finding")
 	}
 }
+
+func TestInsensitiveMatchesUnicode(t *testing.T) {
+	// Test that insensitiveMatches finds terms correctly in Unicode text.
+	// "über" should match "ÜBER" case-insensitively.
+	matches := insensitiveMatches("ÜBER cool", "über")
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 match, got %d", len(matches))
+	}
+	// Test multi-byte UTF-8 match offsets are correct
+	matches = insensitiveMatches("über cool", "über")
+	// "über" is 5 bytes in UTF-8 (ü = 0xC3 0xBC)
+	if len(matches) != 1 || matches[0][0] != 0 || matches[0][1] != 5 {
+		t.Fatalf("expected match at [0,5), got %v", matches)
+	}
+	// Test word boundary: "übercool" should NOT match "über"
+	matches = insensitiveMatches("übercool", "über")
+	if len(matches) != 0 {
+		t.Fatalf("expected no mid-word match, got %d", len(matches))
+	}
+	// Word boundary rules: CJK all-letter chars mean the term must be bounded by
+	// non-letter or string start/end on both sides. "世界" in "A世界B" would match
+	// because 'A' and 'B' are letters (no match). With a real boundary like space,
+	// " 世界 " would match. But this is English-first, so CJK word boundaries use
+	// the same letter/digit detection.
+	// At minimum, a single CJK term in isolation should match:
+	matches = insensitiveMatches("世界", "世界")
+	if len(matches) != 1 {
+		t.Fatalf("expected 1 CJK exact match, got %d", len(matches))
+	}
+}
+
+func TestCodePointColumn(t *testing.T) {
+	// "über" has byte offsets 0,1,2,3,4 but rune offsets 0,1,2,3
+	// codePointColumn should return proper column counting runes.
+	col := codePointColumn("über text", 0, 1) // byte 0 = rune index 0, start at col 1
+	if col != 1 {
+		t.Fatalf("expected col 1 for byte 0, got %d", col)
+	}
+	col = codePointColumn("über text", 4, 1) // byte 4 = rune index 3
+	if col != 4 {
+		t.Fatalf("expected col 4 for byte 4 (after 'ü'+'b'+'e'+'r'), got %d", col)
+	}
+}

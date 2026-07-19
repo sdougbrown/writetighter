@@ -34,7 +34,7 @@ func run(args []string) int {
 	case "profile":
 		return runProfile(args[1:])
 	default:
-		usageErr("not implemented")
+		usageErr("unknown command")
 		return 2
 	}
 }
@@ -54,7 +54,7 @@ func runCheck(args []string) int {
 	responseMode := fs.String("llm-response-mode", "", "")
 	failOn := fs.String("fail-on", "none", "")
 	fs.Usage = func() {}
-	if err := fs.Parse(args); err != nil {
+	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
 		return 2
 	}
 	params := app.CheckParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, LLM: *llm, RequireLLM: *requireLLM, LLMBaseURL: *baseURL, LLMModel: *model, LLMResponseMode: *responseMode, FailOn: *failOn}
@@ -83,31 +83,41 @@ func runCheck(args []string) int {
 	return 0
 }
 
-func runExplain(args []string) int {
-	profile := ""
-	format := "human"
-	ruleID := ""
-
+// The documented CLI permits paths before flags. flag.FlagSet stops at the first
+// positional argument, so normalize the small check grammar before parsing.
+func normalizeInterspersedFlags(args []string) []string {
+	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--llm-base-url": true, "--llm-model": true, "--llm-response-mode": true, "--fail-on": true}
+	var flags, paths []string
 	for i := 0; i < len(args); i++ {
-		switch {
-		case args[i] == "--profile" && i+1 < len(args):
-			profile = args[i+1]
-			i++
-		case args[i] == "--format" && i+1 < len(args):
-			format = args[i+1]
-			i++
-		case strings.HasPrefix(args[i], "--"):
-			// unknown flag, skip
-		default:
-			ruleID = args[i]
+		arg := args[i]
+		if arg == "--" {
+			paths = append(paths, args[i+1:]...)
+			break
 		}
+		if strings.HasPrefix(arg, "--") {
+			flags = append(flags, arg)
+			if withValue[arg] && i+1 < len(args) {
+				i++
+				flags = append(flags, args[i])
+			}
+			continue
+		}
+		paths = append(paths, arg)
 	}
+	return append(flags, paths...)
+}
 
-	if ruleID == "" {
-		usageErr("not implemented")
+func runExplain(args []string) int {
+	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() {}
+	profile := fs.String("profile", "", "")
+	format := fs.String("format", "human", "")
+	if err := fs.Parse(args); err != nil || len(fs.Args()) != 1 || (*format != "human" && *format != "json") {
+		usageErr("invalid explain arguments")
 		return 2
 	}
-	if err := app.New().RunExplainWithOptions(ruleID, profile, format); err != nil {
+	if err := app.New().RunExplainWithOptions(fs.Args()[0], *profile, *format); err != nil {
 		usageErr(err.Error())
 		return 2
 	}
@@ -116,13 +126,13 @@ func runExplain(args []string) int {
 
 func runProfile(args []string) int {
 	if len(args) == 0 {
-		usageErr("not implemented")
+		usageErr("profile subcommand required")
 		return 2
 	}
 	switch args[0] {
 	case "install":
 		if len(args) != 2 || args[1] == "" {
-			usageErr("not implemented")
+			usageErr("profile install requires one bundle path")
 			return 2
 		}
 		if err := app.New().RunProfileInstall(args[1]); err != nil {
@@ -131,12 +141,10 @@ func runProfile(args []string) int {
 		}
 		return 0
 	case "list":
-		format := "human"
-		for i := 1; i < len(args); i++ {
-			if args[i] == "--format" && i+1 < len(args) {
-				format = args[i+1]
-				break
-			}
+		format, ok := parseProfileFormat(args[1:])
+		if !ok {
+			usageErr("invalid profile list arguments")
+			return 2
 		}
 		if err := app.New().RunProfileList(format); err != nil {
 			usageErr(err.Error())
@@ -145,16 +153,14 @@ func runProfile(args []string) int {
 		return 0
 	case "verify":
 		if len(args) < 2 || (len(args) >= 2 && args[1] == "") {
-			usageErr("not implemented")
+			usageErr("profile verify requires a profile or bundle path")
 			return 2
 		}
 		spec := args[1]
-		format := "human"
-		for i := 2; i < len(args); i++ {
-			if args[i] == "--format" && i+1 < len(args) {
-				format = args[i+1]
-				break
-			}
+		format, ok := parseProfileFormat(args[2:])
+		if !ok {
+			usageErr("invalid profile verify arguments")
+			return 2
 		}
 		if err := app.New().RunProfileVerify(spec, format); err != nil {
 			usageErr(err.Error())
@@ -162,7 +168,7 @@ func runProfile(args []string) int {
 		}
 		return 0
 	default:
-		usageErr("not implemented")
+		usageErr("unknown profile subcommand")
 		return 2
 	}
 }
@@ -172,8 +178,8 @@ func runVersion(args []string) int {
 	jsonFlag := fs.Bool("json", false, "")
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() {}
-	if err := fs.Parse(args); err != nil || !*jsonFlag {
-		usageErr("not implemented")
+	if err := fs.Parse(args); err != nil || !*jsonFlag || len(fs.Args()) != 0 {
+		usageErr("version requires --json")
 		return 2
 	}
 	r, _ := profile.LoadEmbedded()
@@ -184,6 +190,17 @@ func runVersion(args []string) int {
 	payload := map[string]any{"version": app.Version, "commit": app.Commit, "embedded_profiles": profiles}
 	_ = json.NewEncoder(os.Stdout).Encode(payload)
 	return 0
+}
+
+func parseProfileFormat(args []string) (string, bool) {
+	fs := flag.NewFlagSet("profile", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() {}
+	format := fs.String("format", "human", "")
+	if err := fs.Parse(args); err != nil || len(fs.Args()) != 0 {
+		return "", false
+	}
+	return *format, *format == "human" || *format == "json"
 }
 
 func usageErr(msg string) { fmt.Fprintln(os.Stderr, msg) }

@@ -29,7 +29,8 @@ type TermEntry struct {
 }
 
 type UserConfig struct {
-	LLM LLMConfig `toml:"llm"`
+	Profile ProfileConfig `toml:"profile"`
+	LLM     LLMConfig     `toml:"llm"`
 }
 
 type LLMConfig struct {
@@ -48,8 +49,12 @@ type MergedConfig struct {
 
 func LoadProjectConfig(path string) (*ProjectConfig, error) {
 	var cfg ProjectConfig
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	md, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		return nil, err
+	}
+	if undecoded := md.Undecoded(); len(undecoded) > 0 {
+		return nil, fmt.Errorf("config %s: unknown key(s): %v", path, undecoded)
 	}
 	if err := ValidateTermBase(cfg.Terms); err != nil {
 		return nil, err
@@ -102,8 +107,12 @@ func ValidateTermBase(entries []TermEntry) error {
 
 func loadUserConfigFile(path string) (*UserConfig, error) {
 	var cfg UserConfig
-	if _, err := toml.DecodeFile(path, &cfg); err != nil {
+	md, err := toml.DecodeFile(path, &cfg)
+	if err != nil {
 		return nil, err
+	}
+	if undecoded := md.Undecoded(); len(undecoded) > 0 {
+		return nil, fmt.Errorf("config %s: unknown key(s): %v", path, undecoded)
 	}
 	return &cfg, nil
 }

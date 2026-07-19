@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sdougbrown/writetighter/internal/check"
 	"github.com/sdougbrown/writetighter/internal/config"
@@ -35,6 +36,9 @@ type CheckParams struct {
 	LLMBaseURL      string
 	LLMModel        string
 	LLMResponseMode string
+	LLMProvider     string
+	LLMAPIKeyEnv    string
+	LLMTimeout      time.Duration
 	FailOn          string
 }
 
@@ -45,19 +49,51 @@ type App struct{}
 func New() *App { return &App{} }
 
 func (a *App) RunCheck(params CheckParams) error {
-	// Load user config
-	userCfg, _ := config.LoadUserConfig()
+	if !validKind(params.Kind) || !validFormat(params.Format) || !validFailOn(params.FailOn) {
+		return fmt.Errorf("invalid check option")
+	}
+	// Explicit configuration errors are fatal; absent discovered files are benign.
+	userCfg, err := config.LoadUserConfig()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		userCfg = nil
+	}
 
 	// Load project config
 	var projCfg *config.ProjectConfig
 	if params.ConfigPath != "" {
-		projCfg, _ = config.LoadProjectConfig(params.ConfigPath)
+		var err error
+		projCfg, err = config.LoadProjectConfig(params.ConfigPath)
+		if err != nil {
+			return err
+		}
 	} else {
-		projCfg, _, _ = config.DiscoverProjectConfig()
+		var err error
+		projCfg, _, err = config.DiscoverProjectConfig()
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
 	}
 
 	// Merge
-	merged, _ := config.MergeConfigs(projCfg, userCfg)
+	merged, err := config.MergeConfigs(projCfg, userCfg)
+	if err != nil {
+		return err
+	}
+	// Profile resolution intentionally precedes source reading.
+	profileSpec := params.Profile
+	if profileSpec == "" && projCfg != nil && projCfg.Profile.ID != "" {
+		profileSpec = projCfg.Profile.ID + "@" + projCfg.Profile.Version
+	}
+	if profileSpec == "" && userCfg != nil && userCfg.Profile.ID != "" {
+		profileSpec = userCfg.Profile.ID + "@" + userCfg.Profile.Version
+	}
+	r, err := profile.Resolve(profileSpec)
+	if err != nil {
+		return err
+	}
 
 	// Extract terms
 	var terms []config.TermEntry
@@ -68,6 +104,9 @@ func (a *App) RunCheck(params CheckParams) error {
 	// LLM fallbacks from user config
 	if merged != nil && merged.User != nil {
 		uc := merged.User.LLM
+		if params.LLMProvider == "" {
+			params.LLMProvider = uc.Provider
+		}
 		if params.LLMBaseURL == "" && uc.BaseURL != "" {
 			params.LLMBaseURL = uc.BaseURL
 		}
@@ -77,13 +116,38 @@ func (a *App) RunCheck(params CheckParams) error {
 		if params.LLMResponseMode == "" && uc.ResponseMode != "" {
 			params.LLMResponseMode = uc.ResponseMode
 		}
+		if params.LLMAPIKeyEnv == "" {
+			params.LLMAPIKeyEnv = uc.APIKeyEnv
+		}
+		if params.LLMTimeout == 0 && uc.Timeout != "" {
+			d, e := time.ParseDuration(uc.Timeout)
+			if e != nil {
+				return fmt.Errorf("invalid llm timeout: %w", e)
+			}
+			params.LLMTimeout = d
+		}
 	}
-
+	if params.LLM {
+		if params.LLMProvider != "" && params.LLMProvider != "openai-compatible" {
+			return fmt.Errorf("unsupported llm provider %q", params.LLMProvider)
+		}
+		if params.LLMResponseMode == "" {
+			params.LLMResponseMode = "auto"
+		}
+		if !validResponseMode(params.LLMResponseMode) {
+			return fmt.Errorf("invalid llm response mode %q", params.LLMResponseMode)
+		}
+		if params.LLMTimeout == 0 {
+			params.LLMTimeout = llm.DefaultTimeout
+		}
+		if params.LLMTimeout <= 0 || params.LLMModel == "" {
+			return errors.New("invalid llm configuration")
+		}
+		if _, err := llm.NewClient(llm.Config{BaseURL: params.LLMBaseURL, Model: params.LLMModel, APIKeyEnv: params.LLMAPIKeyEnv, Timeout: params.LLMTimeout, ResponseMode: params.LLMResponseMode}); err != nil {
+			return err
+		}
+	}
 	docs, err := document.CollectInputs(params.Paths, params.Stdin)
-	if err != nil {
-		return err
-	}
-	r, err := profile.Resolve(params.Profile)
 	if err != nil {
 		return err
 	}
@@ -135,15 +199,39 @@ func (a *App) RunCheck(params CheckParams) error {
 	if params.LLM {
 		llmState = "requested"
 		fmt.Fprintf(os.Stderr, "llm host: %s\n", llm.Host(params.LLMBaseURL))
-		advisorConfig := llm.Config{BaseURL: params.LLMBaseURL, Model: params.LLMModel, ResponseMode: params.LLMResponseMode, Timeout: llm.DefaultTimeout}
-		more, err := llm.Advisor(context.Background(), advisorConfig, docs[0], r, findings)
-		if err != nil && !params.RequireLLM {
-			fmt.Fprintf(os.Stderr, "llm advisor failed: %v\n", err)
-			llmState = "failed"
+		advisorConfig := llm.Config{BaseURL: params.LLMBaseURL, Model: params.LLMModel, APIKeyEnv: params.LLMAPIKeyEnv, ResponseMode: params.LLMResponseMode, Timeout: params.LLMTimeout}
+		var advisory []report.Finding
+		requests := 0
+		for _, doc := range docs {
+			var static []report.Finding
+			for _, f := range findings {
+				if f.Path == nil || *f.Path == doc.Source {
+					static = append(static, f)
+				}
+			}
+			if len(static) == 0 {
+				continue
+			}
+			requests++
+			more, callErr := llm.Advisor(context.Background(), advisorConfig, doc, r, static, terms)
+			if callErr != nil {
+				err = callErr
+				break
+			}
+			advisory = append(advisory, more...)
+		}
+		if requests == 0 {
+			llmState = "skipped"
 		} else if err != nil {
-			return fmt.Errorf("%w: %v", ErrRequireLLM, err)
+			if params.RequireLLM {
+				llmState = "failed"
+			} else {
+				fmt.Fprintf(os.Stderr, "llm advisor failed: %v\n", err)
+				llmState = "failed"
+			}
+			err = nil // clear so report rendering proceeds
 		} else {
-			findings = append(findings, more...)
+			findings = append(findings, advisory...)
 			llmState = "success"
 		}
 	}
@@ -151,16 +239,17 @@ func (a *App) RunCheck(params CheckParams) error {
 	if !params.Stdin && len(params.Paths) > 0 {
 		sourcePath = &params.Paths[0]
 	}
+	fail := false
 	if params.FailOn == "error" {
 		for _, f := range findings {
 			if f.Severity == "error" {
-				return ErrFailThreshold
+				fail = true
 			}
 		}
 	} else if params.FailOn == "warning" {
 		for _, f := range findings {
 			if f.Severity == "warning" || f.Severity == "error" {
-				return ErrFailThreshold
+				fail = true
 			}
 		}
 	}
@@ -193,7 +282,21 @@ func (a *App) RunCheck(params CheckParams) error {
 		return err
 	}
 	_, _ = fmt.Fprint(os.Stdout, formatted)
+	// Required LLM failure/skip must return 3 with the completed report preserved.
+	if params.RequireLLM && (llmState == "failed" || llmState == "skipped") {
+		return ErrRequireLLM
+	}
+	if fail {
+		return ErrFailThreshold
+	}
 	return nil
+}
+
+func validKind(v string) bool   { return v == "description" || v == "procedure" || v == "pr" }
+func validFormat(v string) bool { return v == "human" || v == "json" || v == "agent" }
+func validFailOn(v string) bool { return v == "none" || v == "warning" || v == "error" }
+func validResponseMode(v string) bool {
+	return v == "auto" || v == "json_schema" || v == "json_object" || v == "prompt_json"
 }
 
 func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {
@@ -227,12 +330,37 @@ func (a *App) RunProfileList(format string) error {
 	if err != nil {
 		return err
 	}
+	installed, err := profile.ListInstalled()
+	if err != nil {
+		return err
+	}
+	type listed struct{ ID, Version, SHA256, Source string }
+	all := []listed{{string(embedded.ID), string(embedded.Version), embedded.SHA256, "embedded"}}
+	for _, r := range installed {
+		if r.ID == embedded.ID && r.Version == embedded.Version {
+			if r.SHA256 != embedded.SHA256 {
+				return profileConflictErrForApp(r)
+			}
+			continue
+		}
+		all = append(all, listed{string(r.ID), string(r.Version), r.SHA256, "installed"})
+	}
 	if format == "json" {
-		data := map[string]any{"profiles": []map[string]any{{"id": string(embedded.ID), "version": string(embedded.Version), "sha256": embedded.SHA256, "source": "embedded"}}}
+		profiles := make([]map[string]any, 0, len(all))
+		for _, item := range all {
+			profiles = append(profiles, map[string]any{"id": item.ID, "version": item.Version, "sha256": item.SHA256, "source": item.Source})
+		}
+		data := map[string]any{"profiles": profiles}
 		return json.NewEncoder(os.Stdout).Encode(data)
 	}
-	fmt.Fprintf(os.Stdout, "embedded  %s@%s  sha256:%s\n", embedded.ID, embedded.Version, embedded.SHA256)
+	for _, item := range all {
+		fmt.Fprintf(os.Stdout, "%s  %s@%s  sha256:%s\n", item.Source, item.ID, item.Version, item.SHA256)
+	}
 	return nil
+}
+
+func profileConflictErrForApp(r *profile.Resolution) error {
+	return fmt.Errorf("installed profile conflicts with embedded %s@%s", r.ID, r.Version)
 }
 
 func (a *App) RunProfileVerify(spec, format string) error {

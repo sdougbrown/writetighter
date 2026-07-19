@@ -88,10 +88,12 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	if len(req.Messages) == 0 {
 		return nil, errors.New("llm request requires messages")
 	}
+	totalInput := 0
 	for _, m := range req.Messages {
-		if len(m.Content) > MaxInputChars {
-			return nil, fmt.Errorf("llm input too large")
-		}
+		totalInput += len(m.Content)
+	}
+	if totalInput > MaxInputChars {
+		return nil, fmt.Errorf("llm input too large")
 	}
 	req.Model = c.model
 	if req.ResponseFormat == nil && c.mode != "" && c.mode != "auto" {
@@ -122,7 +124,9 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	}
 	var out Response
 	dec := json.NewDecoder(io.LimitReader(resp.Body, MaxOutputChars))
-	dec.DisallowUnknownFields()
+	// OpenAI-compatible envelopes commonly include id, usage, model, and
+	// timing fields. Only the assistant content is security-sensitive and is
+	// validated strictly by ValidateAdvisorResponseForRules.
 	if err := dec.Decode(&out); err != nil {
 		return nil, err
 	}
@@ -130,9 +134,12 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 }
 
 func buildResponseFormat(mode string) *ResponseFormat {
+	if mode == "prompt_json" || mode == "auto" || mode == "" {
+		return nil
+	}
 	rf := &ResponseFormat{Type: mode}
 	if mode == "json_schema" {
-		schema := `{"type":"object","properties":{"findings":{"type":"array","items":{"$ref":"#/$defs/AdvisorFinding"}},"$defs":{"AdvisorFinding":{"type":"object","properties":{"source_range":{"type":"object","properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"rule_ids":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"replacement":{"type":"string"},"confidence":{"type":"number"}},"required":["source_range","rule_ids","reason"]}}},"required":["findings"]}`
+		schema := `{"type":"object","properties":{"findings":{"type":"array","items":{"$ref":"#/$defs/AdvisorFinding"}},"$defs":{"AdvisorFinding":{"type":"object","properties":{"source_range":{"type":"object","properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"rule_ids":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"replacement":{"type":"string"},"confidence":{"type":"number"}},"required":["source_range","rule_ids","reason","replacement","confidence"]}}},"required":["findings"]}`
 		rf.JSONSchema = &JSONSchema{
 			Name:   "advisor_response",
 			Schema: json.RawMessage(schema),

@@ -28,7 +28,12 @@ func newFakeServer(requireKey bool, mode string) *fakeLLMServer {
 			w.WriteHeader(http.StatusGatewayTimeout)
 		default:
 			content := `{"findings":[{"source_range":{"start":0,"end":5},"rule_ids":["CORE.TERM_DISCOURAGED"],"reason":"rewrite suggestion","replacement":"preferred term","confidence":0.91}]}`
-			_ = json.NewEncoder(w).Encode(Response{Choices: []Choice{{Message: Message{Role: "assistant", Content: content}}}})
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":      "chatcmpl-test",
+				"model":   "test-model",
+				"choices": []Choice{{Message: Message{Role: "assistant", Content: content}}},
+				"usage":   map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+			})
 		}
 	}))
 	f.URL = f.server.URL

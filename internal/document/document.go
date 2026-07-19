@@ -50,53 +50,91 @@ func FromReader(r io.Reader, source, kind string) (*Document, error) {
 	return &Document{Source: source, Kind: kind, Content: content, Segments: segmentMarkdown(content)}, nil
 }
 
-func FromFile(path, kind string) (*Document, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-	return FromReader(f, path, kind)
-}
+// maxAggregateBytes is the maximum total input size across all selected files.
+const maxAggregateBytes = 25 * 1024 * 1024
+
+// maxFileBytes is the maximum size for a single file.
+const maxFileBytes = 5 * 1024 * 1024
 
 func CollectInputs(paths []string, stdin bool) ([]*Document, error) {
 	if stdin {
-		doc, err := FromReader(os.Stdin, "<stdin>", "")
+		// Limit stdin to maxAggregateBytes + 1 so we can detect overflow.
+		limited := io.LimitReader(os.Stdin, int64(maxAggregateBytes+1))
+		doc, err := FromReader(limited, "<stdin>", "")
 		if err != nil {
 			return nil, err
+		}
+		if len(doc.Content) > maxAggregateBytes {
+			return nil, errors.New("stdin input too large")
 		}
 		return []*Document{doc}, nil
 	}
 	var docs []*Document
+	var total int64
 	for _, path := range paths {
 		info, err := os.Lstat(path)
 		if err != nil {
 			return nil, err
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
-			continue
+			return nil, fmt.Errorf("cannot follow symlink: %s", path)
 		}
 		if info.IsDir() {
-			more, err := collectDir(path)
+			more, err := collectDir(path, &total)
 			if err != nil {
 				return nil, err
 			}
 			docs = append(docs, more...)
 			continue
 		}
-		if !isAllowed(path) {
-			continue
+		if info.Size() > maxFileBytes {
+			return nil, fmt.Errorf("file too large: %s", path)
 		}
 		doc, err := FromFile(path, "")
 		if err != nil {
 			return nil, err
+		}
+		total += int64(len(doc.Content))
+		if total > maxAggregateBytes {
+			return nil, errors.New("aggregate input too large")
 		}
 		docs = append(docs, doc)
 	}
 	return docs, nil
 }
 
-func collectDir(root string) ([]*Document, error) {
+// readFileWithBound reads a file but caps actual bytes read at maxFileBytes+1
+// to detect growth or read-after-stat size changes.
+func readFileWithBound(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	limited := io.LimitReader(f, int64(maxFileBytes+1))
+	data, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxFileBytes {
+		return nil, fmt.Errorf("file too large: %s", path)
+	}
+	return data, nil
+}
+
+func FromFile(path, kind string) (*Document, error) {
+	data, err := readFileWithBound(path)
+	if err != nil {
+		return nil, err
+	}
+	if !utf8.Valid(data) {
+		return nil, errors.New("invalid UTF-8")
+	}
+	content := string(data)
+	return &Document{Source: path, Kind: kind, Content: content, Segments: segmentMarkdown(content)}, nil
+}
+
+func collectDir(root string, total *int64) ([]*Document, error) {
 	var files []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -119,22 +157,21 @@ func collectDir(root string) ([]*Document, error) {
 	}
 	sort.Strings(files)
 	var docs []*Document
-	var total int64
 	for _, path := range files {
 		info, err := os.Stat(path)
 		if err != nil {
 			return nil, err
 		}
-		if info.Size() > 5*1024*1024 {
+		if info.Size() > maxFileBytes {
 			return nil, fmt.Errorf("file too large: %s", path)
-		}
-		total += info.Size()
-		if total > 25*1024*1024 {
-			return nil, errors.New("aggregate input too large")
 		}
 		doc, err := FromFile(path, "")
 		if err != nil {
 			return nil, err
+		}
+		*total += int64(len(doc.Content))
+		if *total > maxAggregateBytes {
+			return nil, errors.New("aggregate input too large")
 		}
 		docs = append(docs, doc)
 	}

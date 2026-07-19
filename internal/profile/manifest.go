@@ -33,7 +33,12 @@ type Manifest struct {
 type ManifestLicense struct {
 	SPDX string `json:"spdx"`
 }
-type Provenance struct{ Name, Release, SourceURL, License string }
+type Provenance struct {
+	Name      string `json:"name"`
+	Release   string `json:"release"`
+	SourceURL string `json:"source_url"`
+	License   string `json:"license"`
+}
 type ManifestClaims struct {
 	Standard      *string `json:"standard"`
 	Issue         *string `json:"issue"`
@@ -62,6 +67,12 @@ func (m *Manifest) Validate() error {
 	if m.DisplayName == "" || m.Language == "" || m.License.SPDX == "" {
 		errs = append(errs, fmt.Errorf("manifest missing required fields (display_name, language, license.spdx)"))
 	}
+	if len(m.SupportedKinds) == 0 {
+		errs = append(errs, errors.New("manifest requires supported_kinds"))
+	}
+	if m.Claims.Certification != "none" {
+		errs = append(errs, errors.New("manifest certification must be none"))
+	}
 	if m.Payloads.DictionarySHA256.SHA256 == "" || m.Payloads.RulesSHA256.SHA256 == "" {
 		errs = append(errs, fmt.Errorf("manifest missing payload hashes"))
 	}
@@ -80,8 +91,8 @@ func (m *Manifest) Validate() error {
 		errs = append(errs, fmt.Errorf("manifest requires at least one provenance entry"))
 	}
 	for i, p := range m.Provenance {
-		if p.Name == "" {
-			errs = append(errs, fmt.Errorf("provenance[%d]: name is required", i))
+		if p.Name == "" || p.Release == "" || p.SourceURL == "" || p.License == "" {
+			errs = append(errs, fmt.Errorf("provenance[%d]: name, release, source_url, and license are required", i))
 		}
 	}
 	return errors.Join(errs...)

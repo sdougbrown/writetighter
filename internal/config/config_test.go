@@ -64,3 +64,50 @@ func TestLoadUserConfigXDG(t *testing.T) {
 		t.Fatal("bad provider")
 	}
 }
+
+func TestProjectConfigRejectsUnknownFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".writetighter.toml")
+	data := []byte("[profile]\nid='core'\nversion='1'\n[[terms]]\nterm='alpha'\ndefinition='x'\n[llm]\napi_key='sk-abc123'\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadProjectConfig(path)
+	if err == nil {
+		t.Fatal("expected error for unknown [llm] section in project config")
+	}
+	t.Logf("got expected error: %v", err)
+}
+
+func TestUserConfigRejectsUnknownFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "writetighter", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("[llm]\nprovider='x'\napi_key='sk-abc'\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	_, err := LoadUserConfig()
+	if err == nil {
+		t.Fatal("expected error for unknown api_key field in user config")
+	}
+	t.Logf("got expected error: %v", err)
+}
+
+func TestProjectConfigRejectsApiKeyEnvInProject(t *testing.T) {
+	// Project config should reject [llm] sections entirely.
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".writetighter.toml")
+	data := []byte("[profile]\nid='core'\nversion='1'\n[llm]\napi_key_env='MY_KEY'\n")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadProjectConfig(path)
+	if err == nil {
+		t.Fatal("expected error for unknown [llm] section in project config")
+	}
+	t.Logf("got expected error: %v", err)
+}

@@ -46,6 +46,16 @@ func (d *Dictionary) Validate() error {
 			errs = append(errs, fmt.Errorf("entry %d: empty term", i))
 			continue
 		}
+		switch e.Status {
+		case StatusPreferred, StatusAllowed, StatusDiscouraged, StatusObserved:
+		default:
+			errs = append(errs, fmt.Errorf("entry %q: invalid status %q", e.Term, e.Status))
+		}
+		for _, pos := range e.PartsOfSpeech {
+			if strings.TrimSpace(pos) == "" {
+				errs = append(errs, fmt.Errorf("entry %q: empty part of speech", e.Term))
+			}
+		}
 		if e.Status == StatusPreferred || e.Status == StatusAllowed || e.Status == StatusDiscouraged {
 			if len(e.PartsOfSpeech) == 0 {
 				errs = append(errs, fmt.Errorf("entry %q: status %s requires parts_of_speech", e.Term, e.Status))

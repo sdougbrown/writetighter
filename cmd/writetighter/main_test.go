@@ -53,3 +53,21 @@ func TestRunExplain(t *testing.T) {
 		}
 	})
 }
+
+func TestStrictFlagAndEnumValidation(t *testing.T) {
+	for _, args := range [][]string{
+		{"version", "--wat"}, {"check", "--stdin", "--kind", "blog"},
+		{"check", "--stdin", "--format", "yaml"}, {"explain", "--wat", "CORE.SENTENCE_LENGTH"},
+		{"profile", "list", "--wat"},
+	} {
+		if got := run(args); got != 2 {
+			t.Fatalf("%v: got %d", args, got)
+		}
+	}
+}
+
+func TestCheckAcceptsFlagsAfterPath(t *testing.T) {
+	if got := run([]string{"check", "missing.txt", "--format", "wat"}); got != 2 {
+		t.Fatalf("got %d", got)
+	}
+}
