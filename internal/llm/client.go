@@ -15,11 +15,11 @@ import (
 )
 
 const (
-	DefaultTimeout  = 45 * time.Second
-	MaxInputChars   = 32000
-	MaxSuggestions  = 20
-	MaxOutputChars  = 10000
-	chatPath        = "/v1/chat/completions"
+	DefaultTimeout = 45 * time.Second
+	MaxInputChars  = 32000
+	MaxSuggestions = 20
+	MaxOutputChars = 10000
+	chatPath       = "/v1/chat/completions"
 )
 
 type Config struct {
@@ -33,7 +33,7 @@ type Config struct {
 type Request struct {
 	Model          string          `json:"model"`
 	Messages       []Message       `json:"messages"`
-	ResponseFormat  *ResponseFormat `json:"response_format,omitempty"`
+	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 }
 
 type Message struct {

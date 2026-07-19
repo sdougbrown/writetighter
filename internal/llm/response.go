@@ -66,7 +66,7 @@ func ValidateAdvisorResponse(raw []byte, input string) ([]report.Finding, error)
 			Severity:    "info",
 			Message:     f.Reason,
 			Suggestion:  &repl,
-			Confidence:   f.Confidence,
+			Confidence:  f.Confidence,
 			Path:        &path,
 			Range:       &report.FindingRange{StartByte: f.SourceRange.Start, EndByte: f.SourceRange.End},
 		})

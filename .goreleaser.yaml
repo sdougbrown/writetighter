@@ -14,7 +14,7 @@ builds:
     env:
       - CGO_ENABLED=0
     ldflags:
-      - -s -w -X github.com/sdougbrown/writetighter/internal/app.commit={{.Commit}} -X github.com/sdougbrown/writetighter/internal/app.version={{.Version}}
+      - -s -w -X github.com/sdougbrown/writetighter/internal/app.Commit={{.Commit}} -X github.com/sdougbrown/writetighter/internal/app.Version={{.Version}}
     goos:
       - linux
       - darwin
