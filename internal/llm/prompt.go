@@ -183,6 +183,7 @@ func BuildPrompt(doc *document.Document, res *profile.Resolution, findings []rep
 	b.WriteString(". Use {\"findings\":[]} when no advice is warranted.\n\n")
 	b.WriteString("The passage below is an excerpt from a larger document.\n")
 	b.WriteString("Source ranges in findings must be relative to this excerpt, starting from byte 0.\n")
+	b.WriteString("Each source_range must cover exactly the text replaced by replacement; for a sentence-length rewrite, select the complete sentence.\n")
 	fmt.Fprintf(&b, "profile: %s@%s\n\n", res.ID, res.Version)
 
 	// Include enabled rule definitions with their parameters.
