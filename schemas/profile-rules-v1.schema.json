@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/sdougbrown/writetighter/schemas/profile-rules-v1.schema.json",
+  "title": "Profile Rules v1",
+  "description": "Schema for WriteTighter profile rules.json, format_version 1",
+  "type": "object",
+  "required": ["format_version", "unknown_term_policy", "rules"],
+  "properties": {
+    "format_version": { "type": "integer", "const": 1 },
+    "unknown_term_policy": {
+      "type": "string",
+      "enum": ["candidate", "disabled"]
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "version", "enabled", "enforcement", "severity"],
+        "properties": {
+          "id": { "type": "string", "pattern": "^[A-Z][A-Z0-9._]+$" },
+          "version": { "type": "integer", "minimum": 1 },
+          "enabled": { "type": "boolean" },
+          "enforcement": {
+            "type": "string",
+            "enum": ["enforced", "candidate"]
+          },
+          "severity": {
+            "type": "string",
+            "enum": ["error", "warning", "info"]
+          },
+          "parameters": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

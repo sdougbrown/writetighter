@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/sdougbrown/writetighter/schemas/profile-manifest-v1.schema.json",
+  "title": "Profile Manifest v1",
+  "description": "Schema for WriteTighter profile manifest.json, format_version 1",
+  "type": "object",
+  "required": ["format_version", "id", "version", "display_name", "language", "license", "payloads"],
+  "properties": {
+    "format_version": { "type": "integer", "const": 1 },
+    "id": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$", "description": "Stable profile machine ID" },
+    "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$", "description": "Semantic version" },
+    "display_name": { "type": "string", "minLength": 1 },
+    "language": { "type": "string", "pattern": "^[a-z]{2,3}(-[A-Z]{2})?$", "description": "BCP-47 language tag" },
+    "supported_kinds": {
+      "type": "array",
+      "items": { "type": "string", "enum": ["description", "procedure", "pr"] }
+    },
+    "license": {
+      "type": "object",
+      "required": ["spdx"],
+      "properties": {
+        "spdx": { "type": "string", "minLength": 1 }
+      }
+    },
+    "provenance": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "release", "source_url", "license"],
+        "properties": {
+          "name": { "type": "string" },
+          "release": { "type": "string" },
+          "source_url": { "type": "string", "format": "uri" },
+          "license": { "type": "string" }
+        }
+      }
+    },
+    "claims": {
+      "type": "object",
+      "properties": {
+        "standard": { "type": ["string", "null"] },
+        "issue": { "type": ["string", "null"] },
+        "certification": { "type": "string", "enum": ["none"] }
+      }
+    },
+    "payloads": {
+      "type": "object",
+      "required": ["dictionary.json", "rules.json"],
+      "additionalProperties": { "type": "object" },
+      "propertyNames": { "pattern": "^.+\\.(json|bin)$" },
+      "properties": {
+        "dictionary.json": {
+          "type": "object",
+          "required": ["sha256"],
+          "properties": {
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        },
+        "rules.json": {
+          "type": "object",
+          "required": ["sha256"],
+          "properties": {
+            "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+          }
+        }
+      }
+    }
+  }
+}
