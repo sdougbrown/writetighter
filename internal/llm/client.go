@@ -139,7 +139,7 @@ func buildResponseFormat(mode string) *ResponseFormat {
 	}
 	rf := &ResponseFormat{Type: mode}
 	if mode == "json_schema" {
-		schema := `{"type":"object","properties":{"findings":{"type":"array","items":{"$ref":"#/$defs/AdvisorFinding"}},"$defs":{"AdvisorFinding":{"type":"object","properties":{"source_range":{"type":"object","properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"rule_ids":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"replacement":{"type":"string"},"confidence":{"type":"number"}},"required":["source_range","rule_ids","reason","replacement","confidence"]}}},"required":["findings"]}`
+		schema := `{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"source_range":{"type":"object","additionalProperties":false,"properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"rule_ids":{"type":"array","minItems":1,"items":{"type":"string"}},"reason":{"type":"string"},"replacement":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}},"required":["source_range","rule_ids","reason","replacement","confidence"]}},"$defs":{"AdvisorFinding":{"type":"object","properties":{"source_range":{"type":"object","properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"rule_ids":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"replacement":{"type":"string"},"confidence":{"type":"number"}},"required":["source_range","rule_ids","reason","replacement","confidence"]}}},"required":["findings"]}`
 		rf.JSONSchema = &JSONSchema{
 			Name:   "advisor_response",
 			Schema: json.RawMessage(schema),
