@@ -10,9 +10,22 @@ import (
 
 func testProfile() *profile.Resolution {
 	canon := "WriteTighter"
-	dict := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{{Term: "deprecated term", Status: profile.StatusDiscouraged, Alternatives: []string{"preferred term"}, Reason: "use preferred term", PartsOfSpeech: []string{"noun"}}, {Term: "WriteTighter", Status: profile.StatusPreferred, PartsOfSpeech: []string{"proper noun"}, CanonicalCase: &canon}, {Term: "check-in", Status: profile.StatusPreferred, PartsOfSpeech: []string{"noun"}}}}
+	e1 := profile.Entry{Term: "deprecated term longer phrase", Status: profile.StatusDiscouraged, Alternatives: []string{"better phrase"}, Reason: "use better phrase", PartsOfSpeech: []string{"noun"}}
+	e2 := profile.Entry{Term: "deprecated term", Status: profile.StatusDiscouraged, Alternatives: []string{"preferred term"}, Reason: "use preferred term", PartsOfSpeech: []string{"noun"}}
+	e3 := profile.Entry{Term: "WriteTighter", Status: profile.StatusPreferred, PartsOfSpeech: []string{"proper noun"}, CanonicalCase: &canon}
+	e4 := profile.Entry{Term: "check-in", Status: profile.StatusPreferred, PartsOfSpeech: []string{"noun"}}
+	dict := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{e1, e2, e3, e4}}
 	_ = dict.Validate()
-	return &profile.Resolution{Rules: &profile.RulesConfig{UnknownTermPolicy: "candidate", Rules: []profile.Rule{{ID: "CORE.SENTENCE_LENGTH", Enabled: true, Parameters: map[string]any{"description_max_words": 5}}, {ID: "CORE.DENSE_PARAGRAPH", Enabled: true}, {ID: "CORE.TERM_DISCOURAGED", Enabled: true}, {ID: "CORE.TERM_CASE", Enabled: true}, {ID: "CORE.TERM_UNKNOWN", Enabled: true}, {ID: "CORE.TERM_CONSISTENCY", Enabled: true}, {ID: "CORE.PROCEDURE_MULTI_ACTION", Enabled: true}}}, Dict: dict}
+	rules := []profile.Rule{
+		{ID: "CORE.SENTENCE_LENGTH", Enabled: true, Parameters: map[string]any{"description_max_words": 5}},
+		{ID: "CORE.DENSE_PARAGRAPH", Enabled: true},
+		{ID: "CORE.TERM_DISCOURAGED", Enabled: true},
+		{ID: "CORE.TERM_CASE", Enabled: true},
+		{ID: "CORE.TERM_UNKNOWN", Enabled: true},
+		{ID: "CORE.TERM_CONSISTENCY", Enabled: true},
+		{ID: "CORE.PROCEDURE_MULTI_ACTION", Enabled: true},
+	}
+	return &profile.Resolution{Rules: &profile.RulesConfig{UnknownTermPolicy: "candidate", Rules: rules}, Dict: dict}
 }
 
 func testDoc(text string) *document.Document {
@@ -35,7 +48,64 @@ func TestTermDiscouraged(t *testing.T) {
 		t.Fatal("expected discouraged term finding")
 	}
 }
+func TestTermDiscouragedMultipleOccurrences(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("deprecated term and deprecated term again."), Profile: testProfile()}
+	findings, _ := Get("CORE.TERM_DISCOURAGED").Run(ctx)
+	if len(findings) < 2 {
+		t.Fatalf("expected at least 2 findings for multiple occurrences, got %d", len(findings))
+	}
+}
 
+func TestTermDiscouragedLongestPhraseWins(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("deprecated term longer phrase is here."), Profile: testProfile()}
+	findings, _ := Get("CORE.TERM_DISCOURAGED").Run(ctx)
+	if len(findings) == 0 {
+		t.Fatal("expected discouraged term finding")
+	}
+	// The longest matching phrase should be found ("deprecated term longer phrase"), not the shorter one
+	if len(findings) > 1 {
+		t.Fatalf("expected exactly 1 finding for longest-phrase match, got %d", len(findings))
+	}
+	expectedEvidence := "'deprecated term longer phrase' is discouraged; use 'better phrase' instead"
+	if findings[0].Evidence != expectedEvidence {
+		t.Fatalf("expected evidence %q, got %q", expectedEvidence, findings[0].Evidence)
+	}
+}
+
+func TestTermDiscouragedNoMidWordMatch(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("deprecated terminology is bad."), Profile: testProfile()}
+	findings, _ := Get("CORE.TERM_DISCOURAGED").Run(ctx)
+	for _, f := range findings {
+		if strings.Contains(f.Evidence, "deprecated term ") && !strings.Contains(f.Evidence, "deprecated term longer") {
+			t.Fatalf("should not match 'deprecated term' inside 'deprecated terminology': %s", f.Evidence)
+		}
+	}
+}
+
+func TestTermDiscouragedUnicode(t *testing.T) {
+	canonical := "WriteTighter"
+	dict := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
+		{Term: "café", Status: profile.StatusDiscouraged, Alternatives: []string{"coffee shop"}, Reason: "use coffee shop", PartsOfSpeech: []string{"noun"}},
+		{Term: "deprecated term", Status: profile.StatusDiscouraged, Alternatives: []string{"preferred term"}, Reason: "use preferred term", PartsOfSpeech: []string{"noun"}},
+		{Term: "WriteTighter", Status: profile.StatusPreferred, PartsOfSpeech: []string{"proper noun"}, CanonicalCase: &canonical},
+	}}
+	_ = dict.Validate()
+	rules := []profile.Rule{
+		{ID: "CORE.SENTENCE_LENGTH", Enabled: true, Parameters: map[string]any{"description_max_words": 5}},
+		{ID: "CORE.DENSE_PARAGRAPH", Enabled: true},
+		{ID: "CORE.TERM_DISCOURAGED", Enabled: true},
+		{ID: "CORE.TERM_CASE", Enabled: true},
+		{ID: "CORE.TERM_UNKNOWN", Enabled: true},
+		{ID: "CORE.TERM_CONSISTENCY", Enabled: true},
+		{ID: "CORE.PROCEDURE_MULTI_ACTION", Enabled: true},
+	}
+	p := &profile.Resolution{Rules: &profile.RulesConfig{UnknownTermPolicy: "candidate", Rules: rules}, Dict: dict}
+	ctx := &RunContext{Document: testDoc("café culture matters."), Profile: p}
+	findings, _ := Get("CORE.TERM_DISCOURAGED").Run(ctx)
+	if len(findings) == 0 {
+		t.Fatal("expected discouraged term finding for Unicode term")
+	}
+}
 func TestDenseParagraph(t *testing.T) {
 	ctx := &RunContext{Document: testDoc("One. Two. Three. Four.")}
 	findings, _ := Get("CORE.DENSE_PARAGRAPH").Run(ctx)
@@ -53,10 +123,91 @@ func TestTermCase(t *testing.T) {
 }
 
 func TestTermUnknown(t *testing.T) {
+	// Basic unknown term
 	ctx := &RunContext{Document: testDoc("flarb is unknown."), Profile: testProfile()}
 	findings, _ := Get("CORE.TERM_UNKNOWN").Run(ctx)
 	if len(findings) == 0 {
 		t.Fatal("expected unknown term finding")
+	}
+}
+
+func TestTermUnknownContraction(t *testing.T) {
+	// "don't" should be treated as a single token, not split into "don" and "t"
+	ctx := &RunContext{Document: testDoc("you don't know flarb."), Profile: testProfile()}
+	findings, _ := Get("CORE.TERM_UNKNOWN").Run(ctx)
+	// Count how many findings mention parts of the contraction
+	donCount := 0
+	tCount := 0
+	dontCount := 0
+	for _, f := range findings {
+		e := f.Evidence
+		if e == "Unknown term: don" {
+			donCount++
+		}
+		if e == "Unknown term: t" {
+			tCount++
+		}
+		if strings.Contains(e, "don'") && !strings.Contains(e, "flarb") {
+			dontCount++
+		}
+	}
+	if donCount > 0 {
+		t.Fatalf("contraction incorrectly split: found standalone 'don' finding")
+	}
+	if tCount > 0 {
+		t.Fatalf("contraction incorrectly split: found standalone 't' finding")
+	}
+	// "don't" should appear as a single unknown token
+	if dontCount == 0 {
+		t.Fatalf("expected contraction to be found as a single unknown token, got: %v", findings)
+	}
+	// Should also find "flarb" as unknown
+	foundFlarb := false
+	for _, f := range findings {
+		if strings.Contains(f.Evidence, "flarb") {
+			foundFlarb = true
+		}
+	}
+	if !foundFlarb {
+		t.Fatal("expected 'flarb' to be found as unknown")
+	}
+}
+
+func TestTermUnknownHyphenatedKnown(t *testing.T) {
+	// "check-in" is in the dictionary with StatusPreferred, so it should NOT produce a finding
+	ctx := &RunContext{Document: testDoc("do a check-in now."), Profile: testProfile()}
+	findings, _ := Get("CORE.TERM_UNKNOWN").Run(ctx)
+	for _, f := range findings {
+		if strings.Contains(f.Evidence, "check-in") {
+			t.Fatalf("hyphenated known term 'check-in' should not be unknown: %s", f.Evidence)
+		}
+	}
+}
+
+func TestTermUnknownMultiWordPhrase(t *testing.T) {
+	// "deprecated term" is in the dictionary (StatusDiscouraged), so it should NOT be unknown
+	ctx := &RunContext{Document: testDoc("this deprecated term appears here."), Profile: testProfile()}
+	findings, _ := Get("CORE.TERM_UNKNOWN").Run(ctx)
+	for _, f := range findings {
+		if strings.Contains(f.Evidence, "deprecated") && strings.Contains(f.Evidence, "term") {
+			t.Fatalf("multi-word phrase 'deprecated term' should match dictionary: %s", f.Evidence)
+		}
+	}
+}
+
+func TestTermUnknownUnicode(t *testing.T) {
+	// Unicode terms should work correctly
+	ctx := &RunContext{Document: testDoc("über is a German word."), Profile: testProfile()}
+	findings, _ := Get("CORE.TERM_UNKNOWN").Run(ctx)
+	// "über" should be found as unknown (not in dict)
+	foundUber := false
+	for _, f := range findings {
+		if strings.Contains(f.Evidence, "über") {
+			foundUber = true
+		}
+	}
+	if !foundUber {
+		t.Fatal("expected 'über' to be found as unknown")
 	}
 }
 

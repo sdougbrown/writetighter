@@ -2,6 +2,7 @@ package profile
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"unicode"
@@ -34,30 +35,58 @@ type Dictionary struct {
 }
 
 func (d *Dictionary) Validate() error {
+	var errs []error
 	if d.FormatVersion != 1 {
-		return fmt.Errorf("unsupported dictionary format_version %d", d.FormatVersion)
+		errs = append(errs, fmt.Errorf("unsupported dictionary format_version %d", d.FormatVersion))
 	}
 	d.index = map[string]*Entry{}
 	for i := range d.Entries {
 		e := &d.Entries[i]
 		if e.Term == "" {
-			return fmt.Errorf("entry %d: empty term", i)
+			errs = append(errs, fmt.Errorf("entry %d: empty term", i))
+			continue
 		}
 		if e.Status == StatusPreferred || e.Status == StatusAllowed || e.Status == StatusDiscouraged {
 			if len(e.PartsOfSpeech) == 0 {
-				return fmt.Errorf("entry %q: status %s requires parts_of_speech", e.Term, e.Status)
+				errs = append(errs, fmt.Errorf("entry %q: status %s requires parts_of_speech", e.Term, e.Status))
 			}
 		}
+		// Rejection rule 6: discouraged requires reason
 		if e.Status == StatusDiscouraged && strings.TrimSpace(e.Reason) == "" {
-			return fmt.Errorf("entry %q: discouraged requires reason", e.Term)
+			errs = append(errs, fmt.Errorf("entry %q: discouraged requires reason", e.Term))
 		}
+		// Rejection rule 3: duplicate entry after Unicode case folding
 		k := foldString(e.Term)
 		if _, ok := d.index[k]; ok {
-			return fmt.Errorf("duplicate term %q", e.Term)
+			errs = append(errs, fmt.Errorf("duplicate term %q", e.Term))
 		}
 		d.index[k] = e
 	}
-	return nil
+	return errors.Join(errs...)
+}
+
+// ValidateAlternatives checks that discouraged entries with alternatives
+// resolve to preferred or allowed entries in the dictionary.
+func (d *Dictionary) ValidateAlternatives() error {
+	if d == nil || d.index == nil {
+		return nil
+	}
+	var errs []error
+	for i := range d.Entries {
+		e := &d.Entries[i]
+		if e.Status != StatusDiscouraged || len(e.Alternatives) == 0 {
+			continue
+		}
+		for j, alt := range e.Alternatives {
+			resolved := d.Lookup(alt)
+			if resolved == nil {
+				errs = append(errs, fmt.Errorf("entry %q alternative[%d] %q does not resolve to any dictionary entry", e.Term, j, alt))
+			} else if resolved.Status != StatusPreferred && resolved.Status != StatusAllowed {
+				errs = append(errs, fmt.Errorf("entry %q alternative[%d] %q resolves to entry with status %q (expected preferred or allowed)", e.Term, j, alt, resolved.Status))
+			}
+		}
+	}
+	return errors.Join(errs...)
 }
 
 func (d *Dictionary) Lookup(term string) *Entry {

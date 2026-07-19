@@ -17,8 +17,10 @@ import (
 )
 
 var (
-	Version = "0.1.0"
-	Commit  = "unknown"
+	Version          = "0.1.0"
+	Commit           = "unknown"
+	ErrFailThreshold = errors.New("fail threshold reached")
+	ErrRequireLLM    = errors.New("required llm failed")
 )
 
 type CheckParams struct {
@@ -43,6 +45,40 @@ type App struct{}
 func New() *App { return &App{} }
 
 func (a *App) RunCheck(params CheckParams) error {
+	// Load user config
+	userCfg, _ := config.LoadUserConfig()
+
+	// Load project config
+	var projCfg *config.ProjectConfig
+	if params.ConfigPath != "" {
+		projCfg, _ = config.LoadProjectConfig(params.ConfigPath)
+	} else {
+		projCfg, _, _ = config.DiscoverProjectConfig()
+	}
+
+	// Merge
+	merged, _ := config.MergeConfigs(projCfg, userCfg)
+
+	// Extract terms
+	var terms []config.TermEntry
+	if merged != nil && merged.Project != nil {
+		terms = merged.Project.Terms
+	}
+
+	// LLM fallbacks from user config
+	if merged != nil && merged.User != nil {
+		uc := merged.User.LLM
+		if params.LLMBaseURL == "" && uc.BaseURL != "" {
+			params.LLMBaseURL = uc.BaseURL
+		}
+		if params.LLMModel == "" && uc.Model != "" {
+			params.LLMModel = uc.Model
+		}
+		if params.LLMResponseMode == "" && uc.ResponseMode != "" {
+			params.LLMResponseMode = uc.ResponseMode
+		}
+	}
+
 	docs, err := document.CollectInputs(params.Paths, params.Stdin)
 	if err != nil {
 		return err
@@ -51,22 +87,36 @@ func (a *App) RunCheck(params CheckParams) error {
 	if err != nil {
 		return err
 	}
-	var terms []config.TermEntry
+	if len(terms) > 0 && r != nil && r.Dict != nil {
+		if verr := profile.ValidateAgainstProfile(terms, r.Dict); verr != nil {
+			return verr
+		}
+	}
 	enabled := check.Enabled(r)
 	findings := []report.Finding{}
-	profileRuleEnabled := map[string]bool{}
+
+	coverage := make([]report.RuleCoverage, 0, len(r.Rules.Rules)+len(check.All()))
+
+	// Build coverage from profile rules
+	profileRuleIDs := map[string]bool{}
 	for _, rule := range r.Rules.Rules {
-		profileRuleEnabled[rule.ID] = rule.Enabled
+		profileRuleIDs[rule.ID] = true
+		c := check.Get(rule.ID)
+		state := rule.Enforcement
+		if state == "" {
+			state = "disabled"
+		}
+		if c == nil {
+			state = "not-implemented"
+		}
+		coverage = append(coverage, report.RuleCoverage{ID: rule.ID, Version: rule.Version, State: state})
 	}
 
-	allCheckers := check.All()
-	coverage := make([]report.RuleCoverage, 0, len(allCheckers))
-	for _, c := range allCheckers {
-		state := "disabled"
-		if profileRuleEnabled[c.ID()] {
-			state = "enabled"
+	// Add registered checkers not in profile as disabled
+	for _, c := range check.All() {
+		if !profileRuleIDs[c.ID()] {
+			coverage = append(coverage, report.RuleCoverage{ID: c.ID(), Version: c.Version(), State: "disabled"})
 		}
-		coverage = append(coverage, report.RuleCoverage{ID: c.ID(), Version: c.Version(), State: state})
 	}
 	for _, doc := range docs {
 		if params.Kind != "" {
@@ -81,25 +131,40 @@ func (a *App) RunCheck(params CheckParams) error {
 			findings = append(findings, more...)
 		}
 	}
+	llmState := "not-requested"
+	if params.LLM {
+		llmState = "requested"
+	}
 	if params.LLM {
 		fmt.Fprintf(os.Stderr, "llm host: %s\n", llm.Host(params.LLMBaseURL))
 		advisorConfig := llm.Config{BaseURL: params.LLMBaseURL, Model: params.LLMModel, ResponseMode: params.LLMResponseMode, Timeout: llm.DefaultTimeout}
 		more, err := llm.Advisor(context.Background(), advisorConfig, docs[0], r, findings)
 		if err != nil && !params.RequireLLM {
 			fmt.Fprintf(os.Stderr, "llm advisor failed: %v\n", err)
+			llmState = "failed"
 		} else if err != nil {
 			return err
 		} else {
-			findings = more
+			findings = append(findings, more...)
+			llmState = "success"
 		}
 	}
 	var sourcePath *string
 	if !params.Stdin && len(params.Paths) > 0 {
 		sourcePath = &params.Paths[0]
 	}
-	llmState := "not-requested"
-	if params.LLM {
-		llmState = "requested"
+	if params.FailOn == "error" {
+		for _, f := range findings {
+			if f.Severity == "error" {
+				return ErrFailThreshold
+			}
+		}
+	} else if params.FailOn == "warning" {
+		for _, f := range findings {
+			if f.Severity == "warning" || f.Severity == "error" {
+				return ErrFailThreshold
+			}
+		}
 	}
 	claims := report.ClaimsInfo{}
 	if r.Manifest != nil {

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -42,7 +43,7 @@ func runCheck(args []string) int {
 	fs := flag.NewFlagSet("check", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	stdin := fs.Bool("stdin", false, "")
-	kind := fs.String("kind", "", "")
+	kind := fs.String("kind", "description", "")
 	profile := fs.String("profile", "", "")
 	configPath := fs.String("config", "", "")
 	format := fs.String("format", "human", "")
@@ -69,7 +70,13 @@ func runCheck(args []string) int {
 		usageErr("usage: --require-llm requires --llm")
 		return 2
 	}
-	if err := app.New().RunCheck(params); err != nil {
+	err := app.New().RunCheck(params)
+	switch {
+	case errors.Is(err, app.ErrRequireLLM):
+		return 3
+	case errors.Is(err, app.ErrFailThreshold):
+		return 1
+	case err != nil:
 		usageErr(err.Error())
 		return 2
 	}
