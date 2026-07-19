@@ -201,6 +201,9 @@ func (a *App) RunCheck(params CheckParams) error {
 func (a *App) RunExplain(_ string) error { return errors.New("not implemented") }
 
 func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {
+	if format != "human" && format != "json" {
+		return fmt.Errorf("unsupported format %q", format)
+	}
 	_, err := profile.Resolve(profileSpec)
 	if err != nil {
 		return err
@@ -223,18 +226,25 @@ func (a *App) RunProfileInstall(spec string) error {
 	return err
 }
 
-func (a *App) RunProfileList() error {
+func (a *App) RunProfileList(format string) error {
 	embedded, err := profile.LoadEmbedded()
 	if err != nil {
 		return err
+	}
+	if format == "json" {
+		data := map[string]any{"profiles": []map[string]any{{"id": string(embedded.ID), "version": string(embedded.Version), "sha256": embedded.SHA256, "source": "embedded"}}}
+		return json.NewEncoder(os.Stdout).Encode(data)
 	}
 	fmt.Fprintf(os.Stdout, "embedded  %s@%s  sha256:%s\n", embedded.ID, embedded.Version, embedded.SHA256)
 	return nil
 }
 
-func (a *App) RunProfileVerify(spec string) error {
+func (a *App) RunProfileVerify(spec, format string) error {
 	if info, err := os.Stat(spec); err == nil && info.IsDir() {
 		result := profile.VerifyBundle(spec)
+		if format == "json" {
+			return json.NewEncoder(os.Stdout).Encode(result)
+		}
 		if !result.Valid {
 			return fmt.Errorf("profile verification failed")
 		}
@@ -244,6 +254,10 @@ func (a *App) RunProfileVerify(spec string) error {
 		resolution, err := profile.Resolve(spec)
 		if err != nil {
 			return fmt.Errorf("profile not found: %s", spec)
+		}
+		if format == "json" {
+			data := map[string]any{"id": string(resolution.ID), "version": string(resolution.Version), "sha256": resolution.SHA256, "valid": true}
+			return json.NewEncoder(os.Stdout).Encode(data)
 		}
 		fmt.Fprintf(os.Stderr, "Profile %s@%s resolved (embedded): SHA256=%s\n", resolution.ID, resolution.Version, resolution.SHA256)
 		return nil

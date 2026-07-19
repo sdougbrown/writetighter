@@ -18,9 +18,6 @@ func Advisor(ctx context.Context, config Config, doc *document.Document, res *pr
 	}
 	prompt, passage := BuildPrompt(doc, res, findings)
 	req := Request{Messages: []Message{{Role: "system", Content: prompt}, {Role: "user", Content: passage}}}
-	if config.ResponseMode != "" && config.ResponseMode != "auto" {
-		req.ResponseFormat = &ResponseFormat{Type: config.ResponseMode}
-	}
 	resp, err := client.Do(ctx, req)
 	if err != nil {
 		return findings, err

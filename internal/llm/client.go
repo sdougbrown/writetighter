@@ -42,7 +42,14 @@ type Message struct {
 }
 
 type ResponseFormat struct {
-	Type string `json:"type"`
+	Type       string     `json:"type"`
+	JSONSchema *JSONSchema `json:"json_schema,omitempty"`
+}
+
+type JSONSchema struct {
+	Name   string          `json:"name"`
+	Schema json.RawMessage `json:"schema"`
+	Strict bool            `json:"strict"`
 }
 
 type Response struct {
@@ -88,7 +95,7 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	}
 	req.Model = c.model
 	if req.ResponseFormat == nil && c.mode != "" && c.mode != "auto" {
-		req.ResponseFormat = &ResponseFormat{Type: c.mode}
+		req.ResponseFormat = buildResponseFormat(c.mode)
 	}
 	body, err := json.Marshal(req)
 	if err != nil {
@@ -120,6 +127,19 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 		return nil, err
 	}
 	return &out, nil
+}
+
+func buildResponseFormat(mode string) *ResponseFormat {
+	rf := &ResponseFormat{Type: mode}
+	if mode == "json_schema" {
+		schema := `{"type":"object","properties":{"findings":{"type":"array","items":{"$ref":"#/$defs/AdvisorFinding"}},"$defs":{"AdvisorFinding":{"type":"object","properties":{"source_range":{"type":"object","properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"rule_ids":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"replacement":{"type":"string"},"confidence":{"type":"number"}},"required":["source_range","rule_ids","reason"]}}},"required":["findings"]}`
+		rf.JSONSchema = &JSONSchema{
+			Name:   "advisor_response",
+			Schema: json.RawMessage(schema),
+			Strict: true,
+		}
+	}
+	return rf
 }
 
 func normalizeEndpoint(base string) (string, error) {

@@ -52,7 +52,7 @@ func runCheck(args []string) int {
 	baseURL := fs.String("llm-base-url", "", "")
 	model := fs.String("llm-model", "", "")
 	responseMode := fs.String("llm-response-mode", "", "")
-	failOn := fs.String("fail-on", "", "")
+	failOn := fs.String("fail-on", "none", "")
 	fs.Usage = func() {}
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -131,17 +131,32 @@ func runProfile(args []string) int {
 		}
 		return 0
 	case "list":
-		if err := app.New().RunProfileList(); err != nil {
+		format := "human"
+		for i := 1; i < len(args); i++ {
+			if args[i] == "--format" && i+1 < len(args) {
+				format = args[i+1]
+				break
+			}
+		}
+		if err := app.New().RunProfileList(format); err != nil {
 			usageErr(err.Error())
 			return 2
 		}
 		return 0
 	case "verify":
-		if len(args) != 2 || args[1] == "" {
+		if len(args) < 2 || (len(args) >= 2 && args[1] == "") {
 			usageErr("not implemented")
 			return 2
 		}
-		if err := app.New().RunProfileVerify(args[1]); err != nil {
+		spec := args[1]
+		format := "human"
+		for i := 2; i < len(args); i++ {
+			if args[i] == "--format" && i+1 < len(args) {
+				format = args[i+1]
+				break
+			}
+		}
+		if err := app.New().RunProfileVerify(spec, format); err != nil {
 			usageErr(err.Error())
 			return 2
 		}
