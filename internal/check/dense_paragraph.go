@@ -2,7 +2,6 @@ package check
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/report"
@@ -13,45 +12,64 @@ type denseParagraphChecker struct{}
 func (denseParagraphChecker) ID() string   { return "CORE.DENSE_PARAGRAPH" }
 func (denseParagraphChecker) Version() int { return 1 }
 func (denseParagraphChecker) Run(ctx *RunContext) ([]report.Finding, error) {
-	if ctx == nil || ctx.Document == nil {
+	if ctx == nil || ctx.Document == nil || ctx.Profile == nil || ctx.Profile.Rules == nil {
 		return nil, nil
 	}
-	var out []report.Finding
-	var prose []document.Segment
-	flush := func() {
-		if len(prose) == 0 {
-			return
+
+	// Load profile-configured thresholds.
+	// Default to disabled-like behavior (high thresholds) if not configured.
+	maxSentences := 3 // default
+	maxWords := 50    // default
+
+	for _, r := range ctx.Profile.Rules.Rules {
+		if r.ID != "CORE.DENSE_PARAGRAPH" {
+			continue
 		}
-		text := strings.Builder{}
-		for i, seg := range prose {
-			if i > 0 {
-				text.WriteByte(' ')
+		if r.Parameters == nil {
+			continue
+		}
+		if v, ok := r.Parameters["max_sentences"]; ok {
+			if n, ok2 := toInt(v); ok2 && n > 0 {
+				maxSentences = n
 			}
-			text.WriteString(seg.Text)
 		}
-		content := text.String()
-		sentences := strings.Count(content, ".") + strings.Count(content, "!") + strings.Count(content, "?")
-		words := len(strings.Fields(content))
-		if sentences > 3 || words > 50 {
-			first := prose[0]
-			last := prose[len(prose)-1]
+		if v, ok := r.Parameters["max_words"]; ok {
+			if n, ok2 := toInt(v); ok2 && n > 0 {
+				maxWords = n
+			}
+		}
+	}
+
+	// Use the shared prose analysis layer.
+	blocks := document.AnalyzeProse(ctx.Document)
+	var out []report.Finding
+
+	for _, block := range blocks {
+		sentences := document.SentenceUnits(block, ctx.Document.Content)
+		nSentences := len(sentences)
+		// Total words across all sentences in this paragraph.
+		totalWords := 0
+		for _, s := range sentences {
+			totalWords += s.WordCount
+		}
+
+		if nSentences > maxSentences || totalWords > maxWords {
 			path := ctx.Document.Source
-			out = append(out, report.Finding{RuleID: denseParagraphChecker{}.ID(), RuleVersion: 1, Checker: denseParagraphChecker{}.ID(), CheckerVersion: 1, Enforcement: "candidate", Severity: "info", Path: &path, Range: &report.FindingRange{StartByte: first.Range.Start.Byte, EndByte: last.Range.End.Byte, StartLine: first.Range.Start.Line, StartColumn: first.Range.Start.Column, EndLine: last.Range.End.Line, EndColumn: last.Range.End.Column}, Evidence: fmt.Sprintf("%d sentences; %d words", sentences, words), Message: "Paragraph is dense.", Confidence: 1})
+			evidence := fmt.Sprintf("%d sentences; %d words", nSentences, totalWords)
+			rng := &report.FindingRange{
+				StartByte: block.StartByte, EndByte: block.EndByte,
+				StartLine: block.StartLine, StartColumn: block.StartColumn,
+				EndLine: block.EndLine, EndColumn: block.EndColumn,
+			}
+			out = append(out, report.Finding{
+				RuleID: denseParagraphChecker{}.ID(), RuleVersion: 1,
+				Checker: denseParagraphChecker{}.ID(), CheckerVersion: 1,
+				Enforcement: "candidate", Severity: "info",
+				Path: &path, Range: rng,
+				Evidence: evidence, Message: "Paragraph is dense.", Confidence: 1,
+			})
 		}
-		prose = nil
 	}
-	for _, seg := range ctx.Document.Segments {
-		if seg.Type != document.SegmentProse {
-			flush()
-			continue
-		}
-		if strings.TrimSpace(seg.Text) == "" {
-			flush()
-			continue
-		}
-		prose = append(prose, seg)
-	}
-	flush()
 	return out, nil
 }
 

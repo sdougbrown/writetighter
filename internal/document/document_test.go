@@ -38,6 +38,25 @@ func TestFromFileSimpleText(t *testing.T) {
 	}
 }
 
+func TestAutolinkIsLinkDestinationSegment(t *testing.T) {
+	doc, err := FromReader(strings.NewReader("See <https://example.com/a-b> now."), "test.md", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var destinations int
+	for _, seg := range doc.Segments {
+		if seg.Type == SegmentLinkDest {
+			destinations++
+			if seg.Text != "<https://example.com/a-b>" {
+				t.Fatalf("destination = %q", seg.Text)
+			}
+		}
+	}
+	if destinations != 1 {
+		t.Fatalf("link destination segments = %d, want 1", destinations)
+	}
+}
+
 func TestCollectInputsDirectory(t *testing.T) {
 	docs, err := CollectInputs([]string{filepath.Join(repoRoot(t), "testdata", "documents")}, false)
 	if err != nil {

@@ -3,7 +3,6 @@ package check
 import (
 	"fmt"
 	"strconv"
-	"strings"
 
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/report"
@@ -33,25 +32,39 @@ func sentenceLengthRun(ctx *RunContext) ([]report.Finding, error) {
 	if limit == 0 {
 		return nil, nil
 	}
+
+	// Use the shared prose analysis layer to derive sentence units.
+	blocks := document.AnalyzeProse(ctx.Document)
 	var out []report.Finding
-	for _, seg := range ctx.Document.Segments {
-		if seg.Type != document.SegmentProse {
-			continue
-		}
-		wc := wordCount(seg.Text)
-		if wc > limit {
-			msg := "Split this sentence into independently verifiable claims."
-			evidence := fmt.Sprintf("%d words; profile limit is %d", wc, limit)
-			path := ctx.Document.Source
-			rng := &report.FindingRange{StartByte: seg.Range.Start.Byte, EndByte: seg.Range.End.Byte, StartLine: seg.Range.Start.Line, StartColumn: seg.Range.Start.Column, EndLine: seg.Range.End.Line, EndColumn: seg.Range.End.Column}
-			out = append(out, report.Finding{RuleID: sentenceLengthChecker{}.ID(), RuleVersion: 1, Checker: sentenceLengthChecker{}.ID(), CheckerVersion: 1, Enforcement: "enforced", Severity: "warning", Path: &path, Range: rng, Evidence: evidence, Message: msg, Confidence: 1})
+
+	for _, block := range blocks {
+		sentences := document.SentenceUnits(block, ctx.Document.Content)
+		for _, s := range sentences {
+			if s.WordCount > limit {
+				msg := "Split this sentence into independently verifiable claims."
+				evidence := fmt.Sprintf("%d words; profile limit is %d", s.WordCount, limit)
+				path := ctx.Document.Source
+				rng := &report.FindingRange{
+					StartByte: s.StartByte, EndByte: s.EndByte,
+					StartLine: s.StartLine, StartColumn: s.StartColumn,
+					EndLine: s.EndLine, EndColumn: s.EndColumn,
+				}
+				out = append(out, report.Finding{
+					RuleID: sentenceLengthChecker{}.ID(), RuleVersion: 1,
+					Checker: sentenceLengthChecker{}.ID(), CheckerVersion: 1,
+					Enforcement: "enforced", Severity: "warning",
+					Path: &path, Range: rng,
+					Evidence: evidence, Message: msg, Confidence: 1,
+				})
+			}
 		}
 	}
 	return out, nil
 }
 
-func toInt(v any) (int, bool) { i, err := strconv.Atoi(fmt.Sprint(v)); return i, err == nil }
-
-func wordCount(s string) int { return len(strings.Fields(s)) }
+func toInt(v any) (int, bool) {
+	i, err := strconv.Atoi(fmt.Sprint(v))
+	return i, err == nil
+}
 
 func init() { Register(sentenceLengthChecker{}) }

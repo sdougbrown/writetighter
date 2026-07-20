@@ -5,7 +5,8 @@ machine-readable findings, and can optionally ask an LLM for narrowly scoped rew
 suggestions. It is a neutral checking host — each check selects one versioned profile
 that supplies the applicable dictionary and rule policy.
 
-**Status:** Pre-release / private development.
+**Status:** Private development. The embedded default is
+`software-docs-en@0.2.0`; public release remains blocked on the profile rights review.
 
 ## Quick start
 
@@ -36,7 +37,7 @@ echo "Create the file and then utilize it." | ./writetighter check --stdin --kin
 - `internal/profile/` — bundle schemas, validation, resolution, embedding
 - `internal/report/` — schema-v1 model and renderers
 - `internal/llm/` — OpenAI-compatible client, prompt, response validation
-- `internal/data/profiles/` — verified embedded default bundle
+- `internal/profile/data/profiles/` — verified embedded default bundle
 - `schemas/` — JSON Schemas for bundle and report contracts
 - `testdata/` — fixtures for documents, expected output, profiles, term bases
 - `docs/` — decisions, data provenance, configuration, agent workflow
@@ -55,11 +56,6 @@ Private development. Not cleared for public redistribution.
 
 ## Status
 
-- Stage 0: ✅ Naming, rights, and contract records
-- Stage 1: ⬜ Offline CLI skeleton and configuration
-- Stage 2: ⬜ Document ingestion and report contract
-- Stage 3: ⬜ Profile bundles, installation, and embedding
-- Stage 4: ⬜ Deterministic rules and evaluation
-- Stage 5: ⬜ Opt-in LLM advisor
-- Stage 6: ⬜ Agent adoption
-- Stage 7: ⬜ Release and maintenance
+- Stages 0–6: ✅ Implemented and verified for private development
+- Stage 7 release machinery: ✅ Implemented and snapshot-tested
+- Public publication: ⛔ Blocked pending profile redistribution clearance

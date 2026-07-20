@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -20,6 +21,7 @@ const (
 	SegmentProse       SegmentType = "prose"
 	SegmentCodeBlock   SegmentType = "code_block"
 	SegmentInlineCode  SegmentType = "inline_code"
+	SegmentInlineHTML  SegmentType = "inline_html"
 	SegmentFrontMatter SegmentType = "front_matter"
 	SegmentLinkDest    SegmentType = "link_destination"
 	SegmentHTMLBlock   SegmentType = "html_block"
@@ -220,7 +222,7 @@ func segmentMarkdown(content string) []Segment {
 			}
 		}
 		if isHTMLBlock(line) {
-			end := findBlockEnd(content, lineStart)
+			end := findHTMLBlockEnd(content, lineStart, lineEnd, line)
 			segs = append(segs, makeSeg(SegmentHTMLBlock, content[lineStart:end], lineStart, end, content))
 			lineStart = end
 			continue
@@ -243,18 +245,58 @@ func segmentProseLine(content string, start, end int) []Segment {
 	last := 0
 	for i := 0; i < len(line); {
 		if line[i] == '`' {
-			j := i + 1
-			for j < len(line) && line[j] != '`' {
-				j++
+			// Count opening backticks
+			n := 0
+			for i+n < len(line) && line[i+n] == '`' {
+				n++
 			}
-			if j < len(line) {
-				if i > last {
-					segs = append(segs, makeSeg(SegmentProse, line[last:i], start+last, start+i, content))
+			// Search for closing run of exactly n backticks
+			j := i + n
+			found := false
+			for j < len(line) {
+				if line[j] == '`' {
+					k := 0
+					for j+k < len(line) && line[j+k] == '`' {
+						k++
+					}
+					if k == n {
+						if i > last {
+							segs = append(segs, makeSeg(SegmentProse, line[last:i], start+last, start+i, content))
+						}
+						segs = append(segs, makeSeg(SegmentInlineCode, line[i:j+k], start+i, start+j+k, content))
+						last = j + k
+						i = j + k
+						found = true
+						break
+					}
+					j += k
+				} else {
+					j++
 				}
-				segs = append(segs, makeSeg(SegmentInlineCode, line[i:j+1], start+i, start+j+1, content))
-				last = j + 1
-				i = j + 1
+			}
+			if found {
 				continue
+			}
+		}
+		if line[i] == '<' {
+			if j := strings.IndexByte(line[i+1:], '>'); j >= 0 {
+				j += i + 1
+				inner := line[i+1 : j]
+				segmentType := SegmentType("")
+				if isAutolinkDestination(inner) {
+					segmentType = SegmentLinkDest
+				} else if isInlineHTMLTag(inner) {
+					segmentType = SegmentInlineHTML
+				}
+				if segmentType != "" {
+					if i > last {
+						segs = append(segs, makeSeg(SegmentProse, line[last:i], start+last, start+i, content))
+					}
+					segs = append(segs, makeSeg(segmentType, line[i:j+1], start+i, start+j+1, content))
+					last = j + 1
+					i = j + 1
+					continue
+				}
 			}
 		}
 		if line[i] == '(' && i > 0 && line[i-1] == ']' {
@@ -367,12 +409,117 @@ func findFenceEnd(content string, start int, line string) int {
 	}
 	return len(content)
 }
-func isHTMLBlock(line string) bool {
-	return strings.HasPrefix(strings.TrimSpace(line), "<") && strings.HasSuffix(strings.TrimSpace(line), ">")
+
+var htmlBlockTags = []string{
+	"<address", "<article", "<aside", "<base", "<basefont", "<blockquote",
+	"<body", "<caption", "<center", "<col", "<colgroup", "<dd", "<details",
+	"<dialog", "<dir", "<div", "<dl", "<dt", "<fieldset", "<figcaption",
+	"<figure", "<footer", "<form", "<frame", "<frameset", "<h1", "<h2",
+	"<h3", "<h4", "<h5", "<h6", "<head", "<header", "<hr", "<html",
+	"<iframe", "<legend", "<li", "<link", "<main", "<menu", "<menuitem",
+	"<nav", "<noframes", "<ol", "<optgroup", "<option", "<p", "<param",
+	"<pre", "<script", "<search", "<section", "<style", "<summary", "<table",
+	"<tbody", "<td", "<tfoot", "<th", "<thead", "<title", "<tr", "<track",
+	"<ul",
 }
-func findBlockEnd(content string, start int) int {
-	if idx := strings.Index(content[start:], "\n\n"); idx >= 0 {
+
+func isHTMLBlock(line string) bool {
+	trimmed := strings.TrimSpace(line)
+	lower := strings.ToLower(trimmed)
+	if strings.HasPrefix(lower, "<!--") || strings.HasPrefix(lower, "<![cdata[") ||
+		strings.HasPrefix(lower, "<!doctype") || strings.HasPrefix(lower, "<?") {
+		return true
+	}
+	// Only recognize complete block-level tag names, not inline HTML such as
+	// <em> or longer custom tags that merely share a prefix.
+	tagText := lower
+	if strings.HasPrefix(tagText, "</") {
+		tagText = "<" + tagText[2:]
+	}
+	for _, tag := range htmlBlockTags {
+		if !strings.HasPrefix(tagText, tag) {
+			continue
+		}
+		if len(tagText) == len(tag) || strings.ContainsRune(" \t>/", rune(tagText[len(tag)])) {
+			return true
+		}
+	}
+	return false
+}
+func findHTMLBlockEnd(content string, start, lineEnd int, line string) int {
+	lowerLine := strings.ToLower(strings.TrimSpace(line))
+	rest := content[start:]
+	lowerRest := strings.ToLower(rest)
+	for _, delimiter := range []struct{ prefix, suffix string }{
+		{"<!--", "-->"}, {"<?", "?>"}, {"<![cdata[", "]]>"},
+	} {
+		if strings.HasPrefix(lowerLine, delimiter.prefix) {
+			if idx := strings.Index(lowerRest, delimiter.suffix); idx >= 0 {
+				return start + idx + len(delimiter.suffix)
+			}
+			return len(content)
+		}
+	}
+	for _, tag := range []string{"script", "style", "pre"} {
+		if strings.HasPrefix(lowerLine, "<"+tag) {
+			closing := "</" + tag + ">"
+			if idx := strings.Index(lowerRest, closing); idx >= 0 {
+				return start + idx + len(closing)
+			}
+			return len(content)
+		}
+	}
+	// End any explicitly closed block at its closing tag rather than consuming
+	// unrelated prose up to the next blank line.
+	for _, tagPrefix := range htmlBlockTags {
+		if !strings.HasPrefix(lowerLine, tagPrefix) {
+			continue
+		}
+		name := tagPrefix[1:]
+		closing := "</" + name + ">"
+		if idx := strings.Index(lowerRest, closing); idx >= 0 {
+			return start + idx + len(closing)
+		}
+		if strings.Contains(lowerLine, "/>") {
+			return lineEnd
+		}
+		break
+	}
+	if strings.HasPrefix(lowerLine, "</") {
+		return lineEnd
+	}
+	if idx := strings.Index(rest, "\n\n"); idx >= 0 {
 		return start + idx
 	}
 	return len(content)
+}
+
+func isInlineHTMLTag(inner string) bool {
+	inner = strings.TrimSpace(inner)
+	if inner == "" {
+		return false
+	}
+	if inner[0] == '/' {
+		inner = inner[1:]
+	}
+	return inner != "" && unicode.IsLetter(rune(inner[0]))
+}
+
+func isAutolinkDestination(inner string) bool {
+	if inner == "" || strings.IndexFunc(inner, unicode.IsSpace) >= 0 {
+		return false
+	}
+	if at := strings.IndexByte(inner, '@'); at > 0 && at < len(inner)-1 {
+		return true
+	}
+	colon := strings.IndexByte(inner, ':')
+	if colon < 2 || colon > 32 || !unicode.IsLetter(rune(inner[0])) {
+		return false
+	}
+	for _, r := range inner[1:colon] {
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '+' && r != '.' && r != '-' {
+			return false
+		}
+	}
+	return true
 }

@@ -349,14 +349,18 @@ func buildExcerpt(doc *document.Document, findings []report.Finding) *Excerpt {
 		// Previous prose segment
 		for j := idx - 1; j >= 0; j-- {
 			if doc.Segments[j].Type == document.SegmentProse {
-				included[j] = true
+				if nearbyProseContext(doc, j, idx) {
+					included[j] = true
+				}
 				break
 			}
 		}
 		// Next prose segment
 		for j := idx + 1; j < len(doc.Segments); j++ {
 			if doc.Segments[j].Type == document.SegmentProse {
-				included[j] = true
+				if nearbyProseContext(doc, idx, j) {
+					included[j] = true
+				}
 				break
 			}
 		}
@@ -366,24 +370,58 @@ func buildExcerpt(doc *document.Document, findings []report.Finding) *Excerpt {
 	var excerpt strings.Builder
 	origOffsets := []int{} // excerpt byte position -> original doc byte offset
 
+	previous := -1
 	for idx := 0; idx < len(doc.Segments) && excerpt.Len() <= MaxInputChars; idx++ {
 		if !included[idx] {
 			continue
 		}
 		seg := doc.Segments[idx]
-		if excerpt.Len() > 0 && excerpt.Len() < MaxInputChars-1 {
-			excerpt.WriteByte('\n')
-			origOffsets = append(origOffsets, -1) // separator is not in original
+		if previous >= 0 && excerpt.Len() < MaxInputChars {
+			if excerptGapIsBridgeable(doc, previous, idx) {
+				start := doc.Segments[previous].Range.End.Byte
+				end := seg.Range.Start.Byte
+				for off := start; off < end && excerpt.Len() < MaxInputChars; off++ {
+					b := doc.Content[off]
+					if b != ' ' && b != '\t' && b != '\r' && b != '\n' {
+						b = ' '
+					}
+					excerpt.WriteByte(b)
+					origOffsets = append(origOffsets, off)
+				}
+			} else if excerpt.Len() < MaxInputChars-1 {
+				excerpt.WriteByte('\n')
+				origOffsets = append(origOffsets, -1)
+			}
 		}
-		for i := seg.Range.Start.Byte; i < seg.Range.End.Byte && excerpt.Len() < MaxInputChars; i++ {
-			excerpt.WriteByte(doc.Content[i])
-			origOffsets = append(origOffsets, i)
+		for off := seg.Range.Start.Byte; off < seg.Range.End.Byte && excerpt.Len() < MaxInputChars; off++ {
+			excerpt.WriteByte(doc.Content[off])
+			origOffsets = append(origOffsets, off)
 		}
+		previous = idx
 	}
 
 	text := excerpt.String()
 
 	return newExcerpt(text, origOffsets)
+}
+
+func nearbyProseContext(doc *document.Document, previous, current int) bool {
+	start := doc.Segments[previous].Range.End.Byte
+	end := doc.Segments[current].Range.Start.Byte
+	return start <= end && !strings.Contains(doc.Content[start:end], "\n\n")
+}
+
+func excerptGapIsBridgeable(doc *document.Document, previous, current int) bool {
+	for i := previous + 1; i < current; i++ {
+		switch doc.Segments[i].Type {
+		case document.SegmentInlineCode, document.SegmentInlineHTML, document.SegmentLinkDest:
+			// Excluded inline syntax can be masked while retaining byte mapping.
+		default:
+			return false
+		}
+	}
+	gap := doc.Content[doc.Segments[previous].Range.End.Byte:doc.Segments[current].Range.Start.Byte]
+	return !strings.Contains(gap, "\n\n")
 }
 
 func exclusiveOrigEndFromOffsets(origOffsets []int) int {

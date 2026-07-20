@@ -21,12 +21,22 @@ type Rule struct {
 }
 
 // knownRuleParams defines valid parameter keys for known rule IDs.
+// Rules with empty sets reject all parameters (no v1 parameters defined).
 var knownRuleParams = map[string]map[string]bool{
 	"CORE.SENTENCE_LENGTH": {
 		"description_max_words": true,
 		"procedure_max_words":   true,
 		"pr_max_words":          true,
 	},
+	"CORE.DENSE_PARAGRAPH": {
+		"max_sentences": true,
+		"max_words":     true,
+	},
+	"CORE.TERM_DISCOURAGED":       {},
+	"CORE.TERM_CASE":              {},
+	"CORE.TERM_UNKNOWN":           {},
+	"CORE.TERM_CONSISTENCY":       {},
+	"CORE.PROCEDURE_MULTI_ACTION": {},
 }
 
 var knownRules = map[string]bool{
@@ -52,8 +62,8 @@ func (rc *RulesConfig) Validate() error {
 			errs = append(errs, fmt.Errorf("rules[%d]: duplicate rule ID %q", i, rule.ID))
 		}
 		seen[rule.ID] = true
-		if rule.Version < 1 {
-			errs = append(errs, fmt.Errorf("rules[%d]: version must be positive", i))
+		if rule.Version != 1 {
+			errs = append(errs, fmt.Errorf("rules[%d]: unsupported version %d for rule %q", i, rule.Version, rule.ID))
 		}
 		if rule.Enforcement != "enforced" && rule.Enforcement != "candidate" && rule.Enforcement != "advisory" && rule.Enforcement != "disabled" {
 			errs = append(errs, fmt.Errorf("rules[%d]: invalid enforcement", i))
@@ -68,9 +78,56 @@ func (rc *RulesConfig) Validate() error {
 					errs = append(errs, fmt.Errorf("rules[%d]: unknown parameter %q for rule %q", i, k, rule.ID))
 				}
 			}
+		} else if len(rule.Parameters) > 0 {
+			// Rules not in knownRuleParams still reject parameters
+			for k := range rule.Parameters {
+				errs = append(errs, fmt.Errorf("rules[%d]: unknown parameter %q for rule %q", i, k, rule.ID))
+			}
+		}
+		if rule.Enabled {
+			var required []string
+			switch rule.ID {
+			case "CORE.SENTENCE_LENGTH":
+				required = []string{"description_max_words", "procedure_max_words", "pr_max_words"}
+			case "CORE.DENSE_PARAGRAPH":
+				required = []string{"max_sentences", "max_words"}
+			}
+			for _, key := range required {
+				if _, ok := rule.Parameters[key]; !ok {
+					errs = append(errs, fmt.Errorf("rules[%d]: missing required parameter %q for rule %q", i, key, rule.ID))
+				}
+			}
+		}
+		// Rejection rule 5: Validate parameter values are positive integers.
+		for k, v := range rule.Parameters {
+			switch rule.ID {
+			case "CORE.SENTENCE_LENGTH", "CORE.DENSE_PARAGRAPH":
+				n, ok := toInt(v)
+				if !ok {
+					errs = append(errs, fmt.Errorf("rules[%d]: parameter %q must be an integer, got %T(%v)", i, k, v, v))
+					continue
+				}
+				if n <= 0 {
+					errs = append(errs, fmt.Errorf("rules[%d]: parameter %q must be a positive integer, got %d", i, k, n))
+				}
+			}
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func toInt(v any) (int, bool) {
+	switch n := v.(type) {
+	case float64:
+		if n != float64(int(n)) {
+			return 0, false
+		}
+		return int(n), true
+	case int:
+		return n, true
+	default:
+		return 0, false
+	}
 }
 
 func parseRules(data []byte) (*RulesConfig, error) {

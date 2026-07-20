@@ -107,7 +107,7 @@ func TestTermDiscouragedUnicode(t *testing.T) {
 	}
 }
 func TestDenseParagraph(t *testing.T) {
-	ctx := &RunContext{Document: testDoc("One. Two. Three. Four.")}
+	ctx := &RunContext{Document: testDoc("One. Two. Three. Four."), Profile: testProfile()}
 	findings, _ := Get("CORE.DENSE_PARAGRAPH").Run(ctx)
 	if len(findings) == 0 {
 		t.Fatal("expected dense paragraph finding")

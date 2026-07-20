@@ -30,7 +30,7 @@ func TestVersionJSON(t *testing.T) {
 }
 
 func TestProfileVerify(t *testing.T) {
-	cmd := exec.Command("go", "run", "./cmd/writetighter", "profile", "verify", "software-docs-en@0.1.0")
+	cmd := exec.Command("go", "run", "./cmd/writetighter", "profile", "verify", "software-docs-en@0.2.0")
 	cmd.Dir = repoRoot(t)
 	out, err := cmd.CombinedOutput()
 	if err != nil {

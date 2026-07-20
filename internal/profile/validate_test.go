@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -254,4 +255,221 @@ func TestValidate_CollectsMultipleErrors(t *testing.T) {
 		t.Fatal("expected multiple errors")
 	}
 	fmt.Println("  OK - multiple errors collected:", err)
+}
+
+// --------------------------------------------------------------------------
+// Requirement 4: Profile pinning — ID, version, payload hashes, and canonical
+// resolution hash so altered/rehashed data cannot silently become the default.
+// --------------------------------------------------------------------------
+
+func TestEmbeddedProfilePinnedIDAndVersion(t *testing.T) {
+	res, err := LoadEmbedded()
+	if err != nil {
+		t.Fatalf("embedded profile load failed: %v", err)
+	}
+	if res.ID != ProfileID("software-docs-en") {
+		t.Errorf("expected pinned ID %q, got %q", "software-docs-en", res.ID)
+	}
+	if res.Version != Version("0.2.0") {
+		t.Errorf("expected pinned version %q, got %q", "0.2.0", res.Version)
+	}
+}
+
+func TestEmbeddedProfilePinnedManifestHashes(t *testing.T) {
+	res, err := LoadEmbedded()
+	if err != nil {
+		t.Fatalf("embedded profile load failed: %v", err)
+	}
+	// Expected payload hashes from the reviewed manifest for software-docs-en@0.2.0
+	const wantDictHash = "d4db517230d0cd22b0bce9a064f47886246604bf7605539154bd28af82a2f04a"
+	const wantRulesHash = "7692a7708a9d321015050ea4d77410e40ee62eca74ef45ec933bee05e1da0760"
+
+	if res.Manifest.Payloads.DictionarySHA256.SHA256 != wantDictHash {
+		t.Errorf("dictionary hash:\n  got:  %s\n  want: %s",
+			res.Manifest.Payloads.DictionarySHA256.SHA256, wantDictHash)
+	}
+	if res.Manifest.Payloads.RulesSHA256.SHA256 != wantRulesHash {
+		t.Errorf("rules hash:\n  got:  %s\n  want: %s",
+			res.Manifest.Payloads.RulesSHA256.SHA256, wantRulesHash)
+	}
+}
+
+func TestEmbeddedProfileCanonicalResolutionHash(t *testing.T) {
+	res, err := LoadEmbedded()
+	if err != nil {
+		t.Fatalf("embedded profile load failed: %v", err)
+	}
+	const expectedSHA = "b169350dc44d7ecb42f9064db00ef8f338db9c189ba0c3804fb6e75ff9894850"
+	if res.SHA256 != expectedSHA {
+		t.Errorf("resolution SHA256:\n  got:  %s\n  want: %s", res.SHA256, expectedSHA)
+	}
+}
+
+// --------------------------------------------------------------------------
+// Requirement 5: Stronger rule validation
+// --------------------------------------------------------------------------
+
+func TestValidateRuleVersionMustBeSupported(t *testing.T) {
+	// Bundle format v1 supports checker version 1 only.
+	params := func(v int) string {
+		return fmt.Sprintf(`"version": %d`, v)
+	}
+	for _, v := range []int{-1, 0, 2} {
+		rules := fmt.Sprintf(`{"format_version": 1, "rules": [{"id": "CORE.SENTENCE_LENGTH", "enabled": true, "enforcement": "enforced", "severity": "warning", %s, "parameters": {"description_max_words": 25, "procedure_max_words": 20, "pr_max_words": 20}}]}`, params(v))
+		rc, err := parseRules([]byte(rules))
+		if err != nil {
+			t.Fatalf("parse error for version=%d: %v", v, err)
+		}
+		if err := rc.Validate(); err == nil {
+			t.Errorf("expected error for version %d", v)
+		}
+	}
+}
+
+func TestValidatePositiveIntegralParams(t *testing.T) {
+	tests := []struct {
+		name   string
+		rules  string
+		wantOK bool
+	}{
+		{
+			name:   "fractional rejected",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.SENTENCE_LENGTH", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1, "parameters": {"description_max_words": 3.5}}]}`,
+			wantOK: false,
+		},
+		{
+			name:   "string rejected",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.SENTENCE_LENGTH", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1, "parameters": {"description_max_words": "lots"}}]}`,
+			wantOK: false,
+		},
+		{
+			name:   "zero rejected",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.SENTENCE_LENGTH", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1, "parameters": {"description_max_words": 0}}]}`,
+			wantOK: false,
+		},
+		{
+			name:   "negative rejected",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.SENTENCE_LENGTH", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1, "parameters": {"description_max_words": -5}}]}`,
+			wantOK: false,
+		},
+		{
+			name:   "numeric string rejected",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.SENTENCE_LENGTH", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1, "parameters": {"description_max_words": "25", "procedure_max_words": 20, "pr_max_words": 20}}]}`,
+			wantOK: false,
+		},
+		{
+			name:   "missing params rejected for enabled rule",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.SENTENCE_LENGTH", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1}]}`,
+			wantOK: false,
+		},
+		{
+			name:   "all sentence params valid",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.SENTENCE_LENGTH", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1, "parameters": {"description_max_words": 25, "procedure_max_words": 20, "pr_max_words": 20}}]}`,
+			wantOK: true,
+		},
+		{
+			name:   "unknown param rejected for CORE.DENSE_PARAGRAPH",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.DENSE_PARAGRAPH", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1, "parameters": {"max_sentences": 3, "max_words": 50, "bad_param": 1}}]}`,
+			wantOK: false,
+		},
+		{
+			name:   "unknown param for TERM rule (empty allowed set)",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.TERM_DISCOURAGED", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1, "parameters": {"any_param": 1}}]}`,
+			wantOK: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rc, err := parseRules([]byte(tc.rules))
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			err = rc.Validate()
+			if tc.wantOK && err != nil {
+				t.Errorf("expected OK, got: %v", err)
+			}
+			if !tc.wantOK && err == nil {
+				t.Errorf("expected error, got nil")
+			}
+			if err != nil && !tc.wantOK {
+				t.Logf("expected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateDenseParagraphParams(t *testing.T) {
+	// CORE.DENSE_PARAGRAPH requires positive integral max_sentences/max_words
+	tests := []struct {
+		name   string
+		rules  string
+		wantOK bool
+	}{
+		{
+			name:   "valid params",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.DENSE_PARAGRAPH", "enabled": true, "enforcement": "candidate", "severity": "info", "version": 1, "parameters": {"max_sentences": 3, "max_words": 80}}]}`,
+			wantOK: true,
+		},
+		{
+			name:   "max_sentences zero",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.DENSE_PARAGRAPH", "enabled": true, "enforcement": "candidate", "severity": "info", "version": 1, "parameters": {"max_sentences": 0, "max_words": 80}}]}`,
+			wantOK: false,
+		},
+		{
+			name:   "max_words string",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.DENSE_PARAGRAPH", "enabled": true, "enforcement": "candidate", "severity": "info", "version": 1, "parameters": {"max_sentences": 3, "max_words": "many"}}]}`,
+			wantOK: false,
+		},
+		{
+			name:   "negative max_sentences",
+			rules:  `{"format_version": 1, "rules": [{"id": "CORE.DENSE_PARAGRAPH", "enabled": true, "enforcement": "candidate", "severity": "info", "version": 1, "parameters": {"max_sentences": -1, "max_words": 80}}]}`,
+			wantOK: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			rc, err := parseRules([]byte(tc.rules))
+			if err != nil {
+				t.Fatalf("parse error: %v", err)
+			}
+			err = rc.Validate()
+			if tc.wantOK && err != nil {
+				t.Errorf("expected OK, got: %v", err)
+			}
+			if !tc.wantOK && err == nil {
+				t.Errorf("expected error, got nil")
+			}
+			if err != nil {
+				t.Logf("got error: %v", err)
+			}
+		})
+	}
+}
+
+// Test that rules without parameter sets (unregistered in knownRuleParams) reject
+// arbitrary parameters.
+func TestValidateUnknownRuleParamsRejected(t *testing.T) {
+	// CORE.TERM_CASE has empty allowed-parameter set in knownRuleParams
+	rules := `{"format_version": 1, "rules": [{"id": "CORE.TERM_CASE", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1, "parameters": {"xyz": 42}}]}`
+	rc, err := parseRules([]byte(rules))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	err = rc.Validate()
+	if err == nil || !strings.Contains(err.Error(), "xyz") {
+		t.Errorf("expected error about unknown param 'xyz', got: %v", err)
+	}
+}
+
+// Test that rules with parameters get validated even if allowed-param-set is empty
+func TestValidateParamForTermConsistencyRejected(t *testing.T) {
+	rules := `{"format_version": 1, "rules": [{"id": "CORE.TERM_CONSISTENCY", "enabled": true, "enforcement": "enforced", "severity": "warning", "version": 1, "parameters": {"foo": "bar"}}]}`
+	rc, err := parseRules([]byte(rules))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	err = rc.Validate()
+	if err == nil {
+		t.Error("expected error for TERM_CONSISTENCY with unknown param, got nil")
+	}
 }

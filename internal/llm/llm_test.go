@@ -402,6 +402,38 @@ func TestByteOffsetToLineColumnUTF8(t *testing.T) {
 }
 
 // Issue 4: Static finding positions in prompt are excerpt-relative.
+func TestExcerptDoesNotPullContextAcrossParagraphBoundary(t *testing.T) {
+	content := "# Heading\n\nThis sentence has the finding.\n\n# Next"
+	doc, err := document.FromReader(strings.NewReader(content), "test.md", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(content, "This")
+	end := start + len("This sentence has the finding.")
+	excerpt := buildExcerpt(doc, []report.Finding{{Range: &report.FindingRange{StartByte: start, EndByte: end}}})
+	if strings.Contains(excerpt.Text, "Heading") || strings.Contains(excerpt.Text, "Next") {
+		t.Fatalf("cross-paragraph context leaked into excerpt: %q", excerpt.Text)
+	}
+}
+
+func TestExcerptBridgesInlineCodeWithContiguousMapping(t *testing.T) {
+	content := "Replace the global `repoCacheMu` mutex safely."
+	doc, err := document.FromReader(strings.NewReader(content), "test.md", "pr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	excerpt := buildExcerpt(doc, []report.Finding{{Range: &report.FindingRange{StartByte: 0, EndByte: len(content)}}})
+	if strings.Contains(excerpt.Text, "repoCacheMu") {
+		t.Fatalf("inline code leaked into excerpt: %q", excerpt.Text)
+	}
+	if !excerpt.validExcerptRange(0, len(excerpt.Text)) {
+		t.Fatalf("full sentence range should bridge excluded inline code: %#v", excerpt.origOffsets)
+	}
+	if excerpt.OrigOffset(0) != 0 || excerpt.OrigOffset(len(excerpt.Text)) != len(content) {
+		t.Fatalf("mapped range = [%d,%d), want [0,%d)", excerpt.OrigOffset(0), excerpt.OrigOffset(len(excerpt.Text)), len(content))
+	}
+}
+
 func TestBuildPromptStaticFindingsExcerptRelative(t *testing.T) {
 	content := "First paragraph.\n\nSecond paragraph with issue here.\n\nThird paragraph."
 	doc, _ := document.FromReader(strings.NewReader(content), "doc.md", "pr")

@@ -27,7 +27,7 @@ The following are not present in the research artifact and were not inferred:
 
 ## Public release blockers
 
-A public release of `software-docs-en@0.1.0` requires:
+A public release of any `software-docs-en` version requires:
 1. A completed source-by-source rights review for each corpus.
 2. Exclusion or clearance of the Stripe corpus.
 3. Selection of a public license for the derived dictionary.

@@ -23,7 +23,7 @@ Docs-writer never has shell access. The parent owns the check/review loop.
 
 ```sh
 writetighter check --stdin --kind pr --format json \
-  --profile software-docs-en@0.1.0 <<'EOF'
+  --profile software-docs-en@0.2.0 <<'EOF'
 <PR title and body>
 EOF
 ```
@@ -41,7 +41,7 @@ writetighter check docs/ --kind description --format json --fail-on none
 ### Verify embedded profile
 
 ```sh
-writetighter profile verify software-docs-en@0.1.0 --format json
+writetighter profile verify software-docs-en@0.2.0 --format json
 ```
 
 ### List available profiles

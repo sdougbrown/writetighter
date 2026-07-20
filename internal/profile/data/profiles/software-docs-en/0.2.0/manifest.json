@@ -13,17 +13,17 @@
   },
   "payloads": {
     "dictionary.json": {
-      "sha256": "2696b343ec3a5f04d362898d819d6045521f327b708b5c0a758717ab69e8c549"
+      "sha256": "d4db517230d0cd22b0bce9a064f47886246604bf7605539154bd28af82a2f04a"
     },
     "rules.json": {
-      "sha256": "62b5c3eb2afc4b3290cb007485895afd3ec383c2055cb2a887b813dc039d9589"
+      "sha256": "7692a7708a9d321015050ea4d77410e40ee62eca74ef45ec933bee05e1da0760"
     }
   },
   "provenance": [
     {
       "license": "LicenseRef-Private-Research",
       "name": "software-dictionary",
-      "release": "b936ec93acd12508dbce57c55e15e6bb5acc2516",
+      "release": "98099488f15464d3b156c370d450ff9ca304561a",
       "source_url": "https://github.com/sdougbrown/software-dictionary"
     }
   ],
@@ -32,5 +32,5 @@
     "procedure",
     "pr"
   ],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
