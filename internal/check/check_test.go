@@ -48,6 +48,40 @@ func TestTermDiscouraged(t *testing.T) {
 		t.Fatal("expected discouraged term finding")
 	}
 }
+func TestTermDiscouragedHonorsRulePolicy(t *testing.T) {
+	p := testProfile()
+	for i := range p.Rules.Rules {
+		if p.Rules.Rules[i].ID == "CORE.TERM_DISCOURAGED" {
+			p.Rules.Rules[i].Enforcement = "candidate"
+			p.Rules.Rules[i].Severity = "info"
+		}
+	}
+	ctx := &RunContext{Document: testDoc("deprecated term appears here."), Profile: p}
+	findings, err := Get("CORE.TERM_DISCOURAGED").Run(ctx)
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("expected one discouraged term finding, got %d, err=%v", len(findings), err)
+	}
+	if findings[0].Enforcement != "candidate" || findings[0].Severity != "info" {
+		t.Fatalf("expected candidate/info policy, got %s/%s", findings[0].Enforcement, findings[0].Severity)
+	}
+}
+
+func TestTermDiscouragedSupportsGuidanceOnlyEntry(t *testing.T) {
+	p := testProfile()
+	p.Dict.Entries[1].Alternatives = nil
+	ctx := &RunContext{Document: testDoc("deprecated term appears here."), Profile: p}
+	findings, err := Get("CORE.TERM_DISCOURAGED").Run(ctx)
+	if err != nil || len(findings) != 1 {
+		t.Fatalf("expected one discouraged term finding, got %d, err=%v", len(findings), err)
+	}
+	if findings[0].Suggestion != nil {
+		t.Fatalf("expected no literal suggestion, got %q", *findings[0].Suggestion)
+	}
+	if findings[0].Evidence != "'deprecated term' is discouraged" {
+		t.Fatalf("unexpected guidance-only evidence: %q", findings[0].Evidence)
+	}
+}
+
 func TestTermDiscouragedMultipleOccurrences(t *testing.T) {
 	ctx := &RunContext{Document: testDoc("deprecated term and deprecated term again."), Profile: testProfile()}
 	findings, _ := Get("CORE.TERM_DISCOURAGED").Run(ctx)

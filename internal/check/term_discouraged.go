@@ -20,6 +20,21 @@ func (termDiscouragedChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 		return nil, nil
 	}
 	var out []report.Finding
+	enforcement, severity := "enforced", "warning"
+	if ctx.Profile.Rules != nil {
+		for _, rule := range ctx.Profile.Rules.Rules {
+			if rule.ID != (termDiscouragedChecker{}).ID() {
+				continue
+			}
+			if rule.Enforcement != "" {
+				enforcement = rule.Enforcement
+			}
+			if rule.Severity != "" {
+				severity = rule.Severity
+			}
+			break
+		}
+	}
 
 	// Collect and sort discouraged entries by term byte length (longest first).
 	var terms []profile.Entry
@@ -61,14 +76,20 @@ func (termDiscouragedChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 				}
 
 				path := ctx.Document.Source
-				suggestion := strings.Join(entry.Alternatives, ", ")
+				evidence := fmt.Sprintf("'%s' is discouraged", entry.Term)
+				var suggestion *string
+				if len(entry.Alternatives) > 0 {
+					joined := strings.Join(entry.Alternatives, ", ")
+					evidence += fmt.Sprintf("; use '%s' instead", joined)
+					suggestion = &joined
+				}
 				out = append(out, report.Finding{
 					RuleID:         termDiscouragedChecker{}.ID(),
 					RuleVersion:    1,
 					Checker:        termDiscouragedChecker{}.ID(),
 					CheckerVersion: 1,
-					Enforcement:    "enforced",
-					Severity:       "warning",
+					Enforcement:    enforcement,
+					Severity:       severity,
 					Path:           &path,
 					Range: &report.FindingRange{
 						StartByte: seg.Range.Start.Byte + actualPos,
@@ -76,9 +97,9 @@ func (termDiscouragedChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 						StartLine: seg.Range.Start.Line, StartColumn: codePointColumn(seg.Text, actualPos, seg.Range.Start.Column),
 						EndLine: seg.Range.Start.Line, EndColumn: codePointColumn(seg.Text, matchEnd, seg.Range.Start.Column),
 					},
-					Evidence:   fmt.Sprintf("'%s' is discouraged; use '%s' instead", entry.Term, suggestion),
+					Evidence:   evidence,
 					Message:    entry.Reason,
-					Suggestion: &suggestion,
+					Suggestion: suggestion,
 					Confidence: 1,
 				})
 			}
