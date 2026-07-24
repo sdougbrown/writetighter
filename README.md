@@ -146,8 +146,15 @@ You can opt-in to LLM-powered advice. This is **advisory only** and runs only fo
 
 **How it works:**
 1. WriteTighter runs the static rules.
-2. If a finding is found, it sends the context to your LLM.
-3. The LLM returns suggested improvements.
+2. If a finding is found, it builds a compact rewrite rubric from reviewed profile
+   dictionary entries. Corpus-only `observed` terms never become prompt policy.
+3. It asks the model for the minimum context-aware rewrite, using literal
+   alternatives only when they preserve technical meaning and treating
+   guidance-only entries as grammatical recasts.
+4. It discards suggestions that change or omit protected technical content such as
+   code spans, identifiers, commands, paths, URLs, numbers, versions, product names,
+   or defined project terms.
+5. Surviving rewrites are advisory findings only; WriteTighter never applies them.
 
 **Network Access:** For security, network access is disabled by default. You must explicitly include the `--llm` flag on **every** invocation to use an LLM.
 

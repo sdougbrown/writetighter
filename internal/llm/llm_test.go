@@ -384,6 +384,31 @@ func TestByteOffsetToLineColumn(t *testing.T) {
 	}
 }
 
+func TestPreservesProtectedContent(t *testing.T) {
+	content := "Configure WidgetAPI v1.2.3 with `widgetctl --mode safe` at /etc/widget/config.yaml for 12 quiet PRs."
+	doc, err := document.FromReader(strings.NewReader(content), "test.md", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	terms := []config.TermEntry{{Term: "quiet PRs"}}
+	preserved := "For 12 quiet PRs, configure WidgetAPI v1.2.3 with `widgetctl --mode safe` at /etc/widget/config.yaml."
+	if !preservesProtectedContent(doc, 0, len(content), preserved, terms) {
+		t.Fatal("expected exact technical content to be accepted")
+	}
+	missingCommand := "For 12 quiet PRs, configure WidgetAPI v1.2.3 at /etc/widget/config.yaml."
+	if preservesProtectedContent(doc, 0, len(content), missingCommand, terms) {
+		t.Fatal("expected rewrite that drops inline code to be rejected")
+	}
+	changedVersion := "For 12 quiet PRs, configure WidgetAPI v1.2.4 with `widgetctl --mode safe` at /etc/widget/config.yaml."
+	if preservesProtectedContent(doc, 0, len(content), changedVersion, terms) {
+		t.Fatal("expected rewrite that changes a version to be rejected")
+	}
+	changedTerm := "For 12 silent PRs, configure WidgetAPI v1.2.3 with `widgetctl --mode safe` at /etc/widget/config.yaml."
+	if preservesProtectedContent(doc, 0, len(content), changedTerm, terms) {
+		t.Fatal("expected rewrite that changes a defined project term to be rejected")
+	}
+}
+
 func TestByteOffsetToLineColumnUTF8(t *testing.T) {
 	// "\u00fcber" is 5 bytes, 4 code points
 	content := "\u00fcber"
@@ -431,6 +456,138 @@ func TestExcerptBridgesInlineCodeWithContiguousMapping(t *testing.T) {
 	}
 	if excerpt.OrigOffset(0) != 0 || excerpt.OrigOffset(len(excerpt.Text)) != len(content) {
 		t.Fatalf("mapped range = [%d,%d), want [0,%d)", excerpt.OrigOffset(0), excerpt.OrigOffset(len(excerpt.Text)), len(content))
+	}
+}
+
+func TestBuildWritingGuidelinesDiscouragedOnly(t *testing.T) {
+	// Profile with a discouraged entry that has reason but no alternatives.
+	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
+		{Term: "utilize", Status: profile.StatusDiscouraged, Reason: "Use 'use' when the meaning is unchanged.", PartsOfSpeech: []string{"verb"}},
+	}}
+	_ = d.Validate()
+	got := BuildWritingGuidelines(d)
+	if got == "" {
+		t.Fatal("expected non-empty guidelines for discouraged entry")
+	}
+	if !strings.Contains(got, "utilize") {
+		t.Fatal("guidelines should mention discouraged term")
+	}
+	if !strings.Contains(got, "Use 'use'") {
+		t.Fatal("guidelines should include reason")
+	}
+	if !strings.Contains(got, "no fixed replacement") || !strings.Contains(got, "do not delete") {
+		t.Fatal("guidance-only entries must require grammatical recasting rather than deletion")
+	}
+}
+
+func TestBuildWritingGuidelinesDiscouragedWithAlternatives(t *testing.T) {
+	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
+		{Term: "foo", Status: profile.StatusDiscouraged, Alternatives: []string{"bar"}, Reason: "use bar instead", PartsOfSpeech: []string{"noun"}},
+		{Term: "bar", Status: profile.StatusPreferred, PartsOfSpeech: []string{"noun"}},
+	}}
+	_ = d.Validate()
+	got := BuildWritingGuidelines(d)
+	if got == "" {
+		t.Fatal("expected non-empty guidelines")
+	}
+	if !strings.Contains(got, "bar") || !strings.Contains(got, "foo") {
+		t.Fatal("guidelines should include both discouraged term and alternative")
+	}
+	if !strings.Contains(got, "consider") || !strings.Contains(got, "preserves the technical meaning") {
+		t.Fatal("exact alternatives must remain conditional on technical meaning")
+	}
+}
+
+func TestBuildWritingGuidelinesCanonicalCases(t *testing.T) {
+	canon := "WriteTighter"
+	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
+		{Term: "WriteTighter", Status: profile.StatusPreferred, PartsOfSpeech: []string{"proper noun"}, CanonicalCase: &canon},
+	}}
+	_ = d.Validate()
+	got := BuildWritingGuidelines(d)
+	if got == "" {
+		t.Fatal("expected non-empty guidelines for canonical case entry")
+	}
+	if !strings.Contains(got, "WriteTighter") || !strings.Contains(got, "canonical case") {
+		t.Fatal("guidelines should include canonical case specification")
+	}
+}
+
+func TestBuildWritingGuidelinesObservedExcluded(t *testing.T) {
+	// Observed entries must not become policy.
+	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
+		{Term: "ability", Status: profile.StatusObserved},
+		{Term: "access", Status: profile.StatusObserved},
+	}}
+	_ = d.Validate()
+	got := BuildWritingGuidelines(d)
+	if got != "" {
+		t.Fatalf("observed-only dictionary should produce empty guidelines, got: %q", got)
+	}
+}
+
+func TestBuildWritingGuidelinesMixedEntries(t *testing.T) {
+	canon := "WriteTighter"
+	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
+		{Term: "utilize", Status: profile.StatusDiscouraged, Alternatives: []string{"use"}, Reason: "Use 'use' when the meaning is unchanged.", PartsOfSpeech: []string{"verb"}},
+		{Term: "use", Status: profile.StatusPreferred, PartsOfSpeech: []string{"verb"}},
+		{Term: "WriteTighter", Status: profile.StatusPreferred, PartsOfSpeech: []string{"proper noun"}, CanonicalCase: &canon},
+		{Term: "ability", Status: profile.StatusObserved},
+		{Term: "access", Status: profile.StatusObserved},
+	}}
+	_ = d.Validate()
+	got := BuildWritingGuidelines(d)
+	if got == "" {
+		t.Fatal("expected non-empty guidelines for mixed dictionary")
+	}
+	// Should mention the discouraged term
+	if !strings.Contains(got, "utilize") {
+		t.Fatal("should include discouraged term")
+	}
+	// Should mention the canonical case
+	if !strings.Contains(got, "WriteTighter") || !strings.Contains(got, "canonical case") {
+		t.Fatal("should include canonical case specification")
+	}
+	// Should NOT mention observed terms
+	if strings.Contains(got, "ability") || strings.Contains(got, "access") {
+		t.Fatal("observed terms must not appear in guidelines")
+	}
+	// Must not imply literal enforcement or deletion
+	if strings.Contains(got, "delete") || strings.Contains(got, "remove") || strings.Contains(got, "must") {
+		t.Fatal("guidelines must not use enforcement language")
+	}
+}
+
+func TestBuildWritingGuidelinesEmptyDict(t *testing.T) {
+	if got := BuildWritingGuidelines(nil); got != "" {
+		t.Fatalf("nil dict should give empty, got %q", got)
+	}
+	if got := BuildWritingGuidelines(&profile.Dictionary{FormatVersion: 1, Entries: nil}); got != "" {
+		t.Fatalf("empty dict should give empty, got %q", got)
+	}
+}
+
+func TestBuildPromptIncludesDictionaryGuidelinesAndRewriteSafety(t *testing.T) {
+	// Verify that when includeGuidelines=true and there are meaningful dict entries,
+	// the guidelines section appears in the prompt.
+	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
+		{Term: "utilize", Status: profile.StatusDiscouraged, Alternatives: []string{"use"}, Reason: "Use 'use' when the meaning is unchanged.", PartsOfSpeech: []string{"verb"}},
+	}}
+	_ = d.Validate()
+	res := &profile.Resolution{ID: "PROFILE_ID", Version: "1", Dict: d}
+	doc, _ := document.FromReader(strings.NewReader("This is a test passage."), "test.md", "")
+	sys, _ := BuildPrompt(doc, res, nil, nil)
+	for _, expected := range []string{
+		"reviewed dictionary guidance",
+		"utilize",
+		"minimum rewrite",
+		"do not add facts",
+		"Preserve the exact spelling",
+		"do not invent a vocabulary problem",
+	} {
+		if !strings.Contains(sys, expected) {
+			t.Fatalf("expected prompt to contain %q", expected)
+		}
 	}
 }
 
