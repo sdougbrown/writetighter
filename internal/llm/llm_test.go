@@ -526,6 +526,28 @@ func TestBuildWritingGuidelinesObservedExcluded(t *testing.T) {
 	}
 }
 
+func TestBuildObservedVocabularyContextRelevantOnly(t *testing.T) {
+	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
+		{Term: "fixture", Status: profile.StatusObserved},
+		{Term: "quiet", Status: profile.StatusObserved},
+		{Term: "unrelated", Status: profile.StatusObserved},
+		{Term: "use", Status: profile.StatusPreferred, PartsOfSpeech: []string{"verb"}},
+	}}
+	_ = d.Validate()
+	got := BuildObservedVocabularyContext(d, "The quiet fixture is intentional.", 64)
+	for _, expected := range []string{"attested vocabulary", "fixture", "quiet", "not approved"} {
+		if !strings.Contains(got, expected) {
+			t.Fatalf("expected observed-vocabulary context to contain %q", expected)
+		}
+	}
+	if strings.Contains(got, "unrelated") || strings.Contains(got, "- use\n") {
+		t.Fatalf("context included absent or reviewed terms: %q", got)
+	}
+	if got := BuildObservedVocabularyContext(d, "fixture quiet", 1); strings.Count(got, "\n- ") != 1 {
+		t.Fatalf("expected bounded observed vocabulary, got %q", got)
+	}
+}
+
 func TestBuildWritingGuidelinesMixedEntries(t *testing.T) {
 	canon := "WriteTighter"
 	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
@@ -572,6 +594,7 @@ func TestBuildPromptIncludesDictionaryGuidelinesAndRewriteSafety(t *testing.T) {
 	// the guidelines section appears in the prompt.
 	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
 		{Term: "utilize", Status: profile.StatusDiscouraged, Alternatives: []string{"use"}, Reason: "Use 'use' when the meaning is unchanged.", PartsOfSpeech: []string{"verb"}},
+		{Term: "passage", Status: profile.StatusObserved},
 	}}
 	_ = d.Validate()
 	res := &profile.Resolution{ID: "PROFILE_ID", Version: "1", Dict: d}
@@ -580,6 +603,8 @@ func TestBuildPromptIncludesDictionaryGuidelinesAndRewriteSafety(t *testing.T) {
 	for _, expected := range []string{
 		"reviewed dictionary guidance",
 		"utilize",
+		"attested vocabulary",
+		"passage",
 		"minimum rewrite",
 		"do not add facts",
 		"Preserve the exact spelling",
