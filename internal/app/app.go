@@ -22,6 +22,7 @@ var (
 	Commit           = "unknown"
 	ErrFailThreshold = errors.New("fail threshold reached")
 	ErrRequireLLM    = errors.New("required llm failed")
+	ErrReviseFailed  = errors.New("revise failed")
 )
 
 type CheckParams struct {
@@ -40,6 +41,16 @@ type CheckParams struct {
 	LLMAPIKeyEnv    string
 	LLMTimeout      time.Duration
 	FailOn          string
+}
+
+// ReviseParams holds parameters for the `writetighter revise` command.
+type ReviseParams struct {
+	Paths      []string
+	Stdin      bool
+	Kind       string
+	Profile    string
+	ConfigPath string
+	Format     string
 }
 
 type RunFunc func() error
@@ -297,6 +308,232 @@ func validFormat(v string) bool { return v == "human" || v == "json" || v == "ag
 func validFailOn(v string) bool { return v == "none" || v == "warning" || v == "error" }
 func validResponseMode(v string) bool {
 	return v == "auto" || v == "json_schema" || v == "json_object" || v == "prompt_json"
+}
+
+// RunLint is the deterministic lint command. It is identical to check without --llm flags.
+func (a *App) RunLint(params CheckParams) error {
+	params.LLM = false
+	params.RequireLLM = false
+	return a.RunCheck(params)
+}
+
+// RunRevise runs the LLM-based revision advisor. It reads LLM config from the
+// user config [llm] section and returns a structured ReviseResponse.
+func (a *App) RunRevise(params ReviseParams) error {
+	if params.Kind == "" {
+		params.Kind = "description"
+	}
+	if !validKind(params.Kind) {
+		return fmt.Errorf("invalid document kind %q", params.Kind)
+	}
+	if !params.Stdin && len(params.Paths) == 0 {
+		return fmt.Errorf("no input specified")
+	}
+	if params.Stdin && len(params.Paths) > 0 {
+		return fmt.Errorf("mutually exclusive arguments")
+	}
+	if params.Format == "" {
+		params.Format = "json" // revise defaults to JSON output
+	}
+	if params.Format != "json" && params.Format != "human" {
+		return fmt.Errorf("invalid format %q for revise", params.Format)
+	}
+
+	// Load user config (required for LLM settings).
+	userCfg, err := config.LoadUserConfig()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		userCfg = nil
+	}
+
+	// Load project config.
+	var projCfg *config.ProjectConfig
+	if params.ConfigPath != "" {
+		var err error
+		projCfg, err = config.LoadProjectConfig(params.ConfigPath)
+		if err != nil {
+			return err
+		}
+	} else {
+		var err error
+		projCfg, _, err = config.DiscoverProjectConfig()
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+
+	// Merge configs.
+	merged, err := config.MergeConfigs(projCfg, userCfg)
+	if err != nil {
+		return err
+	}
+
+	// Resolve profile.
+	profileSpec := params.Profile
+	if profileSpec == "" && projCfg != nil && projCfg.Profile.ID != "" {
+		profileSpec = projCfg.Profile.ID + "@" + projCfg.Profile.Version
+	}
+	if profileSpec == "" && userCfg != nil && userCfg.Profile.ID != "" {
+		profileSpec = userCfg.Profile.ID + "@" + userCfg.Profile.Version
+	}
+	res, err := profile.Resolve(profileSpec)
+	if err != nil {
+		return err
+	}
+
+	// Extract terms.
+	var terms []config.TermEntry
+	if merged != nil && merged.Project != nil {
+		terms = merged.Project.Terms
+	}
+
+	// Read LLM config from user config. Require usable configuration.
+	if merged == nil || merged.User == nil || merged.User.LLM.Model == "" {
+		return fmt.Errorf("revise requires LLM configuration in ~/.config/writetighter/config.toml [llm] section (model is required)")
+	}
+	uc := merged.User.LLM
+
+	llmProvider := uc.Provider
+	llmBaseURL := uc.BaseURL
+	llmModel := uc.Model
+	llmAPIKeyEnv := uc.APIKeyEnv
+	llmResponseMode := uc.ResponseMode
+	llmTimeout := llm.DefaultTimeout
+	if uc.Timeout != "" {
+		d, e := time.ParseDuration(uc.Timeout)
+		if e != nil {
+			return fmt.Errorf("invalid llm timeout: %w", e)
+		}
+		llmTimeout = d
+	}
+
+	if llmProvider == "" {
+		llmProvider = "openai-compatible"
+	}
+	if llmProvider != "openai-compatible" {
+		return fmt.Errorf("unsupported llm provider %q", llmProvider)
+	}
+	if llmResponseMode == "" {
+		llmResponseMode = "auto"
+	}
+	if !validResponseMode(llmResponseMode) {
+		return fmt.Errorf("invalid llm response mode %q", llmResponseMode)
+	}
+	if llmModel == "" || llmBaseURL == "" {
+		return fmt.Errorf("revise requires llm model and base_url in config")
+	}
+	if llmAPIKeyEnv != "" && os.Getenv(llmAPIKeyEnv) == "" {
+		return fmt.Errorf("revise api_key_env %q is configured but the environment variable is unset", llmAPIKeyEnv)
+	}
+
+	llmCfg := llm.Config{
+		BaseURL:      llmBaseURL,
+		Model:        llmModel,
+		APIKeyEnv:    llmAPIKeyEnv,
+		Timeout:      llmTimeout,
+		ResponseMode: llmResponseMode,
+	}
+
+	// Validate LLM config before reading input.
+	if _, err := llm.NewClient(llmCfg); err != nil {
+		return fmt.Errorf("invalid llm configuration: %w", err)
+	}
+
+	// Collect input documents.
+	docs, err := document.CollectInputs(params.Paths, params.Stdin)
+	if err != nil {
+		return err
+	}
+
+	// Validate terms against profile.
+	if len(terms) > 0 && res != nil && res.Dict != nil {
+		if verr := profile.ValidateAgainstProfile(terms, res.Dict); verr != nil {
+			return verr
+		}
+	}
+
+	// Run static lint findings (for context, not prerequisites).
+	enabled := check.Enabled(res)
+	findings := []report.Finding{}
+	for _, doc := range docs {
+		if params.Kind != "" {
+			doc.Kind = params.Kind
+		}
+		ctx := &check.RunContext{Document: doc, Profile: res, Terms: terms}
+		for _, c := range enabled {
+			more, err := c.Run(ctx)
+			if err != nil {
+				return err
+			}
+			findings = append(findings, more...)
+		}
+	}
+
+	// Call the model once per document. Preserve successful structured results
+	// while reporting any failed document and returning exit code 3.
+	allRevisions := make([]report.RevisionItem, 0)
+	revisionErrors := make([]report.RevisionError, 0)
+	discardedRewrites := 0
+	succeeded := 0
+	for _, doc := range docs {
+		docFindings := make([]report.Finding, 0)
+		for _, f := range findings {
+			if f.Path == nil || *f.Path == doc.Source {
+				docFindings = append(docFindings, f)
+			}
+		}
+
+		revResp, callErr := llm.Revise(context.Background(), llmCfg, doc, res, docFindings, terms)
+		if callErr != nil {
+			revisionErrors = append(revisionErrors, report.RevisionError{SourcePath: doc.Source, Message: callErr.Error()})
+			continue
+		}
+		succeeded++
+		discardedRewrites += revResp.DiscardedRewrites
+		allRevisions = append(allRevisions, revResp.Revisions...)
+	}
+
+	sources := make([]string, 0, len(docs))
+	for _, doc := range docs {
+		sources = append(sources, doc.Source)
+	}
+	status := "ok"
+	if len(revisionErrors) > 0 {
+		status = "partial"
+		if succeeded == 0 {
+			status = "failed"
+		}
+	}
+	reviseResponse := &report.ReviseResponse{
+		SchemaVersion:     1,
+		ToolVersion:       Version,
+		ProfileID:         string(res.ID),
+		ProfileVersion:    string(res.Version),
+		LLMModel:          llmModel,
+		LLMProvider:       llmProvider,
+		Sources:           sources,
+		Status:            status,
+		DiscardedRewrites: discardedRewrites,
+		Errors:            revisionErrors,
+		Revisions:         allRevisions,
+	}
+
+	var formatted string
+	if params.Format == "human" {
+		formatted, err = report.RenderReviseHuman(reviseResponse)
+	} else {
+		formatted, err = report.RenderReviseJSON(reviseResponse)
+	}
+	if err != nil {
+		return err
+	}
+	_, _ = fmt.Fprint(os.Stdout, formatted)
+	if len(revisionErrors) > 0 {
+		return fmt.Errorf("%w: %d document revision request(s) failed", ErrReviseFailed, len(revisionErrors))
+	}
+	return nil
 }
 
 func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {

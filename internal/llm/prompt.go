@@ -218,11 +218,6 @@ func BuildPrompt(doc *document.Document, res *profile.Resolution, findings []rep
 			b.WriteString(guidelines)
 			b.WriteString("\n")
 		}
-		observed := BuildObservedVocabularyContext(res.Dict, excerpt.Text, 64)
-		if observed != "" {
-			b.WriteString(observed)
-			b.WriteString("\n")
-		}
 	}
 
 	// Include project term base entries.
@@ -502,45 +497,8 @@ func BuildWritingGuidelines(d *profile.Dictionary) string {
 }
 
 // intersect reports whether byte range [aStart, aEnd) overlaps [bStart, bEnd).
-// BuildObservedVocabularyContext lists only observed terms that occur in the
-// current excerpt. They provide domain context but carry no approval or policy.
-func BuildObservedVocabularyContext(d *profile.Dictionary, excerpt string, limit int) string {
-	if d == nil || excerpt == "" || limit <= 0 {
-		return ""
-	}
-	var matches []string
-	for _, entry := range d.Entries {
-		if entry.Status == profile.StatusObserved && termOccurs(excerpt, entry.Term) {
-			matches = append(matches, entry.Term)
-		}
-	}
-	if len(matches) == 0 {
-		return ""
-	}
-	// Prefer longer, more specific vocabulary when the bounded section is full.
-	sort.Slice(matches, func(i, j int) bool {
-		if len(matches[i]) != len(matches[j]) {
-			return len(matches[i]) > len(matches[j])
-		}
-		return strings.ToLower(matches[i]) < strings.ToLower(matches[j])
-	})
-	if len(matches) > limit {
-		matches = matches[:limit]
-	}
-	sort.Slice(matches, func(i, j int) bool {
-		return strings.ToLower(matches[i]) < strings.ToLower(matches[j])
-	})
-	var b strings.Builder
-	b.WriteString("attested vocabulary in this excerpt (context only; not approved, preferred, or required):\n")
-	for _, term := range matches {
-		fmt.Fprintf(&b, "- %s\n", term)
-	}
-	b.WriteString("Do not flag these terms merely because they are unfamiliar; rewrite them only when the static finding and context justify it.\n")
-	return b.String()
-}
-
 func termOccurs(text, term string) bool {
-	if term == "" {
+	if term == "" || len(term) > len(text) {
 		return false
 	}
 	text = strings.ToLower(text)

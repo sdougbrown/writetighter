@@ -15,11 +15,12 @@ import (
 )
 
 const (
-	DefaultTimeout = 45 * time.Second
-	MaxInputChars  = 32000
-	MaxSuggestions = 20
-	MaxOutputChars = 10000
-	chatPath       = "/v1/chat/completions"
+	DefaultTimeout   = 45 * time.Second
+	MaxInputChars    = 32000
+	MaxSuggestions   = 20
+	MaxOutputChars   = 10000
+	MaxEnvelopeChars = 64 * 1024
+	chatPath         = "/v1/chat/completions"
 )
 
 type Config struct {
@@ -122,12 +123,18 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
 		return nil, fmt.Errorf("llm http %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
+	envelope, err := io.ReadAll(io.LimitReader(resp.Body, MaxEnvelopeChars+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(envelope) > MaxEnvelopeChars {
+		return nil, errors.New("llm response envelope too large")
+	}
 	var out Response
-	dec := json.NewDecoder(io.LimitReader(resp.Body, MaxOutputChars))
 	// OpenAI-compatible envelopes commonly include id, usage, model, and
 	// timing fields. Only the assistant content is security-sensitive and is
-	// validated strictly by ValidateAdvisorResponseForRules.
-	if err := dec.Decode(&out); err != nil {
+	// validated strictly by the caller-specific response validator.
+	if err := json.Unmarshal(envelope, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil
@@ -139,9 +146,28 @@ func buildResponseFormat(mode string) *ResponseFormat {
 	}
 	rf := &ResponseFormat{Type: mode}
 	if mode == "json_schema" {
-		schema := `{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"source_range":{"type":"object","additionalProperties":false,"properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"rule_ids":{"type":"array","minItems":1,"items":{"type":"string"}},"reason":{"type":"string"},"replacement":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}},"required":["source_range","rule_ids","reason","replacement","confidence"]}},"$defs":{"AdvisorFinding":{"type":"object","properties":{"source_range":{"type":"object","properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"rule_ids":{"type":"array","items":{"type":"string"}},"reason":{"type":"string"},"replacement":{"type":"string"},"confidence":{"type":"number"}},"required":["source_range","rule_ids","reason","replacement","confidence"]}}},"required":["findings"]}`
+		schema := `{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"source_range":{"type":"object","additionalProperties":false,"properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"rule_ids":{"type":"array","minItems":1,"items":{"type":"string"}},"reason":{"type":"string"},"replacement":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}},"required":["source_range","rule_ids","reason","replacement","confidence"]}}},"required":["findings"]}`
 		rf.JSONSchema = &JSONSchema{
 			Name:   "advisor_response",
+			Schema: json.RawMessage(schema),
+			Strict: true,
+		}
+	}
+	return rf
+}
+
+// buildReviseResponseFormat builds a revise-specific JSON schema for json_schema mode.
+// This schema is distinct from the advisor schema: it uses principle_ids, kind (enum),
+// and optional question/replacement fields.
+func buildReviseResponseFormat(mode string) *ResponseFormat {
+	if mode == "prompt_json" || mode == "auto" || mode == "" {
+		return nil
+	}
+	rf := &ResponseFormat{Type: mode}
+	if mode == "json_schema" {
+		schema := `{"type":"object","additionalProperties":false,"properties":{"findings":{"type":"array","maxItems":20,"items":{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","enum":["rewrite","clarification"]},"source_range":{"type":"object","additionalProperties":false,"properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"principle_ids":{"type":"array","minItems":1,"items":{"type":"string","enum":["CORE.APPROVED_WORDS","CORE.ONE_TERM_IDEA","CORE.SHORT_SENTENCE","CORE.ACTIVE_DIRECT_VOICE","CORE.ONE_TOPIC_PARAGRAPH","CORE.EXPLICIT_RELATIONSHIPS"]}},"reason":{"type":"string","minLength":1},"replacement":{"type":["string","null"]},"question":{"type":["string","null"]},"confidence":{"type":"number","minimum":0,"maximum":1}},"required":["kind","source_range","principle_ids","reason","replacement","question","confidence"]}}},"required":["findings"]}`
+		rf.JSONSchema = &JSONSchema{
+			Name:   "revise_response",
 			Schema: json.RawMessage(schema),
 			Strict: true,
 		}
@@ -159,6 +185,9 @@ func normalizeEndpoint(base string) (string, error) {
 	}
 	if u.Host == "" {
 		return "", errors.New("invalid llm base url host")
+	}
+	if u.User != nil {
+		return "", errors.New("llm base url must not contain credentials")
 	}
 	u.Path = chatPath
 	u.RawQuery = ""

@@ -71,3 +71,53 @@ func TestCheckAcceptsFlagsAfterPath(t *testing.T) {
 		t.Fatalf("got %d", got)
 	}
 }
+
+func TestLintCommand(t *testing.T) {
+	if got := run([]string{"lint"}); got != 2 {
+		t.Fatalf("expected exit 2 for missing input, got %d", got)
+	}
+	if got := run([]string{"lint", "--stdin", "foo"}); got != 2 {
+		t.Fatalf("expected exit 2 for stdin+path, got %d", got)
+	}
+	if got := run([]string{"lint", "--stdin", "--llm"}); got != 2 {
+		t.Fatalf("expected exit 2 because lint has no LLM flags, got %d", got)
+	}
+}
+
+func TestLintAcceptedFlags(t *testing.T) {
+	// lint should accept the same positional+flags as check (minus --llm).
+	if got := run([]string{"lint", "missing.txt"}); got != 2 {
+		t.Fatalf("got %d", got)
+	}
+}
+
+func TestReviseCommand(t *testing.T) {
+	if got := run([]string{"revise"}); got != 2 {
+		t.Fatalf("expected exit 2 for missing input, got %d", got)
+	}
+	if got := run([]string{"revise", "--stdin", "foo"}); got != 2 {
+		t.Fatalf("expected exit 2 for stdin+path, got %d", got)
+	}
+}
+
+func TestReviseNoLLMConfigFails(t *testing.T) {
+	// Without any config file, revise should fail with a clear message about
+	// missing LLM configuration.
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	if got := run([]string{"revise", "missing.txt"}); got != 2 {
+		t.Fatalf("expected exit 2, got %d", got)
+	}
+}
+
+func TestCheckIsBackwardCompatible(t *testing.T) {
+	// The check command still handles the same flags.
+	if got := run([]string{"check", "--stdin"}); got != 0 {
+		t.Fatalf("expected exit 0 for stdin with no data, got %d", got)
+	}
+	// Check with --llm but no model should fail with config error (exit 2).
+	if got := run([]string{"check", "--stdin", "--llm"}); got != 2 {
+		t.Fatalf("expected exit 2 for --llm without model, got %d", got)
+	}
+}

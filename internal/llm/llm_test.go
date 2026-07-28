@@ -40,6 +40,13 @@ func TestResponseModes(t *testing.T) {
 	}
 }
 
+func TestClientRejectsCredentialsInBaseURL(t *testing.T) {
+	_, err := NewClient(Config{BaseURL: "https://secret@example.test/v1", Model: "test"})
+	if err == nil || !strings.Contains(err.Error(), "must not contain credentials") {
+		t.Fatalf("expected embedded credential rejection, got %v", err)
+	}
+}
+
 func TestCombinedInputLimit(t *testing.T) {
 	client, err := NewClient(Config{BaseURL: "http://127.0.0.1:1", Model: "test"})
 	if err != nil {
@@ -99,6 +106,32 @@ func TestResponseFallback(t *testing.T) {
 	_, err = c.Do(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
 	if err == nil {
 		t.Fatal("expected malformed response error")
+	}
+}
+
+func TestClientAllowsEscapedEnvelopeLargerThanValidatedContentLimit(t *testing.T) {
+	srv := newFakeServer(false, "escaped-envelope")
+	defer srv.Close()
+	client, err := NewClient(Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := client.Do(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err != nil || len(response.Choices) != 1 || len(response.Choices[0].Message.Content) != 8000 {
+		t.Fatalf("expected bounded escaped envelope to decode, got %#v, err=%v", response, err)
+	}
+}
+
+func TestClientRejectsOversizedEnvelope(t *testing.T) {
+	srv := newFakeServer(false, "oversized-envelope")
+	defer srv.Close()
+	client, err := NewClient(Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Do(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err == nil || !strings.Contains(err.Error(), "envelope too large") {
+		t.Fatalf("expected oversized envelope error, got %v", err)
 	}
 }
 
@@ -385,25 +418,25 @@ func TestByteOffsetToLineColumn(t *testing.T) {
 }
 
 func TestPreservesProtectedContent(t *testing.T) {
-	content := "Configure WidgetAPI v1.2.3 with `widgetctl --mode safe` at /etc/widget/config.yaml for 12 quiet PRs."
+	content := "Configure WidgetAPI v1.2.3 with `widgetctl --mode safe` at /etc/widget/config.yaml for 12 quiet PRs; notify ops@example.com about host 192.0.2.4 and request 123e4567-e89b-12d3-a456-426614174000."
 	doc, err := document.FromReader(strings.NewReader(content), "test.md", "description")
 	if err != nil {
 		t.Fatal(err)
 	}
 	terms := []config.TermEntry{{Term: "quiet PRs"}}
-	preserved := "For 12 quiet PRs, configure WidgetAPI v1.2.3 with `widgetctl --mode safe` at /etc/widget/config.yaml."
+	preserved := "For 12 quiet PRs, configure WidgetAPI v1.2.3 with `widgetctl --mode safe` at /etc/widget/config.yaml; notify ops@example.com about host 192.0.2.4 and request 123e4567-e89b-12d3-a456-426614174000."
 	if !preservesProtectedContent(doc, 0, len(content), preserved, terms) {
 		t.Fatal("expected exact technical content to be accepted")
 	}
-	missingCommand := "For 12 quiet PRs, configure WidgetAPI v1.2.3 at /etc/widget/config.yaml."
+	missingCommand := "For 12 quiet PRs, configure WidgetAPI v1.2.3 at /etc/widget/config.yaml; notify ops@example.com about host 192.0.2.4 and request 123e4567-e89b-12d3-a456-426614174000."
 	if preservesProtectedContent(doc, 0, len(content), missingCommand, terms) {
 		t.Fatal("expected rewrite that drops inline code to be rejected")
 	}
-	changedVersion := "For 12 quiet PRs, configure WidgetAPI v1.2.4 with `widgetctl --mode safe` at /etc/widget/config.yaml."
+	changedVersion := "For 12 quiet PRs, configure WidgetAPI v1.2.4 with `widgetctl --mode safe` at /etc/widget/config.yaml; notify ops@example.com about host 192.0.2.4 and request 123e4567-e89b-12d3-a456-426614174000."
 	if preservesProtectedContent(doc, 0, len(content), changedVersion, terms) {
 		t.Fatal("expected rewrite that changes a version to be rejected")
 	}
-	changedTerm := "For 12 silent PRs, configure WidgetAPI v1.2.3 with `widgetctl --mode safe` at /etc/widget/config.yaml."
+	changedTerm := "For 12 silent PRs, configure WidgetAPI v1.2.3 with `widgetctl --mode safe` at /etc/widget/config.yaml; notify ops@example.com about host 192.0.2.4 and request 123e4567-e89b-12d3-a456-426614174000."
 	if preservesProtectedContent(doc, 0, len(content), changedTerm, terms) {
 		t.Fatal("expected rewrite that changes a defined project term to be rejected")
 	}
@@ -526,28 +559,6 @@ func TestBuildWritingGuidelinesObservedExcluded(t *testing.T) {
 	}
 }
 
-func TestBuildObservedVocabularyContextRelevantOnly(t *testing.T) {
-	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
-		{Term: "fixture", Status: profile.StatusObserved},
-		{Term: "quiet", Status: profile.StatusObserved},
-		{Term: "unrelated", Status: profile.StatusObserved},
-		{Term: "use", Status: profile.StatusPreferred, PartsOfSpeech: []string{"verb"}},
-	}}
-	_ = d.Validate()
-	got := BuildObservedVocabularyContext(d, "The quiet fixture is intentional.", 64)
-	for _, expected := range []string{"attested vocabulary", "fixture", "quiet", "not approved"} {
-		if !strings.Contains(got, expected) {
-			t.Fatalf("expected observed-vocabulary context to contain %q", expected)
-		}
-	}
-	if strings.Contains(got, "unrelated") || strings.Contains(got, "- use\n") {
-		t.Fatalf("context included absent or reviewed terms: %q", got)
-	}
-	if got := BuildObservedVocabularyContext(d, "fixture quiet", 1); strings.Count(got, "\n- ") != 1 {
-		t.Fatalf("expected bounded observed vocabulary, got %q", got)
-	}
-}
-
 func TestBuildWritingGuidelinesMixedEntries(t *testing.T) {
 	canon := "WriteTighter"
 	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
@@ -594,7 +605,6 @@ func TestBuildPromptIncludesDictionaryGuidelinesAndRewriteSafety(t *testing.T) {
 	// the guidelines section appears in the prompt.
 	d := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{
 		{Term: "utilize", Status: profile.StatusDiscouraged, Alternatives: []string{"use"}, Reason: "Use 'use' when the meaning is unchanged.", PartsOfSpeech: []string{"verb"}},
-		{Term: "passage", Status: profile.StatusObserved},
 	}}
 	_ = d.Validate()
 	res := &profile.Resolution{ID: "PROFILE_ID", Version: "1", Dict: d}
@@ -603,8 +613,6 @@ func TestBuildPromptIncludesDictionaryGuidelinesAndRewriteSafety(t *testing.T) {
 	for _, expected := range []string{
 		"reviewed dictionary guidance",
 		"utilize",
-		"attested vocabulary",
-		"passage",
 		"minimum rewrite",
 		"do not add facts",
 		"Preserve the exact spelling",

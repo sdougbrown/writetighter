@@ -45,9 +45,52 @@ It also emits an informational candidate when a paragraph has more than three
 sentences or more than 80 words. The profile carries a small reviewed dictionary,
 but version 0.2.0 does not enable deterministic term findings yet.
 
-## Usage
+## Commands
 
-### Basic Checks
+### `writetighter lint` (Deterministic)
+
+`lint` is the deterministic command for running static rule checks. It shares the established `check` behavior but intentionally has no LLM flags.
+
+```sh
+./writetighter lint README.md --kind description --format json
+```
+
+`check` remains available for backward compatibility, including its legacy optional `--llm` advisory mode.
+
+### `writetighter check` (Backward-Compatible Alias)
+
+`check` is the original command, kept for backward compatibility. It supports all the same flags, including `--llm` for optional LLM advice.
+
+### `writetighter revise` (Opt-In LLM Advisor)
+
+`revise` runs the LLM-based revision advisor. It reads LLM configuration from your user config (`~/.config/writetighter/config.toml [llm]` section) and never modifies target files.
+
+Unlike `check --llm`, `revise` runs even when `lint` has no findings — semantic compression can occur in short text.
+
+**Output:** A structured JSON response containing revision suggestions, each with:
+- top-level `sources`: every document analyzed, including documents with no suggestions
+- `kind`: `"rewrite"` or `"clarification"`
+- `source_path`: File path
+- `range`: Source byte range and line/column positions
+- `principle_ids`: Stable revision principles that explain the suggestion
+- `reason`: Explanation
+- `replacement` (rewrite only): Suggested replacement text
+- `question` (clarification only): Concrete question instead of fabricated rewrite
+- `confidence`: Float between 0 and 1
+- `discarded_rewrites`: Count of model rewrites suppressed because they lost protected technical content
+- `errors`: Per-document model or response failures; their presence also produces exit code 3
+
+**Requirements:**
+- LLM configuration must be present in `~/.config/writetighter/config.toml` (model and base_url are required); `--config` selects project/profile terminology and does not supply model credentials
+- Local endpoints may omit `api_key_env`
+- API keys are read from environment variables, never from command-line arguments
+
+**Example:**
+```sh
+./writetighter revise README.md --kind description
+```
+
+## Basic Checks
 
 You can check text via `stdin` or by providing paths to files and directories.
 
@@ -84,10 +127,10 @@ warning CORE.SENTENCE_LENGTH Split this sentence into independently verifiable c
 - `agent`: Compact, line-oriented output for coding agents.
 
 **Exit Codes:**
-- `0`: Check completed successfully; no findings reached the failure threshold.
-- `1`: Check completed; findings reached the `--fail-on` threshold.
+- `0`: `lint`/`check` completed successfully; no findings reached the failure threshold. `revise` also exits `0` on success.
+- `1`: `lint`/`check` completed; findings reached the `--fail-on` threshold.
 - `2`: Usage, configuration, profile, or input failure.
-- `3`: The `--require-llm` flag was used, but the LLM stage failed or was skipped.
+- `3`: A required model call or response failed (`revise`, or `check --require-llm`).
 
 You can control failure behavior with `--fail-on`:
 - `--fail-on none` (default): Always exit `0`.
@@ -140,25 +183,40 @@ An addition does not need `override`. A project term that conflicts with a
 discouraged profile term must set `override = true` and provide a non-empty reason.
 Project configuration cannot contain LLM settings or credentials.
 
-## LLM Advisory (Optional)
+## LLM Advisory (Two Workflows)
 
-You can opt-in to LLM-powered advice. This is **advisory only** and runs only for files or passages that have already triggered static findings.
+LLM configuration is always read from the user config file. Never pass API keys on the command line.
 
-**How it works:**
-1. WriteTighter runs the static rules.
-2. If a finding is found, it builds a compact rewrite rubric from reviewed profile
-   dictionary entries. Corpus-only `observed` terms never become prompt policy.
-3. It asks the model for the minimum context-aware rewrite, using literal
-   alternatives only when they preserve technical meaning and treating
-   guidance-only entries as grammatical recasts.
-4. It discards suggestions that change or omit protected technical content such as
-   code spans, identifiers, commands, paths, URLs, numbers, versions, product names,
-   or defined project terms.
-5. Surviving rewrites are advisory findings only; WriteTighter never applies them.
+Put machine-specific LLM settings in `~/.config/writetighter/config.toml` (or the matching XDG config path):
+
+```toml
+[llm]
+provider = "openai-compatible"
+base_url = "http://sparky:4000/v1"
+model = "gemma4"
+response_mode = "json_object"
+```
+
+For an authenticated endpoint, configure only the environment-variable name and
+export its value before running `revise`:
+
+```toml
+api_key_env = "WRITETIGHTER_API_KEY"
+```
+
+### Workflow 1: `check --llm` (Finding-Gated Advisory)
 
 **Network Access:** For security, network access is disabled by default. You must explicitly include the `--llm` flag on **every** invocation to use an LLM.
 
-**Example with a local OpenAI-compatible endpoint:**
+This runs only for files or passages that have already triggered static findings.
+
+1. WriteTighter runs the static rules.
+2. If a finding is found, it builds a compact rewrite rubric from reviewed profile dictionary entries. Corpus-only `observed` terms never become prompt policy.
+3. It asks the model for the minimum context-aware rewrite, using literal alternatives only when they preserve technical meaning.
+4. It discards suggestions that change or omit protected technical content.
+5. Surviving rewrites are advisory findings only; WriteTighter never applies them.
+
+**Example:**
 ```sh
 ./writetighter check docs/ \
   --llm \
@@ -167,30 +225,28 @@ You can opt-in to LLM-powered advice. This is **advisory only** and runs only fo
   --llm-response-mode json_object
 ```
 
+### Workflow 2: `revise` (Independent Revision Analysis)
+
+Runs the revision advisor on every selected document regardless of static findings. Always reads LLM config from the user config file (no `--llm` flags needed). It sends the document, up to the documented input limit, to that configured endpoint and returns a dedicated JSON structure with `revisions` (either `rewrite` or `clarification`). It never modifies target files.
+
+**Example:**
+```sh
+./writetighter revise docs/
+```
+
 ### Security: Secret Handling
 Never pass API keys as command-line arguments. WriteTighter reads the key from an environment variable defined in your configuration via `api_key_env`.
-
-Put machine-specific LLM settings in
-`~/.config/writetighter/config.toml` (or the matching XDG config path):
-
-```toml
-[llm]
-provider = "openai-compatible"
-base_url = "http://sparky:4000/v1"
-model = "gemma4"
-api_key_env = "SPARKY_API_KEY"
-```
 
 ## Practical Workflows
 
 **Checking PR descriptions:**
 ```sh
-./writetighter check pr_description.md --kind pr
+./writetighter lint pr_description.md --kind pr
 ```
 
 **Checking recent Markdown plans:**
 ```sh
-./writetighter check plans/*.md --kind description --format json
+./writetighter lint plans/*.md --kind description --format json
 ```
 
 ## Known Limitations (Pre-release)
@@ -200,7 +256,7 @@ As this is a private development build, please be aware of the following:
 - **Heuristic Splitting:** Sentence and paragraph splitting uses heuristics and may occasionally miscalculate spans.
 - **Narrow Policy:** The current profile has only two reviewed lexical-policy entries and does not yet enable its deterministic term rules.
 - **Precision Gate:** The automated precision/recall for rule enforcement is still being calibrated.
-- **No Auto-fix:** The tool identifies issues but does not automatically rewrite files.
+- **No Auto-apply:** `lint` reports deterministic findings and `revise` returns suggested replacements or questions, but neither command modifies files.
 
 ## Documentation
 

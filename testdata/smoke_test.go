@@ -38,6 +38,16 @@ func TestProfileVerify(t *testing.T) {
 	}
 }
 
+func TestLintStdin(t *testing.T) {
+	cmd := exec.Command("go", "run", "./cmd/writetighter", "lint", "--stdin", "--kind", "pr", "--format", "json")
+	cmd.Dir = repoRoot(t)
+	cmd.Stdin = bytes.NewBufferString("Create the file.\n")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("lint failed: %s", string(out))
+	}
+}
+
 func TestOfflineStdin(t *testing.T) {
 	cmd := exec.Command("go", "run", "./cmd/writetighter", "check", "--stdin", "--kind", "pr", "--format", "json")
 	cmd.Dir = repoRoot(t)

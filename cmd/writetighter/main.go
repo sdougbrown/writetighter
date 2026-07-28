@@ -15,10 +15,10 @@ import (
 func main() { os.Exit(run(os.Args[1:])) }
 
 // Exit codes:
-// 0: check completed and the selected failure threshold was not reached.
-// 1: check completed and findings reached --fail-on.
-// 2: usage, configuration, profile, input, or Stage 1 stub failures.
-// 3: --require-llm was requested and the LLM stage failed or was skipped.
+// 0: command completed successfully.
+// 1: lint/check findings reached --fail-on.
+// 2: usage, configuration, profile, or input failure.
+// 3: a required model call or model response failed.
 func run(args []string) int {
 	if len(args) == 0 {
 		usageErr("usage: no input specified")
@@ -29,6 +29,10 @@ func run(args []string) int {
 		return runVersion(args[1:])
 	case "check":
 		return runCheck(args[1:])
+	case "lint":
+		return runLint(args[1:])
+	case "revise":
+		return runRevise(args[1:])
 	case "explain":
 		return runExplain(args[1:])
 	case "profile":
@@ -77,6 +81,75 @@ func runCheck(args []string) int {
 	case errors.Is(err, app.ErrFailThreshold):
 		return 1
 	case err != nil:
+		usageErr(err.Error())
+		return 2
+	}
+	return 0
+}
+
+// runLint is the deterministic command. It parses the same flags as check
+// but does not support --llm or --require-llm.
+func runLint(args []string) int {
+	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	stdin := fs.Bool("stdin", false, "")
+	kind := fs.String("kind", "description", "")
+	profile := fs.String("profile", "", "")
+	configPath := fs.String("config", "", "")
+	format := fs.String("format", "human", "")
+	failOn := fs.String("fail-on", "none", "")
+	fs.Usage = func() {}
+	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
+		return 2
+	}
+	params := app.CheckParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, FailOn: *failOn}
+	if params.Stdin && len(params.Paths) > 0 {
+		usageErr("usage: mutually exclusive arguments")
+		return 2
+	}
+	if !params.Stdin && len(params.Paths) == 0 {
+		usageErr("usage: no input specified")
+		return 2
+	}
+	err := app.New().RunLint(params)
+	switch {
+	case errors.Is(err, app.ErrFailThreshold):
+		return 1
+	case err != nil:
+		usageErr(err.Error())
+		return 2
+	}
+	return 0
+}
+
+// runRevise is the opt-in LLM revision advisor command.
+func runRevise(args []string) int {
+	fs := flag.NewFlagSet("revise", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	stdin := fs.Bool("stdin", false, "")
+	kind := fs.String("kind", "description", "")
+	profile := fs.String("profile", "", "")
+	configPath := fs.String("config", "", "")
+	format := fs.String("format", "json", "")
+	fs.Usage = func() {}
+	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
+		return 2
+	}
+	params := app.ReviseParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format}
+	if params.Stdin && len(params.Paths) > 0 {
+		usageErr("usage: mutually exclusive arguments")
+		return 2
+	}
+	if !params.Stdin && len(params.Paths) == 0 {
+		usageErr("usage: no input specified")
+		return 2
+	}
+	if err := app.New().RunRevise(params); err != nil {
+		// Runtime LLM/response failures => exit 3; configuration/input errors => exit 2.
+		if errors.Is(err, app.ErrReviseFailed) {
+			usageErr(err.Error())
+			return 3
+		}
 		usageErr(err.Error())
 		return 2
 	}

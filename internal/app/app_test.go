@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -11,6 +13,7 @@ import (
 
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/profile"
+	"github.com/sdougbrown/writetighter/internal/report"
 )
 
 // helpers from check_test.go that we reuse here
@@ -582,5 +585,225 @@ func TestRunCheckLLMOptionalFailurePreservesReport(t *testing.T) {
 	err := runCheckWithParams(params)
 	if err != nil {
 		t.Fatalf("expected no error from optional LLM failure, got %v", err)
+	}
+}
+
+// --- RunRevise tests ---
+
+func writeReviseUserConfig(t *testing.T, baseURL, apiKeyEnv string) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	body := "[llm]\nprovider = \"openai-compatible\"\nbase_url = \"" + baseURL + "\"\nmodel = \"test-model\"\nresponse_mode = \"json_object\"\n"
+	if apiKeyEnv != "" {
+		body += "api_key_env = \"" + apiKeyEnv + "\"\n"
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunReviseNoInput(t *testing.T) {
+	err := (&App{}).RunRevise(ReviseParams{})
+	if err == nil {
+		t.Fatal("expected error for no input")
+	}
+	if !strings.Contains(err.Error(), "no input specified") {
+		t.Fatalf("wrong error: %v", err)
+	}
+}
+
+func TestRunReviseMutuallyExclusive(t *testing.T) {
+	err := (&App{}).RunRevise(ReviseParams{
+		Stdin: true,
+		Paths: []string{"file.md"},
+	})
+	if err == nil {
+		t.Fatal("expected error for stdin+paths")
+	}
+}
+
+func TestRunReviseMissingLLMConfig(t *testing.T) {
+	// Without any user config, RunRevise should fail with a clear message.
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	path := writeTempFile(t, "short test.")
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:  []string{path},
+		Format: "json",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing LLM config")
+	}
+	if !strings.Contains(err.Error(), "model is required") && !strings.Contains(err.Error(), "LLM configuration") && !strings.Contains(err.Error(), "revise requires") {
+		t.Fatalf("expected config-related error, got: %v", err)
+	}
+}
+
+func TestRunReviseInvalidFormat(t *testing.T) {
+	path := writeTempFile(t, "short test.")
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:  []string{path},
+		Format: "xml",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid format")
+	}
+}
+
+func TestRunLint(t *testing.T) {
+	text := "simple text."
+	path := writeTempFile(t, text)
+	err := (&App{}).RunLint(CheckParams{
+		Paths:  []string{path},
+		Kind:   "description",
+		Format: "json",
+		FailOn: "none",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunLintCannotEnableModelCallsThroughParams(t *testing.T) {
+	path := writeTempFile(t, "simple text.")
+	err := (&App{}).RunLint(CheckParams{
+		Paths:      []string{path},
+		Kind:       "description",
+		Format:     "json",
+		FailOn:     "none",
+		LLM:        true,
+		RequireLLM: true,
+		LLMBaseURL: "http://127.0.0.1:1",
+		LLMModel:   "test",
+	})
+	if err != nil {
+		t.Fatalf("lint must remain deterministic even when an API caller sets LLM fields: %v", err)
+	}
+}
+
+func TestRunLintProducesOutput(t *testing.T) {
+	path := writeTempFile(t, "some text.")
+	var buf bytes.Buffer
+	oldStdout := os.Stdout
+	r, w, _ := os.Pipe()
+	os.Stdout = w
+	err := (&App{}).RunLint(CheckParams{
+		Paths:  []string{path},
+		Kind:   "description",
+		Format: "json",
+		FailOn: "none",
+	})
+	w.Close()
+	os.Stdout = oldStdout
+	buf.ReadFrom(r)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Fatal("expected output from lint")
+	}
+	var reportData map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &reportData); err != nil {
+		t.Fatalf("invalid JSON: %v\noutput: %s", err, buf.String())
+	}
+	if reportData["status"] != "checked" {
+		t.Errorf("expected status 'checked', got %v", reportData["status"])
+	}
+}
+
+func TestRunReviseProducesStructuredClarificationWithoutLintFinding(t *testing.T) {
+	content := "Refs delta pluralizes three scalars."
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		response := `{"findings":[{"kind":"clarification","source_range":{"start":0,"end":36},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"The transformation has multiple plausible meanings.","question":"Does this rename fields or change scalar values to collections?","confidence":0.84}]}`
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": response}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	path := writeTempFile(t, content)
+	buf := captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{Paths: []string{path}, Kind: "description", Format: "json"}); err != nil {
+			t.Fatalf("unexpected revise error: %v", err)
+		}
+	})
+	var response report.ReviseResponse
+	if err := json.Unmarshal(buf.Bytes(), &response); err != nil {
+		t.Fatalf("invalid revise JSON: %v\n%s", err, buf.String())
+	}
+	if response.Status != "ok" || response.LLMModel != "test-model" || len(response.Sources) != 1 || response.Sources[0] != path || len(response.Revisions) != 1 {
+		t.Fatalf("unexpected revise response: %#v", response)
+	}
+	if response.Revisions[0].Kind != "clarification" || response.Revisions[0].Question == nil {
+		t.Fatalf("expected structured clarification: %#v", response.Revisions[0])
+	}
+}
+
+func TestRunReviseReturnsSentinelOnInvalidModelResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": "not-json"}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	var reviseErr error
+	output := captureStdout(t, func() {
+		reviseErr = (&App{}).RunRevise(ReviseParams{Paths: []string{writeTempFile(t, "Short text.")}, Kind: "description", Format: "json"})
+	})
+	if !errors.Is(reviseErr, ErrReviseFailed) {
+		t.Fatalf("expected ErrReviseFailed, got %v", reviseErr)
+	}
+	var response report.ReviseResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatalf("expected structured failure response: %v", err)
+	}
+	if response.Status != "failed" || len(response.Errors) != 1 {
+		t.Fatalf("unexpected structured failure: %#v", response)
+	}
+}
+
+func TestRunReviseRejectsConfiguredUnsetAPIKey(t *testing.T) {
+	writeReviseUserConfig(t, "http://127.0.0.1:4000/v1", "MISSING_REVISE_KEY")
+	t.Setenv("MISSING_REVISE_KEY", "")
+	err := (&App{}).RunRevise(ReviseParams{Paths: []string{writeTempFile(t, "Short text.")}, Kind: "description", Format: "json"})
+	if err == nil || !strings.Contains(err.Error(), "environment variable is unset") {
+		t.Fatalf("expected unset key configuration error, got %v", err)
+	}
+}
+
+func TestRunReviseUnsupportedProvider(t *testing.T) {
+	path := writeTempFile(t, "test content.")
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:  []string{path},
+		Format: "json",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing LLM config")
+	}
+}
+
+func TestReviseAcceptsInputFlags(t *testing.T) {
+	// Verify that revise accepts valid flag combinations (config error is about
+	// missing LLM config, not bad flag parsing).
+	path := writeTempFile(t, "test content.")
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:  []string{path},
+		Kind:   "description",
+		Format: "json",
+	})
+	// Should fail on LLM config, not flag validation.
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if strings.Contains(err.Error(), "invalid") && strings.Contains(err.Error(), "kind") {
+		t.Fatalf("should fail on LLM config, not flag validation: %v", err)
 	}
 }

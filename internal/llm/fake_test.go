@@ -26,8 +26,13 @@ func newFakeServer(requireKey bool, mode string) *fakeLLMServer {
 		case "timeout":
 			time.Sleep(200 * time.Millisecond)
 			w.WriteHeader(http.StatusGatewayTimeout)
+		case "oversized-envelope":
+			_, _ = w.Write([]byte(strings.Repeat("x", MaxEnvelopeChars+1)))
 		default:
 			content := `{"findings":[{"source_range":{"start":0,"end":5},"rule_ids":["CORE.TERM_DISCOURAGED"],"reason":"rewrite suggestion","replacement":"preferred term","confidence":0.91}]}`
+			if mode == "escaped-envelope" {
+				content = strings.Repeat(`"`, 8000)
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"id":      "chatcmpl-test",
 				"model":   "test-model",
@@ -41,3 +46,49 @@ func newFakeServer(requireKey bool, mode string) *fakeLLMServer {
 }
 
 func (f *fakeLLMServer) Close() { f.server.Close() }
+
+// newFakeReviseServer creates a fake server that returns responses matching the
+// revise response schema (principle_ids instead of rule_ids).
+func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
+	f := &fakeLLMServer{}
+	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if requireKey && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		switch mode {
+		case "malformed":
+			w.Write([]byte(`not-json`))
+		case "timeout":
+			time.Sleep(200 * time.Millisecond)
+			w.WriteHeader(http.StatusGatewayTimeout)
+		default:
+			// Build revise-compatible content JSON.
+			type frev struct {
+				Kind         string      `json:"kind"`
+				SourceRange  SourceRange `json:"source_range"`
+				PrincipleIDs []string    `json:"principle_ids"`
+				Reason       string      `json:"reason"`
+				Replacement  string      `json:"replacement"`
+				Confidence   float64     `json:"confidence"`
+			}
+			fc := []frev{{
+				Kind:         "rewrite",
+				SourceRange:  SourceRange{Start: 0, End: 5},
+				PrincipleIDs: []string{"CORE.SHORT_SENTENCE"},
+				Reason:       "rewrite suggestion",
+				Replacement:  "preferred term",
+				Confidence:   0.91,
+			}}
+			respContent, _ := json.Marshal(map[string]any{"findings": fc})
+			json.NewEncoder(w).Encode(map[string]any{
+				"id":      "chatcmpl-test",
+				"model":   "test-model",
+				"choices": []Choice{{Message: Message{Role: "assistant", Content: string(respContent)}}},
+				"usage":   map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+			})
+		}
+	}))
+	f.URL = f.server.URL
+	return f
+}

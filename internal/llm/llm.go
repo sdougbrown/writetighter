@@ -81,7 +81,7 @@ func Advisor(ctx context.Context, config Config, doc *document.Document, res *pr
 	return accepted, nil
 }
 
-var protectedTokenPattern = regexp.MustCompile(`https?://[^\s<>"']+|(?:\.\.?/|/)[A-Za-z0-9._~!$&()*+,;=:@%/-]+|--[A-Za-z0-9][A-Za-z0-9_-]*|\bv?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.-]+)?\b|\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|\b[A-Za-z0-9]*[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*\b|\b[A-Z]{2,}[A-Za-z0-9]*\b`)
+var protectedTokenPattern = regexp.MustCompile(`https?://[^\s<>"']+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|\b[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}\b|\b(?:\d{1,3}\.){3}\d{1,3}\b|(?:\.\.?/|/)[A-Za-z0-9._~!$&()*+,;=:@%/-]+|--[A-Za-z0-9][A-Za-z0-9_-]*|\bv?\d+(?:\.\d+)*(?:[-+][A-Za-z0-9.-]+)?\b|\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|\b[A-Za-z0-9]*[a-z][A-Za-z0-9]*[A-Z][A-Za-z0-9]*\b|\b[A-Z]{2,}[A-Za-z0-9]*\b`)
 
 func preservesProtectedContent(doc *document.Document, start, end int, replacement string, terms []config.TermEntry) bool {
 	if doc == nil || start < 0 || end < start || end > len(doc.Content) {
