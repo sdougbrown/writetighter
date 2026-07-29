@@ -129,10 +129,17 @@ The workflow offers three authentication choices: no key, a key stored in the pr
 - Authenticated endpoints may use either `api_key` in the private config or `api_key_env`, but not both
 - API keys are never accepted as command-line arguments
 
-**Example:**
+**Examples:**
 ```sh
 ./writetighter revise README.md --kind description
+
+printf '%s\n' "Restart the service after changing the file." |
+  ./writetighter revise --stdin --kind procedure
+
+./writetighter revise --text "Which transformation changes these values?"
 ```
+
+Configure the model before using `revise --stdin`. Standard input carries the document, so that invocation cannot also run the interactive configuration workflow. Use `--text` for short, non-sensitive text when you want stdin to remain available for interactive setup.
 
 ## Basic Linting
 
