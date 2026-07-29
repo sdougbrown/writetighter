@@ -615,6 +615,57 @@ func writeReviseStoredKeyConfig(t *testing.T, baseURL, key string) {
 	}
 }
 
+func TestRunPromptExportsCodeCommentGuidanceWithoutConfig(t *testing.T) {
+	configRoot := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", configRoot)
+	configDir := filepath.Join(configRoot, "writetighter")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("malformed = ["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunPrompt(PromptParams{Kind: "code-comment", Format: "human"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	for _, expected := range []string{"Document kind: code-comment", "CORE.CAUSAL_ORDER", "invariant", "TODO", "verify any rewrite against the implementation"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("prompt output missing %q: %s", expected, output.String())
+		}
+	}
+}
+
+func TestRunPromptJSON(t *testing.T) {
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunPrompt(PromptParams{Kind: "pr", Format: "json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var payload struct {
+		SchemaVersion  int `json:"schema_version"`
+		Kind           string
+		Principles     []map[string]string `json:"principles"`
+		KindDirections []string            `json:"kind_directions"`
+	}
+	if err := json.Unmarshal(output.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.SchemaVersion != 1 || payload.Kind != "pr" || len(payload.Principles) == 0 || len(payload.KindDirections) == 0 {
+		t.Fatalf("unexpected prompt JSON: %#v", payload)
+	}
+}
+
+func TestRunPromptRejectsInvalidOptions(t *testing.T) {
+	if err := (&App{}).RunPrompt(PromptParams{Kind: "message", Format: "human"}); err == nil {
+		t.Fatal("expected invalid kind error")
+	}
+	if err := (&App{}).RunPrompt(PromptParams{Kind: "description", Format: "yaml"}); err == nil {
+		t.Fatal("expected invalid format error")
+	}
+}
+
 func TestRunReviseNoInput(t *testing.T) {
 	err := (&App{}).RunRevise(ReviseParams{})
 	if err == nil {

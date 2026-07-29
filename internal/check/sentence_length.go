@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/sdougbrown/writetighter/internal/document"
+	"github.com/sdougbrown/writetighter/internal/guidance"
 	"github.com/sdougbrown/writetighter/internal/report"
 )
 
@@ -25,7 +26,7 @@ func sentenceLengthRun(ctx *RunContext) ([]report.Finding, error) {
 		if r.Parameters == nil {
 			continue
 		}
-		if v, ok := r.Parameters[ctx.Document.Kind+"_max_words"]; ok {
+		if v, ok := r.Parameters[guidance.SentenceLimitParameter(ctx.Document.Kind)]; ok {
 			limit, _ = toInt(v)
 		}
 	}

@@ -41,6 +41,16 @@ func TestSentenceLength(t *testing.T) {
 	}
 }
 
+func TestSentenceLengthCodeCommentUsesDescriptionLimit(t *testing.T) {
+	doc := testDoc("one two three four five six.")
+	doc.Kind = "code-comment"
+	ctx := &RunContext{Document: doc, Profile: testProfile()}
+	findings, err := Get("CORE.SENTENCE_LENGTH").Run(ctx)
+	if err != nil || len(findings) == 0 {
+		t.Fatal("expected code comment to inherit description sentence limit")
+	}
+}
+
 func TestTermDiscouraged(t *testing.T) {
 	ctx := &RunContext{Document: testDoc("deprecated term appears here."), Profile: testProfile()}
 	findings, _ := Get("CORE.TERM_DISCOURAGED").Run(ctx)

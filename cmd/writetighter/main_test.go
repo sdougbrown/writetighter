@@ -42,10 +42,36 @@ func TestRunExplain(t *testing.T) {
 	})
 }
 
+func TestRunPrompt(t *testing.T) {
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+	if got := run([]string{"prompt", "--kind", "code-comment", "--format", "json"}); got != 0 {
+		t.Fatalf("expected exit 0, got %d", got)
+	}
+	_ = w.Close()
+	var out bytes.Buffer
+	if _, err := io.Copy(&out, r); err != nil {
+		t.Fatal(err)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal(out.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload["kind"] != "code-comment" {
+		t.Fatalf("unexpected prompt payload: %v", payload)
+	}
+}
+
 func TestStrictFlagAndEnumValidation(t *testing.T) {
 	for _, args := range [][]string{
 		{"version", "--wat"}, {"lint", "--stdin", "--kind", "blog"},
 		{"lint", "--stdin", "--format", "yaml"}, {"explain", "--wat", "CORE.SENTENCE_LENGTH"},
+		{"prompt", "--kind", "message"}, {"prompt", "--format", "yaml"}, {"prompt", "extra"},
 		{"profile", "list", "--wat"},
 	} {
 		if got := run(args); got != 2 {

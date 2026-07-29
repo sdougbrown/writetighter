@@ -13,6 +13,7 @@ import (
 	"github.com/sdougbrown/writetighter/internal/check"
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/document"
+	"github.com/sdougbrown/writetighter/internal/guidance"
 	"github.com/sdougbrown/writetighter/internal/llm"
 	"github.com/sdougbrown/writetighter/internal/profile"
 	"github.com/sdougbrown/writetighter/internal/report"
@@ -51,6 +52,12 @@ type ReviseParams struct {
 	Profile    string
 	ConfigPath string
 	Format     string
+}
+
+// PromptParams selects exported revision guidance without model access.
+type PromptParams struct {
+	Kind   string
+	Format string
 }
 
 type RunFunc func() error
@@ -243,11 +250,49 @@ func collectInputs(paths []string, stdin bool, text *string, kind string) ([]*do
 	return document.CollectInputs(paths, stdin)
 }
 
-func validKind(v string) bool   { return v == "description" || v == "procedure" || v == "pr" }
+func validKind(v string) bool   { return guidance.ValidKind(v) }
 func validFormat(v string) bool { return v == "human" || v == "json" || v == "agent" }
 func validFailOn(v string) bool { return v == "none" || v == "warning" || v == "error" }
 func validResponseMode(v string) bool {
 	return v == "auto" || v == "json_schema" || v == "json_object" || v == "prompt_json"
+}
+
+// RunPrompt prints the same core and kind-specific guidance used by revise.
+// It does not load user configuration, resolve a profile, read input, or call a model.
+func (a *App) RunPrompt(params PromptParams) error {
+	if params.Kind == "" {
+		params.Kind = guidance.KindDescription
+	}
+	if params.Format == "" {
+		params.Format = "human"
+	}
+	if params.Format != "human" && params.Format != "json" {
+		return fmt.Errorf("invalid prompt format %q", params.Format)
+	}
+	rubric, err := guidance.ForKind(params.Kind)
+	if err != nil {
+		return err
+	}
+	if params.Format == "json" {
+		return json.NewEncoder(os.Stdout).Encode(rubric)
+	}
+	var b strings.Builder
+	b.WriteString("You are a technical writing reviewer. Revise prose using the following guidance.\n")
+	fmt.Fprintf(&b, "Document kind: %s\n\n", rubric.Kind)
+	b.WriteString("Revision principles:\n")
+	for _, principle := range rubric.Principles {
+		fmt.Fprintf(&b, "- %s: %s\n", principle.ID, principle.Direction)
+	}
+	b.WriteString("\nCore directions:\n")
+	for _, direction := range rubric.CoreDirections {
+		fmt.Fprintf(&b, "- %s\n", direction)
+	}
+	b.WriteString("\nDocument-kind directions:\n")
+	for _, direction := range rubric.KindDirections {
+		fmt.Fprintf(&b, "- %s\n", direction)
+	}
+	_, err = fmt.Fprint(os.Stdout, b.String())
+	return err
 }
 
 // RunRevise runs contextual model revision. It reads LLM config from the

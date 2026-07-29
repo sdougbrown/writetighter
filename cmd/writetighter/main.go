@@ -46,6 +46,8 @@ func run(args []string) int {
 		return runLint(args[1:])
 	case "revise":
 		return runRevise(args[1:])
+	case "prompt":
+		return runPrompt(args[1:])
 	case "config":
 		return runConfig(args[1:])
 	case "explain":
@@ -143,6 +145,24 @@ func runRevise(args []string) int {
 			usageErr(err.Error())
 			return 3
 		}
+		usageErr(err.Error())
+		return 2
+	}
+	return 0
+}
+
+// runPrompt exports core and kind-specific revision guidance without model access.
+func runPrompt(args []string) int {
+	fs := flag.NewFlagSet("prompt", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	kind := fs.String("kind", "description", "")
+	format := fs.String("format", "human", "")
+	fs.Usage = func() {}
+	if err := fs.Parse(args); err != nil || len(fs.Args()) != 0 {
+		usageErr("invalid prompt arguments")
+		return 2
+	}
+	if err := app.New().RunPrompt(app.PromptParams{Kind: *kind, Format: *format}); err != nil {
 		usageErr(err.Error())
 		return 2
 	}

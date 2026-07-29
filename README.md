@@ -77,6 +77,7 @@ The embedded `software-docs-en@0.2.0` profile uses these limits:
 | `pr` | 20 words |
 | `procedure` | 20 words |
 | `description` | 25 words |
+| `code-comment` | 25 words (inherits `description`) |
 
 It also emits an informational candidate when a paragraph has more than three
 sentences or more than 80 words. The profile carries a small reviewed dictionary,
@@ -103,6 +104,17 @@ The workflow offers three authentication choices: no key, a key stored in the pr
 ```sh
 ./writetighter lint README.md --kind description --format json
 ```
+
+### `writetighter prompt` (Reusable Revision Guidance)
+
+`prompt` prints the same core and kind-specific directions used by `revise`. It does not read input, load model configuration, resolve a profile, or invoke a model. An agent can pass the human output directly to a subagent or consume the versioned JSON structure.
+
+```sh
+./writetighter prompt --kind code-comment
+./writetighter prompt --kind pr --format json
+```
+
+Supported kinds are `description`, `procedure`, `pr`, and `code-comment`. The `code-comment` lens favors concise explanations of non-obvious constraints, invariants, rationale, contracts, and effects. It asks for clarification instead of inferring behavior from nearby code that was not supplied.
 
 ### `writetighter revise` (Opt-In Contextual Revision)
 
@@ -139,6 +151,9 @@ printf '%s\n' "Restart the service after changing the file." |
   ./writetighter revise --stdin --kind procedure
 
 ./writetighter revise --text "Which transformation changes these values?"
+
+./writetighter revise --text "Wait for the marker before reading configuration." \
+  --kind code-comment
 ```
 
 Configure the model before using `revise --stdin`. Standard input carries the document, so that invocation cannot also run the interactive configuration workflow. Use `--text` for short, non-sensitive text when you want stdin to remain available for interactive setup.
