@@ -20,16 +20,39 @@ WriteTighter separates deterministic policy from contextual revision. A versione
 - **Automatic compliance:** It provides findings based on rules; it does not "certify" your documentation.
 - **Broad prose analysis:** It focuses on specific, rule-based metrics rather than subjective "quality."
 
-## Local Setup
+## Installation
 
-To use WriteTighter from this checkout, build the binary locally:
+### Quick install (curl)
 
 ```sh
-go build -o writetighter ./cmd/writetighter
+curl -fsSL https://raw.githubusercontent.com/sdougbrown/writetighter/main/install.sh | bash
 ```
 
-Run `go install ./cmd/writetighter` instead if your Go bin directory is already on
-`PATH`.
+This downloads the latest release binary for your platform to `~/.local/bin`.
+Set `BINDIR` to choose a different location:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sdougbrown/writetighter/main/install.sh | BINDIR=/usr/local/bin bash
+```
+
+Pre-release versions are marked as pre-releases on GitHub and are excluded
+from the `latest` tag the installer resolves.
+
+### Go install
+
+If you have Go 1.22+ installed:
+
+```sh
+go install github.com/sdougbrown/writetighter/cmd/writetighter@latest
+```
+
+### Build from source
+
+```sh
+git clone https://github.com/sdougbrown/writetighter.git
+cd writetighter
+go build -o writetighter ./cmd/writetighter
+```
 
 ### Current default policy
 

@@ -6,6 +6,7 @@ project_name: writetighter
 before:
   hooks:
     - go mod tidy
+    - go test ./...
 
 builds:
   - id: writetighter
@@ -45,7 +46,7 @@ checksum:
   name_template: "checksums.txt"
 
 snapshot:
-  name_template: "{{ .Version }}-SNAPSHOT-{{ .ShortCommit }}"
+  version_template: "{{ .Version }}-SNAPSHOT-{{ .ShortCommit }}"
 
 changelog:
   sort: asc
@@ -58,4 +59,5 @@ changelog:
       - Merge branch
 
 release:
-  disable: true
+  draft: false
+  prerelease: auto
