@@ -2,6 +2,7 @@ package llm
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -404,16 +405,50 @@ func TestReviseRepairsWrongRangeFromUniqueSourceText(t *testing.T) {
 	}
 }
 
-func TestReviseRejectsAmbiguousSourceTextRemap(t *testing.T) {
+func TestReviseUsesNearestRepeatedSourceText(t *testing.T) {
 	srv := newFakeReviseServer(false, "wrong-range")
 	defer srv.Close()
 	doc, err := document.FromReader(strings.NewReader("term term"), "test.md", "description")
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, doc, testProfile(), nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "does not uniquely match") {
-		t.Fatalf("expected ambiguous source evidence error, got %v", err)
+	response, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, doc, testProfile(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Revisions) != 1 || response.Revisions[0].Range.StartByte != 0 || response.Revisions[0].Range.EndByte != 4 {
+		t.Fatalf("nearest repeated evidence was not selected: %#v", response.Revisions)
+	}
+}
+
+func TestNearestSourceOccurrenceRejectsDistanceTie(t *testing.T) {
+	if start, ok := nearestSourceOccurrence("term__term", "term", 3); ok || start != 0 {
+		t.Fatalf("expected tied occurrences to be rejected, got start=%d ok=%t", start, ok)
+	}
+}
+
+func TestReviseAcceptsSingleJSONCodeFence(t *testing.T) {
+	srv := newFakeReviseServer(false, "fenced")
+	defer srv.Close()
+	response, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	if err != nil || len(response.Revisions) != 1 {
+		t.Fatalf("expected fenced JSON response to pass, got %#v, err=%v", response, err)
+	}
+}
+
+func TestUnwrapJSONFenceRejectsSurroundingProse(t *testing.T) {
+	raw := []byte("Here is the result:\n```json\n{\"findings\":[]}\n```")
+	if got := unwrapJSONFence(raw); string(got) != string(raw) {
+		t.Fatalf("surrounding prose must not be unwrapped: %q", got)
+	}
+}
+
+func TestReviseReportsModelErrorObject(t *testing.T) {
+	srv := newFakeReviseServer(false, "model-error")
+	defer srv.Close()
+	_, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	if !errors.Is(err, ErrInvalidModelResponse) || !strings.Contains(err.Error(), "model reported error: generation failed") || strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("unexpected model error: %v", err)
 	}
 }
 

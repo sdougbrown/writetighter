@@ -110,7 +110,7 @@ The workflow offers three authentication choices: no key, a key stored in the pr
 
 **Output:** A structured JSON response containing revision suggestions, each with:
 - top-level `sources`: every document selected, including documents with no suggestions
-- top-level `analysis`: input bytes, analyzed bytes, chunk count, and complete-coverage status for each source
+- top-level `analysis`: input bytes, analyzed bytes, chunk count, model-request count, and complete-coverage status for each source
 - `kind`: `"rewrite"` or `"clarification"`
 - `source_path`: File path
 - `source_text`: Exact source evidence copied from the selected range
@@ -276,7 +276,9 @@ api_key_env = "WRITETIGHTER_API_KEY"
 
 The command splits large documents at Markdown block boundaries and sends each chunk sequentially to the configured endpoint. Returned revisions retain original-document ranges. The response reports whether every byte was analyzed.
 
-The default `max_requests = 32` prevents an unexpectedly large input from producing hundreds of model calls. Increase it deliberately in user config when a document requires more chunks. `revise` returns structured `rewrite` or `clarification` revisions and never modifies target files.
+The default `max_requests = 32` prevents an unexpectedly large input from producing hundreds of model calls. The limit counts initial chunk requests and runtime fallbacks. Increase it deliberately in user config when a document requires more chunks.
+
+When `json_object` or `json_schema` assistant content violates the revision contract, `revise` retries that chunk once with `prompt_json` if the request budget can still cover every remaining chunk. A model-returned `error` object is reported as a model error rather than an unknown JSON field. `revise` returns structured `rewrite` or `clarification` revisions and never modifies target files.
 
 **Example:**
 ```sh

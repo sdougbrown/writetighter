@@ -28,6 +28,7 @@ type SourceAnalysis struct {
 	InputBytes    int    `json:"input_bytes"`
 	AnalyzedBytes int    `json:"analyzed_bytes"`
 	Chunks        int    `json:"chunks"`
+	ModelRequests int    `json:"model_requests"`
 	Complete      bool   `json:"complete"`
 }
 
@@ -80,7 +81,7 @@ func RenderReviseHuman(r *ReviseResponse) (string, error) {
 		fmt.Fprintf(&b, "model: %s\n", r.LLMModel)
 	}
 	for _, item := range r.Analysis {
-		fmt.Fprintf(&b, "analysis: %s chunks=%d bytes=%d/%d complete=%t\n", item.SourcePath, item.Chunks, item.AnalyzedBytes, item.InputBytes, item.Complete)
+		fmt.Fprintf(&b, "analysis: %s chunks=%d requests=%d bytes=%d/%d complete=%t\n", item.SourcePath, item.Chunks, item.ModelRequests, item.AnalyzedBytes, item.InputBytes, item.Complete)
 	}
 	if r.DiscardedRewrites > 0 {
 		fmt.Fprintf(&b, "discarded unsafe rewrites: %d\n", r.DiscardedRewrites)

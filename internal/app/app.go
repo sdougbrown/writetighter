@@ -445,6 +445,8 @@ func (a *App) RunRevise(params ReviseParams) error {
 	analysis := make([]report.SourceAnalysis, 0, len(plans))
 	discardedRewrites := 0
 	succeededRequests := 0
+	requestsMade := 0
+	remainingPrimaryRequests := totalRequests
 	for _, plan := range plans {
 		docFindings := make([]report.Finding, 0)
 		for _, f := range findings {
@@ -454,7 +456,22 @@ func (a *App) RunRevise(params ReviseParams) error {
 		}
 		coverage := report.SourceAnalysis{SourcePath: plan.doc.Source, InputBytes: len(plan.doc.Content), Chunks: len(plan.chunks)}
 		for _, chunk := range plan.chunks {
+			requestsMade++
+			remainingPrimaryRequests--
+			coverage.ModelRequests++
 			revResp, callErr := llm.ReviseChunk(context.Background(), llmCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte)
+			if callErr != nil && errors.Is(callErr, llm.ErrInvalidModelResponse) && (llmResponseMode == "json_object" || llmResponseMode == "json_schema") && requestsMade+remainingPrimaryRequests < maxRequests {
+				fallbackCfg := llmCfg
+				fallbackCfg.ResponseMode = "prompt_json"
+				requestsMade++
+				coverage.ModelRequests++
+				fallbackResp, fallbackErr := llm.ReviseChunk(context.Background(), fallbackCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte)
+				if fallbackErr == nil {
+					revResp, callErr = fallbackResp, nil
+				} else {
+					callErr = fmt.Errorf("structured response failed: %v; prompt_json fallback failed: %v", callErr, fallbackErr)
+				}
+			}
 			if callErr != nil {
 				revisionErrors = append(revisionErrors, report.RevisionError{
 					SourcePath: plan.doc.Source,

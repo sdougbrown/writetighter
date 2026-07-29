@@ -839,6 +839,39 @@ func TestRunReviseEnforcesRequestCapBeforeModelCalls(t *testing.T) {
 	}
 }
 
+func TestRunReviseRetriesModelErrorWithPromptJSON(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		content := `{"findings":[]}`
+		if request["response_format"] != nil {
+			content = `{"error":{"message":"grammar-constrained generation failed"}}`
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": content}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{Paths: []string{writeTempFile(t, "Short text.")}, Kind: "description", Format: "json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var response report.ReviseResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if requests != 2 || response.Status != "ok" || len(response.Analysis) != 1 || response.Analysis[0].ModelRequests != 2 || !response.Analysis[0].Complete {
+		t.Fatalf("fallback did not complete: requests=%d response=%#v", requests, response)
+	}
+}
+
 func TestRunReviseReturnsSentinelOnInvalidModelResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{

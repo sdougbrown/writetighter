@@ -85,6 +85,13 @@ func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
 				finding.SourceText = "term"
 			}
 			respContent, _ := json.Marshal(map[string]any{"findings": []frev{finding}})
+			if mode == "model-error" {
+				respContent, _ = json.Marshal(map[string]any{"error": map[string]string{"message": "generation failed"}})
+			}
+			if mode == "fenced" {
+				respContent = append([]byte("```json\n"), respContent...)
+				respContent = append(respContent, []byte("\n```")...)
+			}
 			json.NewEncoder(w).Encode(map[string]any{
 				"id":      "chatcmpl-test",
 				"model":   "test-model",

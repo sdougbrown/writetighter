@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/sdougbrown/writetighter/internal/config"
@@ -25,6 +26,9 @@ type SourceRange struct {
 	Start int `json:"start"`
 	End   int `json:"end"`
 }
+
+// ErrInvalidModelResponse marks assistant content that violated the revision contract.
+var ErrInvalidModelResponse = errors.New("invalid model response")
 
 var knownRevisePrincipleIDs = map[string]bool{
 	"CORE.APPROVED_WORDS":         true,
@@ -77,13 +81,20 @@ func reviseExcerpt(ctx context.Context, config Config, doc *document.Document, r
 		return nil, err
 	}
 	if len(resp.Choices) == 0 {
-		return nil, errors.New("empty llm response")
+		return nil, fmt.Errorf("%w: empty response", ErrInvalidModelResponse)
 	}
 
-	raw := []byte(resp.Choices[0].Message.Content)
+	assistantRaw := []byte(resp.Choices[0].Message.Content)
+	if len(assistantRaw) > MaxOutputChars {
+		return nil, fmt.Errorf("%w: response too large", ErrInvalidModelResponse)
+	}
+	raw := unwrapJSONFence(assistantRaw)
+	if modelErr := parseModelReportedError(raw); modelErr != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidModelResponse, modelErr)
+	}
 	reviseResp, err := ValidateReviseResponse(raw)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("%w: %v", ErrInvalidModelResponse, err)
 	}
 
 	// Remap ranges from excerpt-relative to original-file-relative.
@@ -92,25 +103,25 @@ func reviseExcerpt(ctx context.Context, config Config, doc *document.Document, r
 	discardedRewrites := 0
 	for _, rev := range reviseResp.Revisions {
 		if rev.Range.StartByte < 0 || rev.Range.EndByte < rev.Range.StartByte || rev.Range.EndByte > len(excerpt.Text) {
-			return nil, fmt.Errorf("revise range [%d, %d) out of excerpt bounds", rev.Range.StartByte, rev.Range.EndByte)
+			return nil, fmt.Errorf("%w: range [%d, %d) is out of excerpt bounds", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
 		}
 		if excerpt.Text[rev.Range.StartByte:rev.Range.EndByte] != rev.SourceText {
-			first := strings.Index(excerpt.Text, rev.SourceText)
-			if first < 0 || strings.Index(excerpt.Text[first+len(rev.SourceText):], rev.SourceText) >= 0 {
-				return nil, errors.New("revision source_text does not uniquely match the supplied passage")
+			start, ok := nearestSourceOccurrence(excerpt.Text, rev.SourceText, rev.Range.StartByte)
+			if !ok {
+				return nil, fmt.Errorf("%w: source_text does not identify a nearest occurrence", ErrInvalidModelResponse)
 			}
-			rev.Range.StartByte = first
-			rev.Range.EndByte = first + len(rev.SourceText)
+			rev.Range.StartByte = start
+			rev.Range.EndByte = start + len(rev.SourceText)
 		}
 		if rev.Range.StartByte < 0 || rev.Range.EndByte < rev.Range.StartByte || rev.Range.EndByte > len(excerpt.Text) {
-			return nil, fmt.Errorf("revise range [%d, %d) out of excerpt bounds", rev.Range.StartByte, rev.Range.EndByte)
+			return nil, fmt.Errorf("%w: range [%d, %d) is out of excerpt bounds", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
 		}
 		if (rev.Range.StartByte > 0 && !utf8.RuneStart(excerpt.Text[rev.Range.StartByte])) ||
 			(rev.Range.EndByte < len(excerpt.Text) && !utf8.RuneStart(excerpt.Text[rev.Range.EndByte])) {
-			return nil, fmt.Errorf("revise range [%d, %d) splits UTF-8 text", rev.Range.StartByte, rev.Range.EndByte)
+			return nil, fmt.Errorf("%w: range [%d, %d) splits UTF-8 text", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
 		}
 		if !excerpt.validExcerptRange(rev.Range.StartByte, rev.Range.EndByte) {
-			return nil, fmt.Errorf("revise range [%d, %d) crosses excerpt gap or noncontiguous region", rev.Range.StartByte, rev.Range.EndByte)
+			return nil, fmt.Errorf("%w: range [%d, %d) crosses excerpt gap or noncontiguous region", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
 		}
 
 		// Remap to original offsets.
@@ -283,6 +294,87 @@ func ValidateReviseResponse(raw []byte) (*report.ReviseResponse, error) {
 		out.Revisions = append(out.Revisions, item)
 	}
 	return out, nil
+}
+
+func unwrapJSONFence(raw []byte) []byte {
+	trimmed := bytes.TrimSpace(raw)
+	if !bytes.HasPrefix(trimmed, []byte("```")) || !bytes.HasSuffix(trimmed, []byte("```")) {
+		return raw
+	}
+	firstLineEnd := bytes.IndexByte(trimmed, '\n')
+	if firstLineEnd < 0 {
+		return raw
+	}
+	opening := string(trimmed[:firstLineEnd])
+	if opening != "```" && opening != "```json" && opening != "```JSON" {
+		return raw
+	}
+	body := bytes.TrimSpace(trimmed[firstLineEnd+1 : len(trimmed)-3])
+	if len(body) == 0 {
+		return raw
+	}
+	return body
+}
+
+func parseModelReportedError(raw []byte) error {
+	var envelope map[string]json.RawMessage
+	if json.Unmarshal(raw, &envelope) != nil {
+		return nil
+	}
+	errorValue, ok := envelope["error"]
+	if !ok {
+		return nil
+	}
+	message := "model returned an error object"
+	var text string
+	if json.Unmarshal(errorValue, &text) == nil && strings.TrimSpace(text) != "" {
+		message = text
+	} else {
+		var object struct {
+			Message string `json:"message"`
+		}
+		if json.Unmarshal(errorValue, &object) == nil && strings.TrimSpace(object.Message) != "" {
+			message = object.Message
+		}
+	}
+	message = strings.Map(func(r rune) rune {
+		if unicode.IsControl(r) {
+			return ' '
+		}
+		return r
+	}, strings.TrimSpace(message))
+	if len(message) > 512 {
+		message = message[:utf8ValidPrefixLen(message, 512)] + "…"
+	}
+	return fmt.Errorf("model reported error: %s", message)
+}
+
+func nearestSourceOccurrence(text, source string, preferred int) (int, bool) {
+	if source == "" {
+		return 0, false
+	}
+	best := -1
+	bestDistance := int(^uint(0) >> 1)
+	tied := false
+	for offset := 0; offset <= len(text)-len(source); {
+		relative := strings.Index(text[offset:], source)
+		if relative < 0 {
+			break
+		}
+		start := offset + relative
+		distance := start - preferred
+		if distance < 0 {
+			distance = -distance
+		}
+		switch {
+		case distance < bestDistance:
+			best, bestDistance, tied = start, distance, false
+		case distance == bestDistance:
+			tied = true
+		}
+		offset = start + 1
+	}
+	return best, best >= 0 && !tied
 }
 
 func trimmedOptional(value *string) *string {
