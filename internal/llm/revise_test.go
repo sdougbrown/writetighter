@@ -26,7 +26,7 @@ func TestReviseResponseModes(t *testing.T) {
 		t.Fatalf("missing revise JSON schema: %#v", got)
 	}
 	schema := string(got.JSONSchema.Schema)
-	for _, expected := range []string{`"source_text"`, `"principle_ids"`, `"clarification"`, `"replacement"`, `"question"`, `"CORE.EXPLICIT_RELATIONSHIPS"`} {
+	for _, expected := range []string{`"source_text"`, `"principle_ids"`, `"clarification"`, `"replacement"`, `"question"`, `"CORE.EXPLICIT_RELATIONSHIPS"`, `"CORE.CAUSAL_ORDER"`, `"CORE.PLAIN_MECHANISM"`, `"CORE.RELEVANT_DETAIL"`} {
 		if !strings.Contains(schema, expected) {
 			t.Fatalf("revise schema missing %s: %s", expected, schema)
 		}
@@ -238,6 +238,11 @@ func TestBuildRevisePromptBasic(t *testing.T) {
 	if !strings.Contains(prompt, "merely polishes grammar") || !strings.Contains(prompt, "clarification question") {
 		t.Fatal("expected semantic-clarity gate before rewriting")
 	}
+	for _, direction := range []string{"CORE.CAUSAL_ORDER", "CORE.PLAIN_MECHANISM", "CORE.RELEVANT_DETAIL", "causal sequence", "Do not add a rationale"} {
+		if !strings.Contains(prompt, direction) {
+			t.Fatalf("expected explanation direction %q", direction)
+		}
+	}
 	// Prompt should include the fixed principle IDs in the JSON example.
 	if !strings.Contains(prompt, "CORE.SHORT_SENTENCE") {
 		t.Fatal("expected prompt to include principle ID in JSON example")
@@ -246,6 +251,14 @@ func TestBuildRevisePromptBasic(t *testing.T) {
 	// Excerpt should contain the full document content.
 	if !strings.Contains(excerpt.Text, "test sentence") {
 		t.Fatal("expected test sentence in excerpt")
+	}
+}
+
+func TestBuildRevisePromptAddsPRDecisionOrder(t *testing.T) {
+	doc, _ := document.FromReader(strings.NewReader("This PR changes the loader."), "test.md", "pr")
+	prompt, _ := BuildRevisePrompt(doc, &profile.Resolution{ID: "PROFILE_ID", Version: "1"}, nil, nil)
+	if !strings.Contains(prompt, "For PR prose") || !strings.Contains(prompt, "context or requirement, its implication, then the implementation choice") {
+		t.Fatalf("missing PR-specific explanation guidance: %s", prompt)
 	}
 }
 

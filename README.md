@@ -12,7 +12,9 @@ WriteTighter is a local technical-writing revision harness for Markdown. Its pri
 
 `revise` only returns advice. A human reviewer or the calling agent decides what to change; WriteTighter never edits the source file.
 
-The revision rubric favors concise, direct instructions; consistent reviewed terminology; short, single-topic paragraphs; and explicit relationships between subjects, actions, transformations, and effects. Passage-matching profile policy and project glossary definitions provide terminology context. Corpus-only observed vocabulary does not become policy.
+The revision rubric favors direct instructions, consistent reviewed terminology, single-topic paragraphs, literal technical mechanisms, and explicit relationships between subjects, actions, transformations, and effects. It may reorder established details into cause, implication, action, and effect. It uses enough detail to explain the mechanism instead of optimizing for the fewest words.
+
+Passage-matching profile policy and project glossary definitions provide terminology context. Corpus-only observed vocabulary does not become policy.
 
 ### Deterministic lint
 
