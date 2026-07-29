@@ -61,7 +61,7 @@ func TestRunWritesSelectedModelWithoutAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LLM.Model != "qwen" || cfg.LLM.APIKey != "" || cfg.LLM.APIKeyEnv != "" {
+	if cfg.LLM.Model != "qwen" || cfg.LLM.MaxRequests != 32 || cfg.LLM.APIKey != "" || cfg.LLM.APIKeyEnv != "" {
 		t.Fatalf("unexpected config: %#v", cfg.LLM)
 	}
 	info, err := os.Stat(filepath.Join(root, "writetighter", "config.toml"))

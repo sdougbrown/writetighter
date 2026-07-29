@@ -8,17 +8,27 @@ import (
 
 // ReviseResponse is the top-level structured JSON response for `writetighter revise`.
 type ReviseResponse struct {
-	SchemaVersion     int             `json:"schema_version"`
-	ToolVersion       string          `json:"tool_version"`
-	Status            string          `json:"status"`
-	ProfileID         string          `json:"profile_id"`
-	ProfileVersion    string          `json:"profile_version"`
-	LLMModel          string          `json:"llm_model"`
-	LLMProvider       string          `json:"llm_provider"`
-	Sources           []string        `json:"sources"`
-	DiscardedRewrites int             `json:"discarded_rewrites"`
-	Errors            []RevisionError `json:"errors,omitempty"`
-	Revisions         []RevisionItem  `json:"revisions"`
+	SchemaVersion     int              `json:"schema_version"`
+	ToolVersion       string           `json:"tool_version"`
+	Status            string           `json:"status"`
+	ProfileID         string           `json:"profile_id"`
+	ProfileVersion    string           `json:"profile_version"`
+	LLMModel          string           `json:"llm_model"`
+	LLMProvider       string           `json:"llm_provider"`
+	Sources           []string         `json:"sources"`
+	Analysis          []SourceAnalysis `json:"analysis"`
+	DiscardedRewrites int              `json:"discarded_rewrites"`
+	Errors            []RevisionError  `json:"errors,omitempty"`
+	Revisions         []RevisionItem   `json:"revisions"`
+}
+
+// SourceAnalysis reports revision coverage for one input document.
+type SourceAnalysis struct {
+	SourcePath    string `json:"source_path"`
+	InputBytes    int    `json:"input_bytes"`
+	AnalyzedBytes int    `json:"analyzed_bytes"`
+	Chunks        int    `json:"chunks"`
+	Complete      bool   `json:"complete"`
 }
 
 // RevisionError identifies a document whose required model call or response failed.
@@ -68,6 +78,9 @@ func RenderReviseHuman(r *ReviseResponse) (string, error) {
 	}
 	if r.LLMModel != "" {
 		fmt.Fprintf(&b, "model: %s\n", r.LLMModel)
+	}
+	for _, item := range r.Analysis {
+		fmt.Fprintf(&b, "analysis: %s chunks=%d bytes=%d/%d complete=%t\n", item.SourcePath, item.Chunks, item.AnalyzedBytes, item.InputBytes, item.Complete)
 	}
 	if r.DiscardedRewrites > 0 {
 		fmt.Fprintf(&b, "discarded unsafe rewrites: %d\n", r.DiscardedRewrites)

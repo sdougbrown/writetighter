@@ -17,6 +17,18 @@ import (
 
 func main() { os.Exit(run(os.Args[1:])) }
 
+type optionalStringFlag struct {
+	value string
+	set   bool
+}
+
+func (f *optionalStringFlag) String() string { return f.value }
+func (f *optionalStringFlag) Set(value string) error {
+	f.value = value
+	f.set = true
+	return nil
+}
+
 // Exit codes:
 // 0: command completed successfully.
 // 1: lint findings reached --fail-on.
@@ -51,6 +63,8 @@ func runLint(args []string) int {
 	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	stdin := fs.Bool("stdin", false, "")
+	var text optionalStringFlag
+	fs.Var(&text, "text", "")
 	kind := fs.String("kind", "description", "")
 	profile := fs.String("profile", "", "")
 	configPath := fs.String("config", "", "")
@@ -61,11 +75,14 @@ func runLint(args []string) int {
 		return 2
 	}
 	params := app.LintParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, FailOn: *failOn}
-	if params.Stdin && len(params.Paths) > 0 {
-		usageErr("usage: mutually exclusive arguments")
+	if text.set {
+		params.Text = &text.value
+	}
+	if (params.Stdin && (len(params.Paths) > 0 || params.Text != nil)) || (params.Text != nil && len(params.Paths) > 0) {
+		usageErr("usage: paths, --stdin, and --text are mutually exclusive")
 		return 2
 	}
-	if !params.Stdin && len(params.Paths) == 0 {
+	if !params.Stdin && params.Text == nil && len(params.Paths) == 0 {
 		usageErr("usage: no input specified")
 		return 2
 	}
@@ -85,6 +102,8 @@ func runRevise(args []string) int {
 	fs := flag.NewFlagSet("revise", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	stdin := fs.Bool("stdin", false, "")
+	var text optionalStringFlag
+	fs.Var(&text, "text", "")
 	kind := fs.String("kind", "description", "")
 	profile := fs.String("profile", "", "")
 	configPath := fs.String("config", "", "")
@@ -94,11 +113,14 @@ func runRevise(args []string) int {
 		return 2
 	}
 	params := app.ReviseParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format}
-	if params.Stdin && len(params.Paths) > 0 {
-		usageErr("usage: mutually exclusive arguments")
+	if text.set {
+		params.Text = &text.value
+	}
+	if (params.Stdin && (len(params.Paths) > 0 || params.Text != nil)) || (params.Text != nil && len(params.Paths) > 0) {
+		usageErr("usage: paths, --stdin, and --text are mutually exclusive")
 		return 2
 	}
-	if !params.Stdin && len(params.Paths) == 0 {
+	if !params.Stdin && params.Text == nil && len(params.Paths) == 0 {
 		usageErr("usage: no input specified")
 		return 2
 	}
@@ -157,7 +179,7 @@ func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 // The documented CLI permits paths before flags. flag.FlagSet stops at the first
 // positional argument, so normalize the small lint/revise grammar before parsing.
 func normalizeInterspersedFlags(args []string) []string {
-	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true}
+	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true, "--text": true}
 	var flags, paths []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]

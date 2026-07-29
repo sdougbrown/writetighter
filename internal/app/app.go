@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -15,6 +16,11 @@ import (
 	"github.com/sdougbrown/writetighter/internal/llm"
 	"github.com/sdougbrown/writetighter/internal/profile"
 	"github.com/sdougbrown/writetighter/internal/report"
+)
+
+const (
+	defaultRevisionChunkBytes = 20 * 1024
+	defaultMaxModelRequests   = 32
 )
 
 var (
@@ -28,6 +34,7 @@ var (
 type LintParams struct {
 	Paths      []string
 	Stdin      bool
+	Text       *string
 	Kind       string
 	Profile    string
 	ConfigPath string
@@ -39,6 +46,7 @@ type LintParams struct {
 type ReviseParams struct {
 	Paths      []string
 	Stdin      bool
+	Text       *string
 	Kind       string
 	Profile    string
 	ConfigPath string
@@ -104,7 +112,7 @@ func (a *App) RunLint(params LintParams) error {
 		terms = merged.Project.Terms
 	}
 
-	docs, err := document.CollectInputs(params.Paths, params.Stdin)
+	docs, err := collectInputs(params.Paths, params.Stdin, params.Text, params.Kind)
 	if err != nil {
 		return err
 	}
@@ -153,7 +161,10 @@ func (a *App) RunLint(params LintParams) error {
 		}
 	}
 	var sourcePath *string
-	if !params.Stdin && len(params.Paths) > 0 {
+	if params.Text != nil {
+		textSource := "<text>"
+		sourcePath = &textSource
+	} else if !params.Stdin && len(params.Paths) > 0 {
 		sourcePath = &params.Paths[0]
 	}
 	fail := false
@@ -205,6 +216,33 @@ func (a *App) RunLint(params LintParams) error {
 	return nil
 }
 
+func collectInputs(paths []string, stdin bool, text *string, kind string) ([]*document.Document, error) {
+	selected := 0
+	if len(paths) > 0 {
+		selected++
+	}
+	if stdin {
+		selected++
+	}
+	if text != nil {
+		selected++
+	}
+	if selected == 0 {
+		return nil, errors.New("no input specified")
+	}
+	if selected > 1 {
+		return nil, errors.New("paths, --stdin, and --text are mutually exclusive")
+	}
+	if text != nil {
+		doc, err := document.FromText(*text, kind)
+		if err != nil {
+			return nil, err
+		}
+		return []*document.Document{doc}, nil
+	}
+	return document.CollectInputs(paths, stdin)
+}
+
 func validKind(v string) bool   { return v == "description" || v == "procedure" || v == "pr" }
 func validFormat(v string) bool { return v == "human" || v == "json" || v == "agent" }
 func validFailOn(v string) bool { return v == "none" || v == "warning" || v == "error" }
@@ -221,11 +259,21 @@ func (a *App) RunRevise(params ReviseParams) error {
 	if !validKind(params.Kind) {
 		return fmt.Errorf("invalid document kind %q", params.Kind)
 	}
-	if !params.Stdin && len(params.Paths) == 0 {
+	selectedInputs := 0
+	if len(params.Paths) > 0 {
+		selectedInputs++
+	}
+	if params.Stdin {
+		selectedInputs++
+	}
+	if params.Text != nil {
+		selectedInputs++
+	}
+	if selectedInputs == 0 {
 		return fmt.Errorf("no input specified")
 	}
-	if params.Stdin && len(params.Paths) > 0 {
-		return fmt.Errorf("mutually exclusive arguments")
+	if selectedInputs > 1 {
+		return fmt.Errorf("paths, --stdin, and --text are mutually exclusive")
 	}
 	if params.Format == "" {
 		params.Format = "json" // revise defaults to JSON output
@@ -297,6 +345,10 @@ func (a *App) RunRevise(params ReviseParams) error {
 	llmAPIKeyEnv := uc.APIKeyEnv
 	llmResponseMode := uc.ResponseMode
 	llmTimeout := llm.DefaultTimeout
+	maxRequests := uc.MaxRequests
+	if maxRequests == 0 {
+		maxRequests = defaultMaxModelRequests
+	}
 	if uc.Timeout != "" {
 		d, e := time.ParseDuration(uc.Timeout)
 		if e != nil {
@@ -320,6 +372,9 @@ func (a *App) RunRevise(params ReviseParams) error {
 	if llmModel == "" || llmBaseURL == "" {
 		return fmt.Errorf("%w: revise requires llm model and base_url", ErrLLMConfigRequired)
 	}
+	if maxRequests < 1 || maxRequests > 1024 {
+		return fmt.Errorf("%w: max_requests must be between 1 and 1024", ErrLLMConfigRequired)
+	}
 	if llmAPIKey == "" && llmAPIKeyEnv != "" && os.Getenv(llmAPIKeyEnv) == "" {
 		return fmt.Errorf("%w: api_key_env %q is configured but the environment variable is unset", ErrLLMConfigRequired, llmAPIKeyEnv)
 	}
@@ -339,7 +394,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 	}
 
 	// Collect input documents.
-	docs, err := document.CollectInputs(params.Paths, params.Stdin)
+	docs, err := collectInputs(params.Paths, params.Stdin, params.Text, params.Kind)
 	if err != nil {
 		return err
 	}
@@ -368,29 +423,59 @@ func (a *App) RunRevise(params ReviseParams) error {
 		}
 	}
 
-	// Call the model once per document. Preserve successful structured results
-	// while reporting any failed document and returning exit code 3.
+	type revisionPlan struct {
+		doc    *document.Document
+		chunks []document.ChunkRange
+	}
+	plans := make([]revisionPlan, 0, len(docs))
+	totalRequests := 0
+	for _, doc := range docs {
+		chunks := document.ChunkRanges(doc, defaultRevisionChunkBytes)
+		totalRequests += len(chunks)
+		plans = append(plans, revisionPlan{doc: doc, chunks: chunks})
+	}
+	if totalRequests > maxRequests {
+		return fmt.Errorf("revision requires %d model requests, exceeding configured max_requests=%d", totalRequests, maxRequests)
+	}
+
+	// Process chunks sequentially to avoid overloading local endpoints and keep
+	// output deterministic. Chunk ranges remain relative to the original file.
 	allRevisions := make([]report.RevisionItem, 0)
 	revisionErrors := make([]report.RevisionError, 0)
+	analysis := make([]report.SourceAnalysis, 0, len(plans))
 	discardedRewrites := 0
-	succeeded := 0
-	for _, doc := range docs {
+	succeededRequests := 0
+	for _, plan := range plans {
 		docFindings := make([]report.Finding, 0)
 		for _, f := range findings {
-			if f.Path == nil || *f.Path == doc.Source {
+			if f.Path == nil || *f.Path == plan.doc.Source {
 				docFindings = append(docFindings, f)
 			}
 		}
-
-		revResp, callErr := llm.Revise(context.Background(), llmCfg, doc, res, docFindings, terms)
-		if callErr != nil {
-			revisionErrors = append(revisionErrors, report.RevisionError{SourcePath: doc.Source, Message: callErr.Error()})
-			continue
+		coverage := report.SourceAnalysis{SourcePath: plan.doc.Source, InputBytes: len(plan.doc.Content), Chunks: len(plan.chunks)}
+		for _, chunk := range plan.chunks {
+			revResp, callErr := llm.ReviseChunk(context.Background(), llmCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte)
+			if callErr != nil {
+				revisionErrors = append(revisionErrors, report.RevisionError{
+					SourcePath: plan.doc.Source,
+					Message:    fmt.Sprintf("chunk [%d,%d): %v", chunk.StartByte, chunk.EndByte, callErr),
+				})
+				continue
+			}
+			succeededRequests++
+			coverage.AnalyzedBytes += chunk.EndByte - chunk.StartByte
+			discardedRewrites += revResp.DiscardedRewrites
+			allRevisions = append(allRevisions, revResp.Revisions...)
 		}
-		succeeded++
-		discardedRewrites += revResp.DiscardedRewrites
-		allRevisions = append(allRevisions, revResp.Revisions...)
+		coverage.Complete = coverage.AnalyzedBytes == coverage.InputBytes
+		analysis = append(analysis, coverage)
 	}
+	sort.SliceStable(allRevisions, func(i, j int) bool {
+		if allRevisions[i].SourcePath != allRevisions[j].SourcePath {
+			return allRevisions[i].SourcePath < allRevisions[j].SourcePath
+		}
+		return allRevisions[i].Range.StartByte < allRevisions[j].Range.StartByte
+	})
 
 	sources := make([]string, 0, len(docs))
 	for _, doc := range docs {
@@ -399,7 +484,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 	status := "ok"
 	if len(revisionErrors) > 0 {
 		status = "partial"
-		if succeeded == 0 {
+		if succeededRequests == 0 {
 			status = "failed"
 		}
 	}
@@ -411,6 +496,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 		LLMModel:          llmModel,
 		LLMProvider:       llmProvider,
 		Sources:           sources,
+		Analysis:          analysis,
 		Status:            status,
 		DiscardedRewrites: discardedRewrites,
 		Errors:            revisionErrors,

@@ -109,7 +109,8 @@ The workflow offers three authentication choices: no key, a key stored in the pr
 `revise` runs independently of `lint` findings because concise text can still omit the subject, transformation, or effect while satisfying deterministic thresholds.
 
 **Output:** A structured JSON response containing revision suggestions, each with:
-- top-level `sources`: every document analyzed, including documents with no suggestions
+- top-level `sources`: every document selected, including documents with no suggestions
+- top-level `analysis`: input bytes, analyzed bytes, chunk count, and complete-coverage status for each source
 - `kind`: `"rewrite"` or `"clarification"`
 - `source_path`: File path
 - `source_text`: Exact source evidence copied from the selected range
@@ -150,6 +151,14 @@ The human report includes the static finding:
 status: linted
 warning CORE.SENTENCE_LENGTH Split this sentence into independently verifiable claims.
 ```
+
+**Lint a direct string:**
+
+```sh
+./writetighter lint --text "Restart the service after changing the file."
+```
+
+`--text`, `--stdin`, and file paths are mutually exclusive. Command-line text may appear in shell history or process listings, so prefer `--stdin` for large or sensitive content.
 
 **Lint one file:**
 
@@ -239,6 +248,7 @@ provider = "openai-compatible"
 base_url = "http://sparky:4000/v1"
 model = "gemma4"
 response_mode = "json_object"
+max_requests = 32
 ```
 
 For an authenticated endpoint, choose one credential source. A lower-risk local PAT can be stored in the `0600` user config:
@@ -257,11 +267,15 @@ api_key_env = "WRITETIGHTER_API_KEY"
 
 `revise` analyzes every selected document regardless of static findings. It reads model settings from the user config file; it has no model-related command-line flags.
 
-The command sends the document, up to the documented input limit, to the configured endpoint. It returns structured `rewrite` or `clarification` revisions and never modifies target files.
+The command splits large documents at Markdown block boundaries and sends each chunk sequentially to the configured endpoint. Returned revisions retain original-document ranges. The response reports whether every byte was analyzed.
+
+The default `max_requests = 32` prevents an unexpectedly large input from producing hundreds of model calls. Increase it deliberately in user config when a document requires more chunks. `revise` returns structured `rewrite` or `clarification` revisions and never modifies target files.
 
 **Example:**
 ```sh
 ./writetighter revise docs/
+
+./writetighter revise --text "Which transformation changes these values?"
 ```
 
 ### Security: Secret Handling

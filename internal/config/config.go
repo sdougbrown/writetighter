@@ -42,6 +42,7 @@ type LLMConfig struct {
 	APIKeyEnv    string `toml:"api_key_env,omitempty"`
 	Timeout      string `toml:"timeout"`
 	ResponseMode string `toml:"response_mode"`
+	MaxRequests  int    `toml:"max_requests,omitempty"`
 }
 
 type MergedConfig struct {

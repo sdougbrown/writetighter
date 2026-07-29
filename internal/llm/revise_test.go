@@ -370,6 +370,24 @@ func TestReviseWithFakeServer(t *testing.T) {
 	}
 }
 
+func TestReviseChunkReturnsOriginalDocumentRanges(t *testing.T) {
+	srv := newFakeReviseServer(false, "ok")
+	defer srv.Close()
+	content := "prefix paragraph.\n\ndeprecated term appears here."
+	doc, err := document.FromReader(strings.NewReader(content), "test.md", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := strings.Index(content, "deprecated")
+	response, err := ReviseChunk(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, doc, testProfile(), nil, nil, start, len(content))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Revisions) != 1 || response.Revisions[0].Range.StartByte != start || response.Revisions[0].Range.EndByte != start+5 {
+		t.Fatalf("chunk range was not mapped to original document: %#v", response.Revisions)
+	}
+}
+
 func TestReviseRepairsWrongRangeFromUniqueSourceText(t *testing.T) {
 	srv := newFakeReviseServer(false, "wrong-range")
 	defer srv.Close()

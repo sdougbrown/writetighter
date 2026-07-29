@@ -96,6 +96,7 @@ func TestReviseResponseIncludesDiscardAndErrorMetadata(t *testing.T) {
 	resp := &ReviseResponse{
 		SchemaVersion:     1,
 		Status:            "partial",
+		Analysis:          []SourceAnalysis{{SourcePath: "good.md", InputBytes: 100, AnalyzedBytes: 80, Chunks: 2, Complete: false}},
 		DiscardedRewrites: 2,
 		Errors:            []RevisionError{{SourcePath: "bad.md", Message: "invalid model response"}},
 		Revisions:         []RevisionItem{},
@@ -111,7 +112,7 @@ func TestReviseResponseIncludesDiscardAndErrorMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(humanOutput, "discarded unsafe rewrites: 2") || !strings.Contains(humanOutput, "invalid model response") {
+	if !strings.Contains(humanOutput, "bytes=80/100 complete=false") || !strings.Contains(humanOutput, "discarded unsafe rewrites: 2") || !strings.Contains(humanOutput, "invalid model response") {
 		t.Fatalf("missing human metadata: %s", humanOutput)
 	}
 }

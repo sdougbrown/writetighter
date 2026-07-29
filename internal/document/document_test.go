@@ -7,6 +7,7 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func repoRoot(t *testing.T) string {
@@ -230,5 +231,70 @@ func TestCollectInputsBoundedFileReadWithinLimit(t *testing.T) {
 	_, err := CollectInputs([]string{path}, false)
 	if err != nil {
 		t.Fatalf("expected OK for 5 MiB file, got %v", err)
+	}
+}
+
+func TestFromText(t *testing.T) {
+	doc, err := FromText("Short **Markdown** text.", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Source != "<text>" || doc.Content != "Short **Markdown** text." {
+		t.Fatalf("unexpected text document: %#v", doc)
+	}
+}
+
+func TestChunkRangesPreferMarkdownBlocks(t *testing.T) {
+	content := "First paragraph has words.\n\nSecond paragraph has more words.\n\nThird paragraph."
+	doc, err := FromReader(strings.NewReader(content), "test.md", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := ChunkRanges(doc, 45)
+	if len(chunks) < 2 {
+		t.Fatalf("expected multiple chunks: %#v", chunks)
+	}
+	var rebuilt strings.Builder
+	for _, chunk := range chunks {
+		rebuilt.WriteString(content[chunk.StartByte:chunk.EndByte])
+	}
+	if rebuilt.String() != content {
+		t.Fatalf("chunk coverage changed content: %q", rebuilt.String())
+	}
+}
+
+func TestChunkRangesAvoidSplittingSmallCodeBlock(t *testing.T) {
+	content := "Intro.\n\n```sh\necho one\necho two\n```\n\nEnding paragraph."
+	doc, err := FromReader(strings.NewReader(content), "test.md", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := ChunkRanges(doc, 30)
+	codeStart := strings.Index(content, "```sh")
+	codeEnd := strings.Index(content[codeStart:], "```\n\n") + codeStart + len("```\n\n")
+	for _, chunk := range chunks {
+		if codeStart < chunk.EndByte && chunk.EndByte < codeEnd {
+			t.Fatalf("split code block at %d: %#v", chunk.EndByte, chunks)
+		}
+	}
+}
+
+func TestChunkRangesPreserveUTF8(t *testing.T) {
+	content := strings.Repeat("über ", 20)
+	doc, err := FromReader(strings.NewReader(content), "test.md", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	chunks := ChunkRanges(doc, 17)
+	var rebuilt strings.Builder
+	for _, chunk := range chunks {
+		part := content[chunk.StartByte:chunk.EndByte]
+		if !utf8.ValidString(part) {
+			t.Fatalf("invalid UTF-8 chunk: %q", part)
+		}
+		rebuilt.WriteString(part)
+	}
+	if rebuilt.String() != content {
+		t.Fatal("chunks did not cover original content")
 	}
 }

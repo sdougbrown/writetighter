@@ -40,6 +40,12 @@ type Document struct {
 	Segments []Segment
 }
 
+// ChunkRange is a half-open byte range in a document.
+type ChunkRange struct {
+	StartByte int
+	EndByte   int
+}
+
 func FromReader(r io.Reader, source, kind string) (*Document, error) {
 	data, err := io.ReadAll(r)
 	if err != nil {
@@ -57,6 +63,14 @@ const maxAggregateBytes = 25 * 1024 * 1024
 
 // maxFileBytes is the maximum size for a single file.
 const maxFileBytes = 5 * 1024 * 1024
+
+// FromText creates a bounded virtual document from a command-line text value.
+func FromText(text, kind string) (*Document, error) {
+	if len(text) > maxAggregateBytes {
+		return nil, errors.New("text input too large")
+	}
+	return FromReader(strings.NewReader(text), "<text>", kind)
+}
 
 func CollectInputs(paths []string, stdin bool) ([]*Document, error) {
 	if stdin {
@@ -178,6 +192,63 @@ func collectDir(root string, total *int64) ([]*Document, error) {
 		docs = append(docs, doc)
 	}
 	return docs, nil
+}
+
+// ChunkRanges splits a document at Markdown block boundaries when possible.
+// It preserves complete, non-overlapping coverage and UTF-8 boundaries.
+func ChunkRanges(doc *Document, maxBytes int) []ChunkRange {
+	if doc == nil || len(doc.Content) == 0 || maxBytes <= 0 {
+		return nil
+	}
+	content := doc.Content
+	atomic := make([]Range, 0)
+	for _, seg := range doc.Segments {
+		switch seg.Type {
+		case SegmentCodeBlock, SegmentFrontMatter, SegmentHTMLBlock:
+			atomic = append(atomic, seg.Range)
+		}
+	}
+	chunks := make([]ChunkRange, 0, (len(content)+maxBytes-1)/maxBytes)
+	for start := 0; start < len(content); {
+		limit := start + maxBytes
+		if limit >= len(content) {
+			chunks = append(chunks, ChunkRange{StartByte: start, EndByte: len(content)})
+			break
+		}
+		for limit > start && !utf8.RuneStart(content[limit]) {
+			limit--
+		}
+		end := preferredChunkEnd(content, start, limit)
+		for _, block := range atomic {
+			if block.Start.Byte < end && end < block.End.Byte {
+				if block.Start.Byte > start {
+					end = block.Start.Byte
+				} else if block.End.Byte-start <= maxBytes {
+					end = block.End.Byte
+				} else {
+					end = limit
+				}
+				break
+			}
+		}
+		if end <= start {
+			end = limit
+		}
+		chunks = append(chunks, ChunkRange{StartByte: start, EndByte: end})
+		start = end
+	}
+	return chunks
+}
+
+func preferredChunkEnd(content string, start, limit int) int {
+	window := content[start:limit]
+	if split := strings.LastIndex(window, "\n\n"); split >= 0 {
+		return start + split + 2
+	}
+	if split := strings.LastIndexByte(window, '\n'); split >= 0 {
+		return start + split + 1
+	}
+	return limit
 }
 
 func isAllowed(path string) bool {

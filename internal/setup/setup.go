@@ -23,9 +23,10 @@ import (
 )
 
 const (
-	defaultKeyEnv  = "WRITETIGHTER_API_KEY"
-	defaultTimeout = 45 * time.Second
-	maxResponse    = 1 << 20
+	defaultKeyEnv      = "WRITETIGHTER_API_KEY"
+	defaultTimeout     = 45 * time.Second
+	defaultMaxRequests = 32
+	maxResponse        = 1 << 20
 )
 
 // SecretReader reads a secret without persisting it.
@@ -194,6 +195,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		APIKeyEnv:    apiKeyEnv,
 		Timeout:      defaultTimeout.String(),
 		ResponseMode: responseMode,
+		MaxRequests:  defaultMaxRequests,
 	}
 	path, err := config.WriteUserConfig(existing)
 	if err != nil {

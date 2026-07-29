@@ -39,12 +39,32 @@ var knownRevisePrincipleIDs = map[string]bool{
 // It runs even when static findings are empty (semantic compression can occur
 // in short text). The response contains rewrite and/or clarification suggestions.
 func Revise(ctx context.Context, config Config, doc *document.Document, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry) (*report.ReviseResponse, error) {
+	return reviseExcerpt(ctx, config, doc, res, findings, terms, buildReviseExcerpt(doc))
+}
+
+// ReviseChunk analyzes one contiguous range while returning original-document ranges.
+func ReviseChunk(ctx context.Context, config Config, doc *document.Document, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry, start, end int) (*report.ReviseResponse, error) {
+	if doc == nil || start < 0 || end <= start || end > len(doc.Content) {
+		return nil, fmt.Errorf("invalid revision chunk [%d, %d)", start, end)
+	}
+	offsets := make([]int, end-start)
+	for i := range offsets {
+		offsets[i] = start + i
+	}
+	return reviseExcerpt(ctx, config, doc, res, findings, terms, newExcerpt(doc.Content[start:end], offsets))
+}
+
+func reviseExcerpt(ctx context.Context, config Config, doc *document.Document, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry, excerpt *Excerpt) (*report.ReviseResponse, error) {
 	client, err := NewClient(config)
 	if err != nil {
 		return nil, err
 	}
 
-	prompt, excerpt := BuildRevisePrompt(doc, res, findings, terms)
+	chunkBytes := len(excerpt.Text)
+	prompt, excerpt := buildRevisePromptWithExcerpt(doc, res, findings, terms, excerpt)
+	if len(excerpt.Text) != chunkBytes {
+		return nil, errors.New("revision chunk exceeds model input budget after adding prompt context")
+	}
 	req := Request{
 		Messages: []Message{
 			{Role: "system", Content: prompt},
@@ -277,8 +297,10 @@ func trimmedOptional(value *string) *string {
 // It uses the revision rubric defined in the product contract.
 // It includes lint findings as context, not prerequisites.
 func BuildRevisePrompt(doc *document.Document, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry) (string, *Excerpt) {
-	excerpt := buildReviseExcerpt(doc)
+	return buildRevisePromptWithExcerpt(doc, res, findings, terms, buildReviseExcerpt(doc))
+}
 
+func buildRevisePromptWithExcerpt(doc *document.Document, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry, excerpt *Excerpt) (string, *Excerpt) {
 	// Convert findings to excerpt-relative offsets for context.
 	excerptRelFindings := make([]report.Finding, 0, len(findings))
 	for _, f := range findings {
@@ -357,20 +379,31 @@ func BuildRevisePrompt(doc *document.Document, res *profile.Resolution, findings
 		}
 	}
 
-	// Project term base entries.
+	// Include only project glossary entries that occur in this chunk.
 	if len(terms) > 0 {
-		b.WriteString("project glossary:\n")
+		matchedTerms := make([]config.TermEntry, 0)
 		for _, te := range terms {
-			text := te.Term
-			if te.Override && te.Reason != "" {
-				text += " (override: " + te.Reason + ")"
+			if termOccurs(excerpt.Text, te.Term) {
+				matchedTerms = append(matchedTerms, te)
+				if len(matchedTerms) == 64 {
+					break
+				}
 			}
-			if te.Definition != "" {
-				text += " — " + te.Definition
-			}
-			fmt.Fprintf(&b, "- %s\n", text)
 		}
-		b.WriteString("\n")
+		if len(matchedTerms) > 0 {
+			b.WriteString("project glossary:\n")
+			for _, te := range matchedTerms {
+				text := te.Term
+				if te.Override && te.Reason != "" {
+					text += " (override: " + te.Reason + ")"
+				}
+				if te.Definition != "" {
+					text += " — " + te.Definition
+				}
+				fmt.Fprintf(&b, "- %s\n", text)
+			}
+			b.WriteString("\n")
+		}
 	}
 
 	// Include lint findings as context, not prerequisites.

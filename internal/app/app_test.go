@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -584,6 +585,21 @@ func writeReviseUserConfig(t *testing.T, baseURL, apiKeyEnv string) {
 	}
 }
 
+func writeReviseUserConfigWithMaxRequests(t *testing.T, baseURL string, maxRequests int) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf("[llm]\nprovider = \"openai-compatible\"\nbase_url = %q\nmodel = \"test-model\"\nresponse_mode = \"json_object\"\nmax_requests = %d\n", baseURL, maxRequests)
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func writeReviseStoredKeyConfig(t *testing.T, baseURL, key string) {
 	t.Helper()
 	root := t.TempDir()
@@ -678,6 +694,22 @@ func TestRunLint(t *testing.T) {
 	}
 }
 
+func TestRunLintAcceptsDirectText(t *testing.T) {
+	text := "Direct text input."
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunLint(LintParams{Text: &text, Kind: "description", Format: "json", FailOn: "none"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var payload report.Report
+	if err := json.Unmarshal(output.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Source.Path == nil || *payload.Source.Path != "<text>" {
+		t.Fatalf("direct text source = %#v", payload.Source)
+	}
+}
+
 func TestRunLintProducesOutput(t *testing.T) {
 	path := writeTempFile(t, "some text.")
 	var buf bytes.Buffer
@@ -733,6 +765,77 @@ func TestRunReviseProducesStructuredClarificationWithoutLintFinding(t *testing.T
 	}
 	if response.Revisions[0].Kind != "clarification" || response.Revisions[0].Question == nil {
 		t.Fatalf("expected structured clarification: %#v", response.Revisions[0])
+	}
+}
+
+func TestRunReviseChunksEntireLargeDocument(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		var request struct {
+			Messages []struct {
+				Role    string `json:"role"`
+				Content string `json:"content"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		userText := request.Messages[len(request.Messages)-1].Content
+		sourceText := userText[:5]
+		modelResponse, _ := json.Marshal(map[string]any{"findings": []map[string]any{{
+			"kind": "clarification", "source_text": sourceText,
+			"source_range":  map[string]int{"start": 0, "end": 5},
+			"principle_ids": []string{"CORE.EXPLICIT_RELATIONSHIPS"},
+			"reason":        "The passage needs more context.", "replacement": nil,
+			"question": "What relationship should this passage state?", "confidence": 0.7,
+		}}})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": string(modelResponse)}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	content := strings.Repeat("plain words in a long paragraph. ", 1600)
+	path := writeTempFile(t, content)
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{Paths: []string{path}, Kind: "description", Format: "json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var response report.ReviseResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if requests < 2 || len(response.Analysis) != 1 || response.Analysis[0].Chunks != requests || !response.Analysis[0].Complete || response.Analysis[0].AnalyzedBytes != len(content) {
+		t.Fatalf("incomplete chunk coverage: requests=%d response=%#v", requests, response.Analysis)
+	}
+	if len(response.Revisions) != requests {
+		t.Fatalf("revisions=%d, requests=%d", len(response.Revisions), requests)
+	}
+	for i := 1; i < len(response.Revisions); i++ {
+		if response.Revisions[i-1].Range.StartByte >= response.Revisions[i].Range.StartByte {
+			t.Fatalf("revisions are not in source order: %#v", response.Revisions)
+		}
+	}
+}
+
+func TestRunReviseEnforcesRequestCapBeforeModelCalls(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	writeReviseUserConfigWithMaxRequests(t, server.URL, 1)
+	content := strings.Repeat("plain words in a long paragraph. ", 1600)
+	err := (&App{}).RunRevise(ReviseParams{Paths: []string{writeTempFile(t, content)}, Kind: "description", Format: "json"})
+	if err == nil || !strings.Contains(err.Error(), "exceeding configured max_requests=1") {
+		t.Fatalf("expected request cap error, got %v", err)
+	}
+	if requests != 0 {
+		t.Fatalf("request cap was checked after %d model calls", requests)
 	}
 }
 

@@ -66,6 +66,18 @@ func TestLintCommand(t *testing.T) {
 	}
 }
 
+func TestLintAcceptsDirectText(t *testing.T) {
+	if got := run([]string{"lint", "--text", "Short direct text.", "--format", "json"}); got != 0 {
+		t.Fatalf("expected direct text to lint successfully, got %d", got)
+	}
+	if got := run([]string{"lint", "--text", "text", "file.md"}); got != 2 {
+		t.Fatalf("expected --text and path conflict, got %d", got)
+	}
+	if got := run([]string{"lint", "--text", "text", "--stdin"}); got != 2 {
+		t.Fatalf("expected --text and stdin conflict, got %d", got)
+	}
+}
+
 func TestLintAcceptedFlags(t *testing.T) {
 	// lint accepts paths before flags.
 	if got := run([]string{"lint", "missing.txt"}); got != 2 {
@@ -85,6 +97,18 @@ func TestReviseCommand(t *testing.T) {
 	}
 	if got := run([]string{"revise", "--stdin", "foo"}); got != 2 {
 		t.Fatalf("expected exit 2 for stdin+path, got %d", got)
+	}
+}
+
+func TestReviseAcceptsDirectTextFlag(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	if got := run([]string{"revise", "--text", "Short direct text."}); got != 2 {
+		t.Fatalf("expected missing model config exit 2 after accepting --text, got %d", got)
+	}
+	if got := run([]string{"revise", "--text", "text", "file.md"}); got != 2 {
+		t.Fatalf("expected --text and path conflict, got %d", got)
 	}
 }
 
