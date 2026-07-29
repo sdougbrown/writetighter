@@ -10,6 +10,9 @@ const (
 	KindProcedure   = "procedure"
 	KindPR          = "pr"
 	KindCodeComment = "code-comment"
+	KindReference   = "reference"
+	KindDecision    = "decision"
+	KindIncident    = "incident"
 )
 
 // Principle is a stable semantic revision principle exposed to models and agents.
@@ -72,6 +75,27 @@ var directionsByKind = map[string][]string{
 		"For a TODO, state the unresolved action or condition without inventing an owner, deadline, issue, or implementation.",
 		"The comment alone may not establish what nearby code does. Ask for clarification rather than infer missing code context, and require the consumer to verify any rewrite against the implementation.",
 	},
+	KindReference: {
+		"Optimize for accurate lookup: identify the subject, its behavior, accepted inputs, outputs, defaults, constraints, and failure conditions when the source establishes them.",
+		"Prefer direct definitions and scannable, single-purpose entries over narrative transitions or motivational framing.",
+		"Keep exact terminology, units, literals, and boundary conditions. Do not infer an omitted default, requirement, or behavior.",
+		"Do not force every reference entry to mention every possible category; include only information needed to define that subject accurately.",
+		"Remove repetition only when each fact remains available at the point where a reader would look for it.",
+	},
+	KindDecision: {
+		"Organize established information as context, decision drivers, considered alternatives, the selected approach, tradeoffs, and consequences.",
+		"Distinguish external requirements and domain constraints from engineering preferences and implementation choices.",
+		"Keep alternatives and counterfactuals when they explain a real tradeoff; do not invent rejected options or portray an alternative as failing without evidence.",
+		"Do not require an alternatives inventory when the source does not claim to compare options.",
+		"State the deciding reason once and preserve acknowledged costs, risks, and follow-up consequences.",
+	},
+	KindIncident: {
+		"Separate observed facts, reported impact, hypotheses, established causes, contributing factors, and corrective actions.",
+		"Present timeline events in chronological order and preserve timestamps, measurements, affected scope, and stated uncertainty.",
+		"Use causal language only at the confidence level established by the source. Do not turn correlation or sequence into a root-cause claim.",
+		"Describe systems and actions without assigning blame or inventing an actor, owner, cause, or remediation commitment.",
+		"Ask for clarification when a missing distinction between detection time, occurrence time, mitigation, recovery, or prevention changes the incident's interpretation.",
+	},
 }
 
 // ValidKind reports whether kind has a defined revision lens.
@@ -91,13 +115,15 @@ func Kinds() []string {
 }
 
 // SentenceLimitParameter returns the profile parameter used by deterministic
-// sentence-length linting. Code comments inherit the existing description
-// threshold until a reviewed profile version defines a separate policy.
+// sentence-length linting. Contextual kinds added after the immutable profile
+// inherit its description threshold until a reviewed profile defines them.
 func SentenceLimitParameter(kind string) string {
-	if kind == KindCodeComment {
+	switch kind {
+	case KindCodeComment, KindReference, KindDecision, KindIncident:
 		return "description_max_words"
+	default:
+		return kind + "_max_words"
 	}
-	return kind + "_max_words"
 }
 
 // PrincipleIDs returns all stable principle identifiers in declaration order.

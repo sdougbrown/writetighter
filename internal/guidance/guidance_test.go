@@ -1,9 +1,12 @@
 package guidance
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestKindsHaveCompleteIndependentGuidance(t *testing.T) {
-	for _, kind := range []string{KindDescription, KindProcedure, KindPR, KindCodeComment} {
+	for _, kind := range []string{KindDescription, KindProcedure, KindPR, KindCodeComment, KindReference, KindDecision, KindIncident} {
 		set, err := ForKind(kind)
 		if err != nil {
 			t.Fatal(err)
@@ -22,12 +25,37 @@ func TestKindsHaveCompleteIndependentGuidance(t *testing.T) {
 	}
 }
 
-func TestCodeCommentInheritsDescriptionSentenceLimit(t *testing.T) {
-	if got := SentenceLimitParameter(KindCodeComment); got != "description_max_words" {
-		t.Fatalf("code-comment parameter = %q", got)
+func TestNewKindsInheritDescriptionSentenceLimit(t *testing.T) {
+	for _, kind := range []string{KindCodeComment, KindReference, KindDecision, KindIncident} {
+		if got := SentenceLimitParameter(kind); got != "description_max_words" {
+			t.Fatalf("%s parameter = %q", kind, got)
+		}
 	}
 	if got := SentenceLimitParameter(KindPR); got != "pr_max_words" {
 		t.Fatalf("pr parameter = %q", got)
+	}
+}
+
+func TestSpecializedKindsExposeDistinctDirections(t *testing.T) {
+	checks := map[string][]string{
+		KindReference: {"accurate lookup", "defaults", "boundary conditions"},
+		KindDecision:  {"considered alternatives", "tradeoffs", "engineering preferences"},
+		KindIncident:  {"observed facts", "chronological order", "root-cause claim"},
+	}
+	for kind, expected := range checks {
+		set, err := ForKind(kind)
+		if err != nil {
+			t.Fatal(err)
+		}
+		joined := ""
+		for _, direction := range set.KindDirections {
+			joined += direction + "\n"
+		}
+		for _, phrase := range expected {
+			if !strings.Contains(joined, phrase) {
+				t.Fatalf("%s guidance missing %q: %s", kind, phrase, joined)
+			}
+		}
 	}
 }
 

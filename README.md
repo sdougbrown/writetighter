@@ -78,6 +78,9 @@ The embedded `software-docs-en@0.2.0` profile uses these limits:
 | `procedure` | 20 words |
 | `description` | 25 words |
 | `code-comment` | 25 words (inherits `description`) |
+| `reference` | 25 words (inherits `description`) |
+| `decision` | 25 words (inherits `description`) |
+| `incident` | 25 words (inherits `description`) |
 
 It also emits an informational candidate when a paragraph has more than three
 sentences or more than 80 words. The profile carries a small reviewed dictionary,
@@ -111,10 +114,20 @@ The workflow offers three authentication choices: no key, a key stored in the pr
 
 ```sh
 ./writetighter prompt --kind code-comment
-./writetighter prompt --kind pr --format json
+./writetighter prompt --kind decision --format json
 ```
 
-Supported kinds are `description`, `procedure`, `pr`, and `code-comment`. The `code-comment` lens favors concise explanations of non-obvious constraints, invariants, rationale, contracts, and effects. It asks for clarification instead of inferring behavior from nearby code that was not supplied.
+Supported kinds provide these revision lenses:
+
+- `description`: mechanical understanding, causal explanation, and purposeful restatement
+- `procedure`: prerequisites, ordered actions, expected results, and operational exceptions
+- `pr`: review-relevant purpose, dependencies, behavior, and decisions
+- `code-comment`: non-obvious constraints, invariants, rationale, contracts, and effects
+- `reference`: accurate lookup, exact definitions, defaults, constraints, and failure conditions
+- `decision`: context, drivers, alternatives, tradeoffs, the selected approach, and consequences
+- `incident`: observed facts, impact, chronology, causal confidence, and corrective actions
+
+The specialized lenses ask for clarification instead of inferring missing code behavior, defaults, decision provenance, or incident causes.
 
 ### `writetighter revise` (Opt-In Contextual Revision)
 
