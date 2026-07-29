@@ -74,6 +74,17 @@ func Revise(ctx context.Context, config Config, doc *document.Document, res *pro
 		if rev.Range.StartByte < 0 || rev.Range.EndByte < rev.Range.StartByte || rev.Range.EndByte > len(excerpt.Text) {
 			return nil, fmt.Errorf("revise range [%d, %d) out of excerpt bounds", rev.Range.StartByte, rev.Range.EndByte)
 		}
+		if excerpt.Text[rev.Range.StartByte:rev.Range.EndByte] != rev.SourceText {
+			first := strings.Index(excerpt.Text, rev.SourceText)
+			if first < 0 || strings.Index(excerpt.Text[first+len(rev.SourceText):], rev.SourceText) >= 0 {
+				return nil, errors.New("revision source_text does not uniquely match the supplied passage")
+			}
+			rev.Range.StartByte = first
+			rev.Range.EndByte = first + len(rev.SourceText)
+		}
+		if rev.Range.StartByte < 0 || rev.Range.EndByte < rev.Range.StartByte || rev.Range.EndByte > len(excerpt.Text) {
+			return nil, fmt.Errorf("revise range [%d, %d) out of excerpt bounds", rev.Range.StartByte, rev.Range.EndByte)
+		}
 		if (rev.Range.StartByte > 0 && !utf8.RuneStart(excerpt.Text[rev.Range.StartByte])) ||
 			(rev.Range.EndByte < len(excerpt.Text) && !utf8.RuneStart(excerpt.Text[rev.Range.EndByte])) {
 			return nil, fmt.Errorf("revise range [%d, %d) splits UTF-8 text", rev.Range.StartByte, rev.Range.EndByte)
@@ -114,6 +125,7 @@ func Revise(ctx context.Context, config Config, doc *document.Document, res *pro
 // ReviseLLMFinding is the per-finding structure expected from the LLM for revise.
 type ReviseLLMFinding struct {
 	Kind         string      `json:"kind"`
+	SourceText   string      `json:"source_text"`
 	SourceRange  SourceRange `json:"source_range"`
 	PrincipleIDs []string    `json:"principle_ids"`
 	Reason       string      `json:"reason"`
@@ -163,6 +175,10 @@ func ValidateReviseResponse(raw []byte) (*report.ReviseResponse, error) {
 		// Validate kind.
 		if f.Kind != "rewrite" && f.Kind != "clarification" {
 			return nil, fmt.Errorf("invalid revision kind: %q", f.Kind)
+		}
+
+		if f.SourceText == "" {
+			return nil, errors.New("missing source_text in revision")
 		}
 
 		// Validate source range.
@@ -233,6 +249,7 @@ func ValidateReviseResponse(raw []byte) (*report.ReviseResponse, error) {
 		item := report.RevisionItem{
 			Kind:       f.Kind,
 			SourcePath: "", // filled in by caller after remapping
+			SourceText: f.SourceText,
 			Range: report.ReviseRange{
 				StartByte: f.SourceRange.Start,
 				EndByte:   f.SourceRange.End,
@@ -299,11 +316,11 @@ func BuildRevisePrompt(doc *document.Document, res *profile.Resolution, findings
 	b.WriteString("- Do not return a rewrite that merely polishes grammar while leaving compressed shorthand, an undefined abbreviation, an unclear referent, or an ambiguous before-to-after transformation unexplained.\n")
 	b.WriteString("- Return a rewrite only when the passage or project glossary establishes enough meaning to make the relationship more explicit without guessing. Otherwise return a concrete clarification question.\n")
 	b.WriteString("- For example, if a sentence says an update 'pluralizes three values' but does not establish whether that means renaming fields or changing scalars to collections, ask which transformation occurred.\n")
-	b.WriteString("- Source ranges are byte offsets relative to the supplied passage, starting at byte 0, and must cover the exact text being revised or questioned.\n")
+	b.WriteString("- source_text must copy the exact text being revised or questioned. Source ranges are byte offsets relative to the supplied passage, starting at byte 0, and must cover that exact source_text.\n")
 	b.WriteString("- Return only one JSON object with this shape and no Markdown:\n")
-	b.WriteString(`{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":1},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"...","replacement":"...","question":null,"confidence":0.9}]}`)
+	b.WriteString(`{"findings":[{"kind":"rewrite","source_text":"x","source_range":{"start":0,"end":1},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"...","replacement":"...","question":null,"confidence":0.9}]}`)
 	b.WriteString("\n")
-	b.WriteString(`For clarification use a complete item such as: {"kind":"clarification","source_range":{"start":0,"end":1},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"The transformation has multiple plausible meanings.","replacement":null,"question":"Does this rename fields or change scalar values to collections?","confidence":0.8}.`)
+	b.WriteString(`For clarification use a complete item such as: {"kind":"clarification","source_text":"x","source_range":{"start":0,"end":1},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"The transformation has multiple plausible meanings.","replacement":null,"question":"Does this rename fields or change scalar values to collections?","confidence":0.8}.`)
 	b.WriteString("\nUse {\"findings\":[]} when no revision is warranted. Suggestions are advisory and must not claim to modify the file.\n\n")
 
 	fmt.Fprintf(&b, "profile: %s@%s\n", res.ID, res.Version)

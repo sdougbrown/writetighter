@@ -65,21 +65,26 @@ func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
 			// Build revise-compatible content JSON.
 			type frev struct {
 				Kind         string      `json:"kind"`
+				SourceText   string      `json:"source_text"`
 				SourceRange  SourceRange `json:"source_range"`
 				PrincipleIDs []string    `json:"principle_ids"`
 				Reason       string      `json:"reason"`
 				Replacement  string      `json:"replacement"`
 				Confidence   float64     `json:"confidence"`
 			}
-			fc := []frev{{
+			finding := frev{
 				Kind:         "rewrite",
+				SourceText:   "depre",
 				SourceRange:  SourceRange{Start: 0, End: 5},
 				PrincipleIDs: []string{"CORE.SHORT_SENTENCE"},
 				Reason:       "rewrite suggestion",
 				Replacement:  "preferred term",
 				Confidence:   0.91,
-			}}
-			respContent, _ := json.Marshal(map[string]any{"findings": fc})
+			}
+			if mode == "wrong-range" {
+				finding.SourceText = "term"
+			}
+			respContent, _ := json.Marshal(map[string]any{"findings": []frev{finding}})
 			json.NewEncoder(w).Encode(map[string]any{
 				"id":      "chatcmpl-test",
 				"model":   "test-model",

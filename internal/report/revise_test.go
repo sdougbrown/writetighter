@@ -16,6 +16,7 @@ func TestReviseResponseJSON(t *testing.T) {
 			{
 				Kind:       "rewrite",
 				SourcePath: "test.md",
+				SourceText: "long text.",
 				Range: ReviseRange{
 					StartByte: 0, EndByte: 10,
 					StartLine: 1, StartColumn: 1,
@@ -62,6 +63,7 @@ func TestReviseResponseHuman(t *testing.T) {
 			{
 				Kind:       "rewrite",
 				SourcePath: "test.md",
+				SourceText: "long text.",
 				Range: ReviseRange{
 					StartByte: 0, EndByte: 10,
 					StartLine: 1, StartColumn: 1,
@@ -140,6 +142,7 @@ func TestReviseResponseClarification(t *testing.T) {
 			{
 				Kind:         "clarification",
 				SourcePath:   "test.md",
+				SourceText:   "term?",
 				Range:        ReviseRange{StartByte: 0, EndByte: 5},
 				PrincipleIDs: []string{"CORE.TERM_UNKNOWN"},
 				Reason:       "Term is unclear.",

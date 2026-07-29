@@ -25,7 +25,7 @@ func TestReviseResponseModes(t *testing.T) {
 		t.Fatalf("missing revise JSON schema: %#v", got)
 	}
 	schema := string(got.JSONSchema.Schema)
-	for _, expected := range []string{`"principle_ids"`, `"clarification"`, `"replacement"`, `"question"`, `"CORE.EXPLICIT_RELATIONSHIPS"`} {
+	for _, expected := range []string{`"source_text"`, `"principle_ids"`, `"clarification"`, `"replacement"`, `"question"`, `"CORE.EXPLICIT_RELATIONSHIPS"`} {
 		if !strings.Contains(schema, expected) {
 			t.Fatalf("revise schema missing %s: %s", expected, schema)
 		}
@@ -36,7 +36,7 @@ func TestReviseResponseModes(t *testing.T) {
 }
 
 func TestValidateReviseResponseValid(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"use preferred term","replacement":"preferred term","confidence":0.91}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"use preferred term","replacement":"preferred term","confidence":0.91}]}`
 	resp, err := ValidateReviseResponse([]byte(raw))
 	if err != nil {
 		t.Fatalf("expected valid response, got: %v", err)
@@ -50,7 +50,7 @@ func TestValidateReviseResponseValid(t *testing.T) {
 }
 
 func TestValidateReviseResponseClarification(t *testing.T) {
-	raw := `{"findings":[{"kind":"clarification","source_range":{"start":0,"end":5},"principle_ids":["CORE.APPROVED_WORDS"],"reason":"unclear term","question":"Did you mean X?","confidence":0.72}]}`
+	raw := `{"findings":[{"kind":"clarification","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.APPROVED_WORDS"],"reason":"unclear term","question":"Did you mean X?","confidence":0.72}]}`
 	resp, err := ValidateReviseResponse([]byte(raw))
 	if err != nil {
 		t.Fatalf("expected valid clarification, got: %v", err)
@@ -66,8 +66,16 @@ func TestValidateReviseResponseClarification(t *testing.T) {
 	}
 }
 
+func TestValidateReviseResponseRequiresSourceText(t *testing.T) {
+	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","replacement":"x","confidence":0.5}]}`
+	_, err := ValidateReviseResponse([]byte(raw))
+	if err == nil || !strings.Contains(err.Error(), "source_text") {
+		t.Fatalf("expected source_text error, got %v", err)
+	}
+}
+
 func TestValidateReviseResponseInvalidKind(t *testing.T) {
-	raw := `{"findings":[{"kind":"delete","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","replacement":"x","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"delete","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","replacement":"x","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "invalid revision kind") {
 		t.Fatalf("expected invalid kind error, got: %v", err)
@@ -75,7 +83,7 @@ func TestValidateReviseResponseInvalidKind(t *testing.T) {
 }
 
 func TestValidateReviseResponseRewriteWithoutReplacement(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "requires replacement") {
 		t.Fatalf("expected requires replacement error, got: %v", err)
@@ -83,7 +91,7 @@ func TestValidateReviseResponseRewriteWithoutReplacement(t *testing.T) {
 }
 
 func TestValidateReviseResponseClarificationWithoutQuestion(t *testing.T) {
-	raw := `{"findings":[{"kind":"clarification","source_range":{"start":0,"end":5},"principle_ids":["CORE.APPROVED_WORDS"],"reason":"test","replacement":"x","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"clarification","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.APPROVED_WORDS"],"reason":"test","replacement":"x","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "must not have replacement") {
 		t.Fatalf("expected no replacement for clarification, got: %v", err)
@@ -91,7 +99,7 @@ func TestValidateReviseResponseClarificationWithoutQuestion(t *testing.T) {
 }
 
 func TestValidateReviseResponseMissingPrincipleIDs(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":[],"reason":"test","replacement":"x","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":[],"reason":"test","replacement":"x","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "missing principle_ids") {
 		t.Fatalf("expected missing principle_ids error, got: %v", err)
@@ -99,7 +107,7 @@ func TestValidateReviseResponseMissingPrincipleIDs(t *testing.T) {
 }
 
 func TestValidateReviseResponseUnknownPrinciple(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":["UNKNOWN.PRINCIPLE"],"reason":"test","replacement":"x","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["UNKNOWN.PRINCIPLE"],"reason":"test","replacement":"x","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "unknown principle id") {
 		t.Fatalf("expected unknown principle error, got: %v", err)
@@ -107,7 +115,7 @@ func TestValidateReviseResponseUnknownPrinciple(t *testing.T) {
 }
 
 func TestValidateReviseResponseInvalidConfidence(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","replacement":"x","confidence":1.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","replacement":"x","confidence":1.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "invalid revise confidence") {
 		t.Fatalf("expected invalid confidence error, got: %v", err)
@@ -115,7 +123,7 @@ func TestValidateReviseResponseInvalidConfidence(t *testing.T) {
 }
 
 func TestValidateReviseResponseClaimLanguage(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"this is certified","replacement":"x","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"this is certified","replacement":"x","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "changes claims") {
 		t.Fatalf("expected claim rejection, got: %v", err)
@@ -135,7 +143,7 @@ func TestValidateReviseResponseTooLarge(t *testing.T) {
 }
 
 func TestValidateReviseResponseEmptyReason(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"   ","replacement":"x","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"   ","replacement":"x","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "empty reason") {
 		t.Fatalf("expected empty reason error, got: %v", err)
@@ -143,7 +151,7 @@ func TestValidateReviseResponseEmptyReason(t *testing.T) {
 }
 
 func TestValidateReviseResponseEmptyReplacement(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","replacement":"   ","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","replacement":"   ","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "empty replacement") {
 		t.Fatalf("expected empty replacement error, got: %v", err)
@@ -151,7 +159,7 @@ func TestValidateReviseResponseEmptyReplacement(t *testing.T) {
 }
 
 func TestValidateReviseResponseEmptyQuestion(t *testing.T) {
-	raw := `{"findings":[{"kind":"clarification","source_range":{"start":0,"end":5},"principle_ids":["CORE.APPROVED_WORDS"],"reason":"test","question":"   ","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"clarification","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.APPROVED_WORDS"],"reason":"test","question":"   ","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "empty question") {
 		t.Fatalf("expected empty question error, got: %v", err)
@@ -159,7 +167,7 @@ func TestValidateReviseResponseEmptyQuestion(t *testing.T) {
 }
 
 func TestValidateReviseResponseDuplicatePrinciple(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE","CORE.SHORT_SENTENCE"],"reason":"test","replacement":"x","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE","CORE.SHORT_SENTENCE"],"reason":"test","replacement":"x","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "duplicate principle id") {
 		t.Fatalf("expected duplicate principle error, got: %v", err)
@@ -167,7 +175,7 @@ func TestValidateReviseResponseDuplicatePrinciple(t *testing.T) {
 }
 
 func TestValidateReviseResponseAllowsOverlappingAdvisoryRanges(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":0,"end":10},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"first","replacement":"a","confidence":0.5},{"kind":"clarification","source_range":{"start":5,"end":15},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"second","question":"What changes?","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":10},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"first","replacement":"a","confidence":0.5},{"kind":"clarification","source_text":"hello","source_range":{"start":5,"end":15},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"second","question":"What changes?","confidence":0.5}]}`
 	response, err := ValidateReviseResponse([]byte(raw))
 	if err != nil || len(response.Revisions) != 2 {
 		t.Fatalf("expected overlapping advisory alternatives to pass, got %#v, err=%v", response, err)
@@ -175,7 +183,7 @@ func TestValidateReviseResponseAllowsOverlappingAdvisoryRanges(t *testing.T) {
 }
 
 func TestValidateReviseResponseAllowsRepeatedReasonForSeparateRanges(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":10,"end":15},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"same reason","replacement":"a","confidence":0.5},{"kind":"rewrite","source_range":{"start":0,"end":5},"principle_ids":["CORE.APPROVED_WORDS"],"reason":"same reason","replacement":"b","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":10,"end":15},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"same reason","replacement":"a","confidence":0.5},{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.APPROVED_WORDS"],"reason":"same reason","replacement":"b","confidence":0.5}]}`
 	response, err := ValidateReviseResponse([]byte(raw))
 	if err != nil || len(response.Revisions) != 2 {
 		t.Fatalf("expected repeated reason on separate unordered ranges to pass, got %#v, err=%v", response, err)
@@ -183,7 +191,7 @@ func TestValidateReviseResponseAllowsRepeatedReasonForSeparateRanges(t *testing.
 }
 
 func TestValidateReviseResponseRejectsEmptyRange(t *testing.T) {
-	raw := `{"findings":[{"kind":"rewrite","source_range":{"start":5,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","replacement":"x","confidence":0.5}]}`
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":5,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","replacement":"x","confidence":0.5}]}`
 	_, err := ValidateReviseResponse([]byte(raw))
 	if err == nil || !strings.Contains(err.Error(), "invalid revision source range") {
 		t.Fatalf("expected empty range error, got %v", err)
@@ -359,6 +367,35 @@ func TestReviseWithFakeServer(t *testing.T) {
 	// Response must include metadata.
 	if resp.Status != "ok" {
 		t.Fatalf("expected status 'ok', got %q", resp.Status)
+	}
+}
+
+func TestReviseRepairsWrongRangeFromUniqueSourceText(t *testing.T) {
+	srv := newFakeReviseServer(false, "wrong-range")
+	defer srv.Close()
+	response, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Revisions) != 1 {
+		t.Fatalf("revisions = %#v", response.Revisions)
+	}
+	got := response.Revisions[0]
+	if got.SourceText != "term" || got.Range.StartByte != 11 || got.Range.EndByte != 15 {
+		t.Fatalf("source evidence was not remapped: %#v", got)
+	}
+}
+
+func TestReviseRejectsAmbiguousSourceTextRemap(t *testing.T) {
+	srv := newFakeReviseServer(false, "wrong-range")
+	defer srv.Close()
+	doc, err := document.FromReader(strings.NewReader("term term"), "test.md", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, doc, testProfile(), nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "does not uniquely match") {
+		t.Fatalf("expected ambiguous source evidence error, got %v", err)
 	}
 }
 

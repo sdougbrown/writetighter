@@ -1,24 +1,36 @@
 # WriteTighter
 
-WriteTighter is a local, standalone Go CLI for technical prose. It provides deterministic profile-based lint findings and opt-in, structured revision suggestions from a configured local model.
+WriteTighter is a local technical-writing revision harness for Markdown. Its primary command, `revise`, asks a configured OpenAI-compatible model for structured rewrites or clarification requests. Its deterministic companion, `lint`, reports narrow, auditable profile findings.
 
 **Status:** Private development. The embedded default is `software-docs-en@0.2.0`. This repository is not currently cleared for public redistribution.
 
-## What WriteTighter does (and does not) do
+## What WriteTighter does
 
-WriteTighter separates deterministic policy from contextual revision. A versioned **profile** supplies dictionary and rule policy; the revision rubric supplies general technical-writing principles.
+### Contextual revision
 
-### It checks
+`revise` independently analyzes every selected document; it does not require a prior `lint` run or any lint findings. It returns source ranges, reasons, confidence values, and either a suggested replacement or a clarification question.
+
+`revise` only returns advice. A human reviewer or the calling agent decides what to change; WriteTighter never edits the source file.
+
+The revision rubric favors concise, direct instructions; consistent reviewed terminology; short, single-topic paragraphs; and explicit relationships between subjects, actions, transformations, and effects. Passage-matching profile policy and project glossary definitions provide terminology context. Corpus-only observed vocabulary does not become policy.
+
+### Deterministic lint
+
+`lint` provides measurements and exact policy checks that do not require a model:
 
 - **Sentence length:** Applies profile thresholds for PRs, procedures, and descriptions.
 - **Dense paragraphs:** Reports candidate findings for blocks that exceed configured sentence or word counts.
 - **Term policy:** Supports discouraged terms, canonical case, unknown terms, and project term bases when the selected profile enables those rules.
 
-### It does not do
-- **Grammar checking:** It is not a general-purpose grammar checker.
-- **Automatic rewriting:** It identifies issues and suggests improvements via LLM, but it will never modify your files.
-- **Automatic compliance:** It provides findings based on rules; it does not "certify" your documentation.
-- **Broad prose analysis:** It focuses on specific, rule-based metrics rather than subjective "quality."
+## Safety boundaries
+
+- **No automatic application:** `revise` suggests changes but never writes them.
+- **No guessing:** The rubric requests clarification when a safe rewrite would require assumptions.
+- **No invented details:** The rubric prohibits adding facts, actors, identifiers, examples, or implementation details.
+- **Protected technical content:** Rewrites that lose commands, code, identifiers, paths, URLs, numbers, versions, product names, or defined project terms are discarded.
+- **No authorship detection:** WriteTighter improves prose; it does not classify text as human- or AI-written.
+- **No certification:** Findings and suggestions do not establish compliance with a standard.
+- **No universal vocabulary gate:** Reviewed terminology can guide a passage, but corpus frequency and incomplete dictionaries do not define every acceptable word.
 
 ## Installation
 
@@ -72,7 +84,9 @@ but version 0.2.0 does not enable deterministic term findings yet.
 
 ### `writetighter config` (Interactive Setup)
 
-`config` creates a working user configuration in the platform-specific XDG path (normally `~/.config/writetighter/config.toml`). It accepts a complete API URL, a `host:port`, or a localhost port. The workflow queries the OpenAI-compatible model list, lets you select a model, preflights structured output, and atomically writes the config with `0600` permissions.
+`config` creates a working user configuration in the platform-specific XDG path (normally `~/.config/writetighter/config.toml`). It accepts a complete API URL, a `host:port`, or a localhost port.
+
+The workflow queries the OpenAI-compatible model list and lets you select a model. It sends a small chat request to verify that the model returns a JSON object, selecting `json_object` mode when supported and `prompt_json` otherwise. After the preflight succeeds, it atomically writes the config with `0600` permissions.
 
 ```sh
 ./writetighter config
@@ -92,12 +106,13 @@ The workflow offers three authentication choices: no key, a key stored in the pr
 
 `revise` runs contextual revision with the configured model. It reads LLM configuration from your user config (`~/.config/writetighter/config.toml [llm]` section) and never modifies target files.
 
-`revise` runs independently of `lint` findings because semantic compression can occur in short text.
+`revise` runs independently of `lint` findings because concise text can still omit the subject, transformation, or effect while satisfying deterministic thresholds.
 
 **Output:** A structured JSON response containing revision suggestions, each with:
 - top-level `sources`: every document analyzed, including documents with no suggestions
 - `kind`: `"rewrite"` or `"clarification"`
 - `source_path`: File path
+- `source_text`: Exact source evidence copied from the selected range
 - `range`: Source byte range and line/column positions
 - `principle_ids`: Stable revision principles that explain the suggestion
 - `reason`: Explanation
@@ -207,8 +222,9 @@ override = true
 reason = "The published API uses this exact operation name."
 ```
 
-An addition does not need `override`. A project term that conflicts with a
-discouraged profile term must set `override = true` and provide a non-empty reason.
+A project term that does not conflict with the profile does not need `override`.
+A term that conflicts with a discouraged profile entry must set `override = true`
+and provide a non-empty reason.
 Project configuration cannot contain LLM settings or credentials.
 
 ## Local Revision Model
@@ -239,7 +255,9 @@ api_key_env = "WRITETIGHTER_API_KEY"
 
 ### Revision analysis
 
-Runs contextual revision on every selected document regardless of static findings. Always reads LLM config from the user config file (no `--llm` flags needed). It sends the document, up to the documented input limit, to that configured endpoint and returns a dedicated JSON structure with `revisions` (either `rewrite` or `clarification`). It never modifies target files.
+`revise` analyzes every selected document regardless of static findings. It reads model settings from the user config file; it has no model-related command-line flags.
+
+The command sends the document, up to the documented input limit, to the configured endpoint. It returns structured `rewrite` or `clarification` revisions and never modifies target files.
 
 **Example:**
 ```sh

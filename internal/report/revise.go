@@ -31,6 +31,7 @@ type RevisionError struct {
 type RevisionItem struct {
 	Kind         string      `json:"kind"` // "rewrite" or "clarification"
 	SourcePath   string      `json:"source_path"`
+	SourceText   string      `json:"source_text"`
 	Range        ReviseRange `json:"range"`
 	PrincipleIDs []string    `json:"principle_ids"`
 	Reason       string      `json:"reason"`
@@ -83,6 +84,7 @@ func RenderReviseHuman(r *ReviseResponse) (string, error) {
 		}
 		fmt.Fprintf(&b, "kind: %s\n", rev.Kind)
 		fmt.Fprintf(&b, "path: %s\n", rev.SourcePath)
+		fmt.Fprintf(&b, "source: %q\n", rev.SourceText)
 		fmt.Fprintf(&b, "range: [%d:%d - %d:%d] bytes %d-%d\n",
 			rev.Range.StartLine, rev.Range.StartColumn,
 			rev.Range.EndLine, rev.Range.EndColumn,

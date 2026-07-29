@@ -711,7 +711,7 @@ func TestRunLintProducesOutput(t *testing.T) {
 func TestRunReviseProducesStructuredClarificationWithoutLintFinding(t *testing.T) {
 	content := "Refs delta pluralizes three scalars."
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		response := `{"findings":[{"kind":"clarification","source_range":{"start":0,"end":36},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"The transformation has multiple plausible meanings.","question":"Does this rename fields or change scalar values to collections?","confidence":0.84}]}`
+		response := `{"findings":[{"kind":"clarification","source_text":"Refs delta pluralizes three scalars.","source_range":{"start":0,"end":36},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"The transformation has multiple plausible meanings.","question":"Does this rename fields or change scalar values to collections?","confidence":0.84}]}`
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": response}}},
 		})
