@@ -6,7 +6,7 @@ import (
 )
 
 func TestKindsHaveCompleteIndependentGuidance(t *testing.T) {
-	for _, kind := range []string{KindDescription, KindProcedure, KindPR, KindCodeComment, KindReference, KindDecision, KindIncident} {
+	for _, kind := range []string{KindDescription, KindProcedure, KindPR, KindCodeComment, KindReference, KindDecision, KindIncident, KindAgentInstruction} {
 		set, err := ForKind(kind)
 		if err != nil {
 			t.Fatal(err)
@@ -26,7 +26,7 @@ func TestKindsHaveCompleteIndependentGuidance(t *testing.T) {
 }
 
 func TestNewKindsInheritDescriptionSentenceLimit(t *testing.T) {
-	for _, kind := range []string{KindCodeComment, KindReference, KindDecision, KindIncident} {
+	for _, kind := range []string{KindCodeComment, KindReference, KindDecision, KindIncident, KindAgentInstruction} {
 		if got := SentenceLimitParameter(kind); got != "description_max_words" {
 			t.Fatalf("%s parameter = %q", kind, got)
 		}
@@ -38,9 +38,10 @@ func TestNewKindsInheritDescriptionSentenceLimit(t *testing.T) {
 
 func TestSpecializedKindsExposeDistinctDirections(t *testing.T) {
 	checks := map[string][]string{
-		KindReference: {"accurate lookup", "defaults", "boundary conditions"},
-		KindDecision:  {"considered alternatives", "tradeoffs", "engineering preferences"},
-		KindIncident:  {"observed facts", "chronological order", "root-cause claim"},
+		KindReference:        {"accurate lookup", "defaults", "boundary conditions"},
+		KindDecision:         {"considered alternatives", "tradeoffs", "engineering preferences"},
+		KindIncident:         {"observed facts", "chronological order", "root-cause claim"},
+		KindAgentInstruction: {"one control system", "change an agent action", "delegated responsibilities", "reliable execution", "decision points", "trigger metadata", "observable verification"},
 	}
 	for kind, expected := range checks {
 		set, err := ForKind(kind)

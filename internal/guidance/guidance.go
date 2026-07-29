@@ -6,13 +6,14 @@ import (
 )
 
 const (
-	KindDescription = "description"
-	KindProcedure   = "procedure"
-	KindPR          = "pr"
-	KindCodeComment = "code-comment"
-	KindReference   = "reference"
-	KindDecision    = "decision"
-	KindIncident    = "incident"
+	KindDescription      = "description"
+	KindProcedure        = "procedure"
+	KindPR               = "pr"
+	KindCodeComment      = "code-comment"
+	KindReference        = "reference"
+	KindDecision         = "decision"
+	KindIncident         = "incident"
+	KindAgentInstruction = "agent-instruction"
 )
 
 // Principle is a stable semantic revision principle exposed to models and agents.
@@ -96,6 +97,21 @@ var directionsByKind = map[string][]string{
 		"Describe systems and actions without assigning blame or inventing an actor, owner, cause, or remediation commitment.",
 		"Ask for clarification when a missing distinction between detection time, occurrence time, mitigation, recovery, or prevention changes the incident's interpretation.",
 	},
+	KindAgentInstruction: {
+		"Read the full instruction as one control system before proposing local changes. Resolve a term or requirement against all sections, metadata, and examples that define it.",
+		"Prioritize contradictions, missing execution inputs, unreachable steps, ambiguous decisions, unverifiable completion, and unsafe fallback behavior over local explanatory completeness or prose polish.",
+		"Report an ambiguity only when resolving it would change an agent action, choice, output, verification, or failure path. Do not ask for implementation details that the agent does not need to execute the instruction.",
+		"Do not flag a question that another section answers explicitly or that the supplied examples resolve consistently.",
+		"Respect delegated responsibilities. When the instruction assigns discovery or configuration to a named command, tool, or subagent, require only the information needed to invoke it, interpret its result, and handle failure.",
+		"Optimize for reliable execution by the intended agent: state the objective, scope, inputs, expected outputs, and completion condition.",
+		"Order prerequisites and actions so every referenced file, tool, capability, and piece of context is available before it is used.",
+		"Make defaults, precedence, decision points, conditional branches, fallback behavior, and escalation paths explicit. Distinguish required, optional, and conditional steps.",
+		"Align trigger metadata, argument descriptions, tool claims, examples, and body instructions. Do not infer capabilities or context that the instruction does not provide.",
+		"Identify contradictions, unreachable steps, duplicated requirements, and output requirements that no preceding step can satisfy.",
+		"Keep intentional repetition only when it reinforces safety or precedence; otherwise consolidate it so the agent has one authoritative instruction.",
+		"Prefer literal, action-oriented instructions over motivational prose or clever compression. Preserve necessary rationale when it changes how the agent should act.",
+		"Require observable verification and define what the agent should report or do when it cannot complete a required step without guessing.",
+	},
 }
 
 // ValidKind reports whether kind has a defined revision lens.
@@ -119,7 +135,7 @@ func Kinds() []string {
 // inherit its description threshold until a reviewed profile defines them.
 func SentenceLimitParameter(kind string) string {
 	switch kind {
-	case KindCodeComment, KindReference, KindDecision, KindIncident:
+	case KindCodeComment, KindReference, KindDecision, KindIncident, KindAgentInstruction:
 		return "description_max_words"
 	default:
 		return kind + "_max_words"

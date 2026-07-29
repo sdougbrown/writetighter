@@ -81,6 +81,7 @@ The embedded `software-docs-en@0.2.0` profile uses these limits:
 | `reference` | 25 words (inherits `description`) |
 | `decision` | 25 words (inherits `description`) |
 | `incident` | 25 words (inherits `description`) |
+| `agent-instruction` | 25 words (inherits `description`) |
 
 It also emits an informational candidate when a paragraph has more than three
 sentences or more than 80 words. The profile carries a small reviewed dictionary,
@@ -126,8 +127,13 @@ Supported kinds provide these revision lenses:
 - `reference`: accurate lookup, exact definitions, defaults, constraints, and failure conditions
 - `decision`: context, drivers, alternatives, tradeoffs, the selected approach, and consequences
 - `incident`: observed facts, impact, chronology, causal confidence, and corrective actions
+- `agent-instruction`: executable objectives, inputs, tools, decision points, outputs, verification, and failure behavior
 
-The specialized lenses ask for clarification instead of inferring missing code behavior, defaults, decision provenance, or incident causes.
+The specialized lenses ask for clarification instead of inferring missing code behavior, defaults, decision provenance, incident causes, or agent capabilities.
+
+`revise --kind agent-instruction` remains an exact-range prose reviewer. Missing steps and contradictions across distant sections may not have one contiguous evidence range.
+
+For holistic skill or prompt review, pass `writetighter prompt --kind agent-instruction` and the full instruction to a capable reasoning agent. The wrapping agent still verifies and applies any proposed change.
 
 ### `writetighter revise` (Opt-In Contextual Revision)
 
