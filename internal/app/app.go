@@ -21,26 +21,17 @@ var (
 	Version          = "0.1.0"
 	Commit           = "unknown"
 	ErrFailThreshold = errors.New("fail threshold reached")
-	ErrRequireLLM    = errors.New("required llm failed")
 	ErrReviseFailed  = errors.New("revise failed")
 )
 
-type CheckParams struct {
-	Paths           []string
-	Stdin           bool
-	Kind            string
-	Profile         string
-	ConfigPath      string
-	Format          string
-	LLM             bool
-	RequireLLM      bool
-	LLMBaseURL      string
-	LLMModel        string
-	LLMResponseMode string
-	LLMProvider     string
-	LLMAPIKeyEnv    string
-	LLMTimeout      time.Duration
-	FailOn          string
+type LintParams struct {
+	Paths      []string
+	Stdin      bool
+	Kind       string
+	Profile    string
+	ConfigPath string
+	Format     string
+	FailOn     string
 }
 
 // ReviseParams holds parameters for the `writetighter revise` command.
@@ -59,9 +50,9 @@ type App struct{}
 
 func New() *App { return &App{} }
 
-func (a *App) RunCheck(params CheckParams) error {
+func (a *App) RunLint(params LintParams) error {
 	if !validKind(params.Kind) || !validFormat(params.Format) || !validFailOn(params.FailOn) {
-		return fmt.Errorf("invalid check option")
+		return fmt.Errorf("invalid lint option")
 	}
 	// Explicit configuration errors are fatal; absent discovered files are benign.
 	userCfg, err := config.LoadUserConfig()
@@ -112,52 +103,6 @@ func (a *App) RunCheck(params CheckParams) error {
 		terms = merged.Project.Terms
 	}
 
-	// LLM fallbacks from user config
-	if merged != nil && merged.User != nil {
-		uc := merged.User.LLM
-		if params.LLMProvider == "" {
-			params.LLMProvider = uc.Provider
-		}
-		if params.LLMBaseURL == "" && uc.BaseURL != "" {
-			params.LLMBaseURL = uc.BaseURL
-		}
-		if params.LLMModel == "" && uc.Model != "" {
-			params.LLMModel = uc.Model
-		}
-		if params.LLMResponseMode == "" && uc.ResponseMode != "" {
-			params.LLMResponseMode = uc.ResponseMode
-		}
-		if params.LLMAPIKeyEnv == "" {
-			params.LLMAPIKeyEnv = uc.APIKeyEnv
-		}
-		if params.LLMTimeout == 0 && uc.Timeout != "" {
-			d, e := time.ParseDuration(uc.Timeout)
-			if e != nil {
-				return fmt.Errorf("invalid llm timeout: %w", e)
-			}
-			params.LLMTimeout = d
-		}
-	}
-	if params.LLM {
-		if params.LLMProvider != "" && params.LLMProvider != "openai-compatible" {
-			return fmt.Errorf("unsupported llm provider %q", params.LLMProvider)
-		}
-		if params.LLMResponseMode == "" {
-			params.LLMResponseMode = "auto"
-		}
-		if !validResponseMode(params.LLMResponseMode) {
-			return fmt.Errorf("invalid llm response mode %q", params.LLMResponseMode)
-		}
-		if params.LLMTimeout == 0 {
-			params.LLMTimeout = llm.DefaultTimeout
-		}
-		if params.LLMTimeout <= 0 || params.LLMModel == "" {
-			return errors.New("invalid llm configuration")
-		}
-		if _, err := llm.NewClient(llm.Config{BaseURL: params.LLMBaseURL, Model: params.LLMModel, APIKeyEnv: params.LLMAPIKeyEnv, Timeout: params.LLMTimeout, ResponseMode: params.LLMResponseMode}); err != nil {
-			return err
-		}
-	}
 	docs, err := document.CollectInputs(params.Paths, params.Stdin)
 	if err != nil {
 		return err
@@ -206,46 +151,6 @@ func (a *App) RunCheck(params CheckParams) error {
 			findings = append(findings, more...)
 		}
 	}
-	llmState := "not-requested"
-	if params.LLM {
-		llmState = "requested"
-		fmt.Fprintf(os.Stderr, "llm host: %s\n", llm.Host(params.LLMBaseURL))
-		advisorConfig := llm.Config{BaseURL: params.LLMBaseURL, Model: params.LLMModel, APIKeyEnv: params.LLMAPIKeyEnv, ResponseMode: params.LLMResponseMode, Timeout: params.LLMTimeout}
-		var advisory []report.Finding
-		requests := 0
-		for _, doc := range docs {
-			var static []report.Finding
-			for _, f := range findings {
-				if f.Path == nil || *f.Path == doc.Source {
-					static = append(static, f)
-				}
-			}
-			if len(static) == 0 {
-				continue
-			}
-			requests++
-			more, callErr := llm.Advisor(context.Background(), advisorConfig, doc, r, static, terms)
-			if callErr != nil {
-				err = callErr
-				break
-			}
-			advisory = append(advisory, more...)
-		}
-		if requests == 0 {
-			llmState = "skipped"
-		} else if err != nil {
-			if params.RequireLLM {
-				llmState = "failed"
-			} else {
-				fmt.Fprintf(os.Stderr, "llm advisor failed: %v\n", err)
-				llmState = "failed"
-			}
-			err = nil // clear so report rendering proceeds
-		} else {
-			findings = append(findings, advisory...)
-			llmState = "success"
-		}
-	}
 	var sourcePath *string
 	if !params.Stdin && len(params.Paths) > 0 {
 		sourcePath = &params.Paths[0]
@@ -283,9 +188,9 @@ func (a *App) RunCheck(params CheckParams) error {
 		Source:        report.SourceInfo{Kind: params.Kind, Path: sourcePath},
 		Profile:       report.ProfileInfo{ID: string(r.ID), Version: string(r.Version), SHA256: r.SHA256},
 		TermBase:      report.TermBaseInfo{SHA256: termBaseHash},
-		Status:        "checked",
+		Status:        "linted",
 		Claims:        claims,
-		Coverage:      report.CoverageInfo{Rules: coverage, LLM: llmState},
+		Coverage:      report.CoverageInfo{Rules: coverage},
 		Findings:      findings,
 	}
 	formatted, err := renderReport(reportModel, params.Format)
@@ -293,10 +198,6 @@ func (a *App) RunCheck(params CheckParams) error {
 		return err
 	}
 	_, _ = fmt.Fprint(os.Stdout, formatted)
-	// Required LLM failure/skip must return 3 with the completed report preserved.
-	if params.RequireLLM && (llmState == "failed" || llmState == "skipped") {
-		return ErrRequireLLM
-	}
 	if fail {
 		return ErrFailThreshold
 	}
@@ -310,14 +211,7 @@ func validResponseMode(v string) bool {
 	return v == "auto" || v == "json_schema" || v == "json_object" || v == "prompt_json"
 }
 
-// RunLint is the deterministic lint command. It is identical to check without --llm flags.
-func (a *App) RunLint(params CheckParams) error {
-	params.LLM = false
-	params.RequireLLM = false
-	return a.RunCheck(params)
-}
-
-// RunRevise runs the LLM-based revision advisor. It reads LLM config from the
+// RunRevise runs contextual model revision. It reads LLM config from the
 // user config [llm] section and returns a structured ReviseResponse.
 func (a *App) RunRevise(params ReviseParams) error {
 	if params.Kind == "" {

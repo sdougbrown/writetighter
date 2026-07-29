@@ -20,6 +20,12 @@ import (
 // These are the semantic revision principles the LLM may cite, independent of
 // enabled static lint rules. Lint rule IDs may appear as context in the prompt
 // but must not gate semantic revisions.
+// SourceRange is a half-open UTF-8 byte range in model input.
+type SourceRange struct {
+	Start int `json:"start"`
+	End   int `json:"end"`
+}
+
 var knownRevisePrincipleIDs = map[string]bool{
 	"CORE.APPROVED_WORDS":         true,
 	"CORE.ONE_TERM_IDEA":          true,
@@ -29,7 +35,7 @@ var knownRevisePrincipleIDs = map[string]bool{
 	"CORE.EXPLICIT_RELATIONSHIPS": true,
 }
 
-// Revise runs the revision advisor and returns a ReviseResponse.
+// Revise runs contextual revision and returns a ReviseResponse.
 // It runs even when static findings are empty (semantic compression can occur
 // in short text). The response contains rewrite and/or clarification suggestions.
 func Revise(ctx context.Context, config Config, doc *document.Document, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry) (*report.ReviseResponse, error) {

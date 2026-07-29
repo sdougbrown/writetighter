@@ -16,7 +16,7 @@ func main() { os.Exit(run(os.Args[1:])) }
 
 // Exit codes:
 // 0: command completed successfully.
-// 1: lint/check findings reached --fail-on.
+// 1: lint findings reached --fail-on.
 // 2: usage, configuration, profile, or input failure.
 // 3: a required model call or model response failed.
 func run(args []string) int {
@@ -27,8 +27,6 @@ func run(args []string) int {
 	switch args[0] {
 	case "version":
 		return runVersion(args[1:])
-	case "check":
-		return runCheck(args[1:])
 	case "lint":
 		return runLint(args[1:])
 	case "revise":
@@ -43,52 +41,7 @@ func run(args []string) int {
 	}
 }
 
-func runCheck(args []string) int {
-	fs := flag.NewFlagSet("check", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	stdin := fs.Bool("stdin", false, "")
-	kind := fs.String("kind", "description", "")
-	profile := fs.String("profile", "", "")
-	configPath := fs.String("config", "", "")
-	format := fs.String("format", "human", "")
-	llm := fs.Bool("llm", false, "")
-	requireLLM := fs.Bool("require-llm", false, "")
-	baseURL := fs.String("llm-base-url", "", "")
-	model := fs.String("llm-model", "", "")
-	responseMode := fs.String("llm-response-mode", "", "")
-	failOn := fs.String("fail-on", "none", "")
-	fs.Usage = func() {}
-	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
-		return 2
-	}
-	params := app.CheckParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, LLM: *llm, RequireLLM: *requireLLM, LLMBaseURL: *baseURL, LLMModel: *model, LLMResponseMode: *responseMode, FailOn: *failOn}
-	if params.Stdin && len(params.Paths) > 0 {
-		usageErr("usage: mutually exclusive arguments")
-		return 2
-	}
-	if !params.Stdin && len(params.Paths) == 0 {
-		usageErr("usage: no input specified")
-		return 2
-	}
-	if params.RequireLLM && !params.LLM {
-		usageErr("usage: --require-llm requires --llm")
-		return 2
-	}
-	err := app.New().RunCheck(params)
-	switch {
-	case errors.Is(err, app.ErrRequireLLM):
-		return 3
-	case errors.Is(err, app.ErrFailThreshold):
-		return 1
-	case err != nil:
-		usageErr(err.Error())
-		return 2
-	}
-	return 0
-}
-
-// runLint is the deterministic command. It parses the same flags as check
-// but does not support --llm or --require-llm.
+// runLint runs deterministic profile rules without model access.
 func runLint(args []string) int {
 	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -102,7 +55,7 @@ func runLint(args []string) int {
 	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
 		return 2
 	}
-	params := app.CheckParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, FailOn: *failOn}
+	params := app.LintParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, FailOn: *failOn}
 	if params.Stdin && len(params.Paths) > 0 {
 		usageErr("usage: mutually exclusive arguments")
 		return 2
@@ -122,7 +75,7 @@ func runLint(args []string) int {
 	return 0
 }
 
-// runRevise is the opt-in LLM revision advisor command.
+// runRevise is the opt-in contextual revision command.
 func runRevise(args []string) int {
 	fs := flag.NewFlagSet("revise", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -157,9 +110,9 @@ func runRevise(args []string) int {
 }
 
 // The documented CLI permits paths before flags. flag.FlagSet stops at the first
-// positional argument, so normalize the small check grammar before parsing.
+// positional argument, so normalize the small lint/revise grammar before parsing.
 func normalizeInterspersedFlags(args []string) []string {
-	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--llm-base-url": true, "--llm-model": true, "--llm-response-mode": true, "--fail-on": true}
+	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true}
 	var flags, paths []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]

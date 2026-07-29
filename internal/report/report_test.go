@@ -18,12 +18,12 @@ func repoRoot(t *testing.T) string {
 
 func TestRenderJSON(t *testing.T) {
 	var path *string
-	r := &Report{SchemaVersion: 1, ToolVersion: "0.1.0", Source: SourceInfo{Kind: "pr", Path: path}, Profile: ProfileInfo{ID: "software-docs-en", Version: "0.1.0", SHA256: "placeholder"}, TermBase: TermBaseInfo{SHA256: "placeholder"}, Status: "checked", Claims: ClaimsInfo{Certification: "unknown"}, Coverage: CoverageInfo{Rules: []RuleCoverage{}, LLM: "not-requested"}, Findings: []Finding{}}
+	r := &Report{SchemaVersion: 1, ToolVersion: "0.1.0", Source: SourceInfo{Kind: "pr", Path: path}, Profile: ProfileInfo{ID: "software-docs-en", Version: "0.1.0", SHA256: "placeholder"}, TermBase: TermBaseInfo{SHA256: "placeholder"}, Status: "linted", Claims: ClaimsInfo{Certification: "unknown"}, Coverage: CoverageInfo{Rules: []RuleCoverage{}}, Findings: []Finding{}}
 	got, err := RenderJSON(r)
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := os.ReadFile(filepath.Join(repoRoot(t), "testdata", "expected", "simple-check.json"))
+	want, err := os.ReadFile(filepath.Join(repoRoot(t), "testdata", "expected", "simple-lint.json"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestRenderJSON(t *testing.T) {
 }
 
 func TestRenderHuman(t *testing.T) {
-	got, err := RenderHuman(&Report{Status: "checked"})
+	got, err := RenderHuman(&Report{Status: "linted"})
 	if err != nil || got == "" {
 		t.Fatal("expected human output")
 	}

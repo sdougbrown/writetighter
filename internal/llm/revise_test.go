@@ -31,7 +31,7 @@ func TestReviseResponseModes(t *testing.T) {
 		}
 	}
 	if strings.Contains(schema, "uniqueItems") || strings.Contains(schema, `"rule_ids"`) {
-		t.Fatalf("revise schema contains unsupported or legacy fields: %s", schema)
+		t.Fatalf("revise schema contains unsupported or unexpected fields: %s", schema)
 	}
 }
 

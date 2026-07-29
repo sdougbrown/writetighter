@@ -13,13 +13,13 @@ parent MUST run WriteTighter over the changed prose before accepting the result:
    writetighter lint PATH ... --kind description --format json
    ```
 3. Send the compact report back to docs-writer for one bounded revision pass.
-4. Rerun the static check before acceptance.
+4. Rerun `lint` before acceptance.
 
-Docs-writer never has shell access. The parent owns the check/review loop.
+Docs-writer never has shell access. The parent owns the lint/review loop.
 
 ## Agent usage examples
 
-### Check PR body
+### Lint PR body
 
 ```sh
 writetighter lint --stdin --kind pr --format json \
@@ -41,7 +41,7 @@ questions. The primary agent decides whether and how to edit; `revise` never
 changes the target file. Exit code 3 means the required model call or response
 failed, so an empty revision list must not be inferred from a failed process.
 
-### Check documentation
+### Lint documentation
 
 ```sh
 writetighter lint docs/ --kind description --format json --fail-on none
@@ -61,7 +61,7 @@ writetighter profile list
 
 ## Precision gating
 
-Checks are advisory by default. Enable required static checks only
+Lint findings are advisory by default. Enable required rules only
 rule-by-rule after the documented precision threshold passes (at least 100
 labeled opportunities and 90% precision per rule).
 
@@ -80,4 +80,4 @@ See also:
 
 - [Post-dispatch checklist](../references/post-dispatch-checklist.md) in
   the docs-writer skill
-- [README configuration and command guide](../README.md#llm-advisory-two-workflows)
+- [README configuration and command guide](../README.md#local-revision-model)

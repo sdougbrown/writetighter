@@ -13,15 +13,14 @@
   "term_base": {
     "sha256": "placeholder"
   },
-  "status": "checked",
+  "status": "linted",
   "claims": {
     "standard": null,
     "issue": null,
     "certification": "unknown"
   },
   "coverage": {
-    "rules": [],
-    "llm": "not-requested"
+    "rules": []
   },
   "findings": []
 }

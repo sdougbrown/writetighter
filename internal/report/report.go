@@ -41,7 +41,6 @@ type ClaimsInfo struct {
 
 type CoverageInfo struct {
 	Rules []RuleCoverage `json:"rules"`
-	LLM   string         `json:"llm"`
 }
 
 type RuleCoverage struct {
@@ -98,7 +97,7 @@ func RenderAgent(report *Report) (string, error) {
 		if f.Path != nil {
 			path = *f.Path
 		}
-		fmt.Fprintf(&b, "check: %s %s path:%s\n", strings.ToUpper(f.Severity), f.RuleID, path)
+		fmt.Fprintf(&b, "lint: %s %s path:%s\n", strings.ToUpper(f.Severity), f.RuleID, path)
 	}
 	return b.String(), nil
 }

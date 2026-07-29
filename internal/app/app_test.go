@@ -52,10 +52,10 @@ func writeTempFile(t *testing.T, content string) string {
 	return p
 }
 
-// runCheckWithParams is a helper that runs RunCheck with the given params.
-func runCheckWithParams(params CheckParams) error {
+// runLintWithParams is a helper that runs RunLint with the given params.
+func runLintWithParams(params LintParams) error {
 	a := &App{}
-	return a.RunCheck(params)
+	return a.RunLint(params)
 }
 
 // captureStdout captures os.Stdout output into a buffer.
@@ -86,63 +86,63 @@ func TestCommitNonEmpty(t *testing.T) {
 	}
 }
 
-// --- RunCheck tests ---
+// --- RunLint tests ---
 
-func TestRunCheckNoProfileFails(t *testing.T) {
-	params := CheckParams{
+func TestRunLintNoProfileFails(t *testing.T) {
+	params := LintParams{
 		Paths:  []string{"/nonexistent/path.txt"},
 		Kind:   "description",
 		Format: "json",
 		FailOn: "none",
 	}
-	err := runCheckWithParams(params)
+	err := runLintWithParams(params)
 	if err == nil {
 		t.Fatal("expected error for nonexistent path")
 	}
 }
 
-func TestRunCheckFailOnError(t *testing.T) {
+func TestRunLintFailOnError(t *testing.T) {
 	// The default profile's CORE.SENTENCE_LENGTH produces warning-severity findings,
 	// not error. So FailOn=error should NOT trigger ErrFailThreshold even with findings.
 	// We verify this by using long text that triggers sentence-length warnings.
 	text := strings.Repeat("word ", 30) + "."
 	path := writeTempFile(t, text)
 
-	params := CheckParams{
+	params := LintParams{
 		Paths:  []string{path},
 		Kind:   "description",
 		Format: "json",
 		FailOn: "error",
 	}
-	err := runCheckWithParams(params)
+	err := runLintWithParams(params)
 	// No rule in the default profile produces error-severity, so no threshold reached.
 	if err != nil {
 		t.Fatalf("expected nil with FailOn=error (no error-severity findings), got %v", err)
 	}
 }
 
-func TestRunCheckFailOnWarning(t *testing.T) {
+func TestRunLintFailOnWarning(t *testing.T) {
 	// Long text triggers CORE.SENTENCE_LENGTH which has severity "warning".
 	// FailOn=warning should return ErrFailThreshold.
 	text := strings.Repeat("word ", 30) + "."
 	path := writeTempFile(t, text)
 
-	params := CheckParams{
+	params := LintParams{
 		Paths:  []string{path},
 		Kind:   "description",
 		Format: "json",
 		FailOn: "warning",
 	}
-	err := runCheckWithParams(params)
+	err := runLintWithParams(params)
 	if err != ErrFailThreshold {
 		t.Fatalf("expected ErrFailThreshold, got %v", err)
 	}
 }
 
-func TestRunCheckFailOnWarningRendersCompletedReport(t *testing.T) {
+func TestRunLintFailOnWarningRendersCompletedReport(t *testing.T) {
 	path := writeTempFile(t, strings.Repeat("word ", 30)+".")
 	buf := captureStdout(t, func() {
-		err := runCheckWithParams(CheckParams{Paths: []string{path}, Kind: "description", Format: "json", FailOn: "warning"})
+		err := runLintWithParams(LintParams{Paths: []string{path}, Kind: "description", Format: "json", FailOn: "warning"})
 		if !errors.Is(err, ErrFailThreshold) {
 			t.Fatalf("expected threshold error, got %v", err)
 		}
@@ -151,29 +151,29 @@ func TestRunCheckFailOnWarningRendersCompletedReport(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("expected completed JSON report: %v", err)
 	}
-	if got["status"] != "checked" {
+	if got["status"] != "linted" {
 		t.Fatalf("unexpected report: %#v", got)
 	}
 }
 
-func TestRunCheckFailOnNone(t *testing.T) {
+func TestRunLintFailOnNone(t *testing.T) {
 	// Even though there are findings, FailOn=none means no error.
 	text := strings.Repeat("word ", 30) + "."
 	path := writeTempFile(t, text)
 
-	params := CheckParams{
+	params := LintParams{
 		Paths:  []string{path},
 		Kind:   "description",
 		Format: "json",
 		FailOn: "none",
 	}
-	err := runCheckWithParams(params)
+	err := runLintWithParams(params)
 	if err != nil {
 		t.Fatalf("expected nil with FailOn=none, got %v", err)
 	}
 }
 
-func TestRunCheckStdin(t *testing.T) {
+func TestRunLintStdin(t *testing.T) {
 	r, w, err := os.Pipe()
 	if err != nil {
 		t.Fatal(err)
@@ -185,19 +185,19 @@ func TestRunCheckStdin(t *testing.T) {
 	os.Stdin = r
 	defer func() { os.Stdin = oldStdin }()
 
-	params := CheckParams{
+	params := LintParams{
 		Stdin:  true,
 		Kind:   "description",
 		Format: "json",
 		FailOn: "none",
 	}
-	checkErr := runCheckWithParams(params)
+	checkErr := runLintWithParams(params)
 	if checkErr != nil {
 		t.Fatalf("unexpected error: %v", checkErr)
 	}
 }
 
-func TestRunCheckJSONOutput(t *testing.T) {
+func TestRunLintJSONOutput(t *testing.T) {
 	text := "some text here."
 	path := writeTempFile(t, text)
 
@@ -206,13 +206,13 @@ func TestRunCheckJSONOutput(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	params := CheckParams{
+	params := LintParams{
 		Paths:  []string{path},
 		Kind:   "description",
 		Format: "json",
 		FailOn: "none",
 	}
-	runCheckWithParams(params)
+	runLintWithParams(params)
 	w.Close()
 	os.Stdout = oldStdout
 
@@ -222,12 +222,12 @@ func TestRunCheckJSONOutput(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &reportData); err != nil {
 		t.Fatalf("invalid JSON output: %v\noutput: %s", err, buf.String())
 	}
-	if reportData["status"] != "checked" {
-		t.Errorf("expected status 'checked', got %v", reportData["status"])
+	if reportData["status"] != "linted" {
+		t.Errorf("expected status 'linted', got %v", reportData["status"])
 	}
 }
 
-func TestRunCheckHumanOutput(t *testing.T) {
+func TestRunLintHumanOutput(t *testing.T) {
 	text := "some text here."
 	path := writeTempFile(t, text)
 
@@ -236,26 +236,26 @@ func TestRunCheckHumanOutput(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	params := CheckParams{
+	params := LintParams{
 		Paths:  []string{path},
 		Kind:   "description",
 		Format: "human",
 		FailOn: "none",
 	}
-	runCheckWithParams(params)
+	runLintWithParams(params)
 	w.Close()
 	os.Stdout = oldStdout
 
 	buf.ReadFrom(r)
 
 	out := buf.String()
-	// Human format shows "status: checked" at minimum.
+	// Human format shows "status: linted" at minimum.
 	if !strings.Contains(out, "status:") {
 		t.Fatalf("expected human output to contain 'status:', got: %s", out)
 	}
 }
 
-func TestRunCheckAgentOutput(t *testing.T) {
+func TestRunLintAgentOutput(t *testing.T) {
 	text := "some text here."
 	path := writeTempFile(t, text)
 
@@ -264,13 +264,13 @@ func TestRunCheckAgentOutput(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	params := CheckParams{
+	params := LintParams{
 		Paths:  []string{path},
 		Kind:   "description",
 		Format: "agent",
 		FailOn: "none",
 	}
-	runCheckWithParams(params)
+	runLintWithParams(params)
 	w.Close()
 	os.Stdout = oldStdout
 
@@ -282,59 +282,52 @@ func TestRunCheckAgentOutput(t *testing.T) {
 	_ = out
 }
 
-func TestRunCheckDefaultProfile(t *testing.T) {
+func TestRunLintDefaultProfile(t *testing.T) {
 	text := "writetighter is great."
 	path := writeTempFile(t, text)
 
-	params := CheckParams{
+	params := LintParams{
 		Paths:  []string{path},
 		Kind:   "description",
 		Format: "json",
 		FailOn: "none",
 	}
-	err := runCheckWithParams(params)
+	err := runLintWithParams(params)
 	if err != nil {
 		t.Fatalf("unexpected error with default profile: %v", err)
 	}
 }
 
-func TestRunCheckInvalidProfileSpec(t *testing.T) {
+func TestRunLintInvalidProfileSpec(t *testing.T) {
 	text := "hello world."
 	path := writeTempFile(t, text)
 
-	params := CheckParams{
+	params := LintParams{
 		Paths:   []string{path},
 		Kind:    "description",
 		Format:  "json",
 		FailOn:  "none",
 		Profile: "nonexistent@0.0.0",
 	}
-	err := runCheckWithParams(params)
+	err := runLintWithParams(params)
 	if err == nil {
 		t.Fatal("expected error for invalid profile spec")
 	}
 }
 
-func TestRunCheckLLMRequiredButNotAvailable(t *testing.T) {
-	// Verify the sentinel error is defined.
-	if ErrRequireLLM == nil {
-		t.Fatal("ErrRequireLLM should not be nil")
-	}
-}
-
-func TestRunCheckFailOnWarningIncludesErrors(t *testing.T) {
+func TestRunLintFailOnWarningIncludesErrors(t *testing.T) {
 	// FailOn=warning catches both warning AND error severity.
 	// Sentence length produces warning-severity findings.
 	text := strings.Repeat("word ", 30) + "."
 	path := writeTempFile(t, text)
 
-	params := CheckParams{
+	params := LintParams{
 		Paths:  []string{path},
 		Kind:   "description",
 		Format: "json",
 		FailOn: "warning",
 	}
-	err := runCheckWithParams(params)
+	err := runLintWithParams(params)
 	if err != ErrFailThreshold {
 		t.Fatalf("expected ErrFailThreshold for warning, got %v", err)
 	}
@@ -530,18 +523,18 @@ func TestNewReturnsNonNull(t *testing.T) {
 
 // --- Edge case: no config files ---
 
-func TestRunCheckExplicitMissingConfigFails(t *testing.T) {
+func TestRunLintExplicitMissingConfigFails(t *testing.T) {
 	text := "simple text."
 	path := writeTempFile(t, text)
 
-	params := CheckParams{
+	params := LintParams{
 		Paths:      []string{path},
 		Kind:       "description",
 		Format:     "json",
 		FailOn:     "none",
 		ConfigPath: "/nonexistent/config.yaml",
 	}
-	err := runCheckWithParams(params)
+	err := runLintWithParams(params)
 	if err == nil {
 		t.Fatal("expected explicit missing config to fail")
 	}
@@ -559,32 +552,15 @@ func TestProfileResolveEmbedded(t *testing.T) {
 	}
 }
 
-func TestRunCheckRejectsSymlinkPath(t *testing.T) {
+func TestRunLintRejectsSymlinkPath(t *testing.T) {
 	realPath := writeTempFile(t, "test content")
 	symPath := filepath.Join(t.TempDir(), "link.txt")
 	if err := os.Symlink(realPath, symPath); err != nil {
 		t.Skip("symlink creation not supported")
 	}
-	err := runCheckWithParams(CheckParams{Paths: []string{symPath}, Kind: "description", Format: "json", FailOn: "none"})
+	err := runLintWithParams(LintParams{Paths: []string{symPath}, Kind: "description", Format: "json", FailOn: "none"})
 	if err == nil || !strings.Contains(err.Error(), "symlink") {
 		t.Fatalf("expected symlink error, got %v", err)
-	}
-}
-
-func TestRunCheckLLMOptionalFailurePreservesReport(t *testing.T) {
-	// With a connection that will fail, optional LLM should still produce a report.
-	params := CheckParams{
-		Paths:      []string{writeTempFile(t, "simple text.")},
-		Kind:       "description",
-		Format:     "json",
-		FailOn:     "none",
-		LLM:        true,
-		LLMBaseURL: "http://127.0.0.1:1",
-		LLMModel:   "test",
-	}
-	err := runCheckWithParams(params)
-	if err != nil {
-		t.Fatalf("expected no error from optional LLM failure, got %v", err)
 	}
 }
 
@@ -660,7 +636,7 @@ func TestRunReviseInvalidFormat(t *testing.T) {
 func TestRunLint(t *testing.T) {
 	text := "simple text."
 	path := writeTempFile(t, text)
-	err := (&App{}).RunLint(CheckParams{
+	err := (&App{}).RunLint(LintParams{
 		Paths:  []string{path},
 		Kind:   "description",
 		Format: "json",
@@ -671,30 +647,13 @@ func TestRunLint(t *testing.T) {
 	}
 }
 
-func TestRunLintCannotEnableModelCallsThroughParams(t *testing.T) {
-	path := writeTempFile(t, "simple text.")
-	err := (&App{}).RunLint(CheckParams{
-		Paths:      []string{path},
-		Kind:       "description",
-		Format:     "json",
-		FailOn:     "none",
-		LLM:        true,
-		RequireLLM: true,
-		LLMBaseURL: "http://127.0.0.1:1",
-		LLMModel:   "test",
-	})
-	if err != nil {
-		t.Fatalf("lint must remain deterministic even when an API caller sets LLM fields: %v", err)
-	}
-}
-
 func TestRunLintProducesOutput(t *testing.T) {
 	path := writeTempFile(t, "some text.")
 	var buf bytes.Buffer
 	oldStdout := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
-	err := (&App{}).RunLint(CheckParams{
+	err := (&App{}).RunLint(LintParams{
 		Paths:  []string{path},
 		Kind:   "description",
 		Format: "json",
@@ -713,8 +672,8 @@ func TestRunLintProducesOutput(t *testing.T) {
 	if err := json.Unmarshal(buf.Bytes(), &reportData); err != nil {
 		t.Fatalf("invalid JSON: %v\noutput: %s", err, buf.String())
 	}
-	if reportData["status"] != "checked" {
-		t.Errorf("expected status 'checked', got %v", reportData["status"])
+	if reportData["status"] != "linted" {
+		t.Errorf("expected status 'linted', got %v", reportData["status"])
 	}
 }
 

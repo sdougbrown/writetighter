@@ -29,7 +29,7 @@ func newFakeServer(requireKey bool, mode string) *fakeLLMServer {
 		case "oversized-envelope":
 			_, _ = w.Write([]byte(strings.Repeat("x", MaxEnvelopeChars+1)))
 		default:
-			content := `{"findings":[{"source_range":{"start":0,"end":5},"rule_ids":["CORE.TERM_DISCOURAGED"],"reason":"rewrite suggestion","replacement":"preferred term","confidence":0.91}]}`
+			content := `{"findings":[]}`
 			if mode == "escaped-envelope" {
 				content = strings.Repeat(`"`, 8000)
 			}
@@ -47,8 +47,7 @@ func newFakeServer(requireKey bool, mode string) *fakeLLMServer {
 
 func (f *fakeLLMServer) Close() { f.server.Close() }
 
-// newFakeReviseServer creates a fake server that returns responses matching the
-// revise response schema (principle_ids instead of rule_ids).
+// newFakeReviseServer returns responses matching the revision schema.
 func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
 	f := &fakeLLMServer{}
 	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

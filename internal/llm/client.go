@@ -66,7 +66,6 @@ type Client struct {
 	endpoint   string
 	apiKeyEnv  string
 	model      string
-	mode       string
 }
 
 func NewClient(cfg Config) (*Client, error) {
@@ -80,7 +79,7 @@ func NewClient(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{httpClient: &http.Client{Timeout: cfg.Timeout}, endpoint: endpoint, apiKeyEnv: cfg.APIKeyEnv, model: cfg.Model, mode: cfg.ResponseMode}, nil
+	return &Client{httpClient: &http.Client{Timeout: cfg.Timeout}, endpoint: endpoint, apiKeyEnv: cfg.APIKeyEnv, model: cfg.Model}, nil
 }
 
 func (c *Client) Endpoint() string { return c.endpoint }
@@ -97,9 +96,6 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 		return nil, fmt.Errorf("llm input too large")
 	}
 	req.Model = c.model
-	if req.ResponseFormat == nil && c.mode != "" && c.mode != "auto" {
-		req.ResponseFormat = buildResponseFormat(c.mode)
-	}
 	body, err := json.Marshal(req)
 	if err != nil {
 		return nil, err
@@ -140,25 +136,7 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	return &out, nil
 }
 
-func buildResponseFormat(mode string) *ResponseFormat {
-	if mode == "prompt_json" || mode == "auto" || mode == "" {
-		return nil
-	}
-	rf := &ResponseFormat{Type: mode}
-	if mode == "json_schema" {
-		schema := `{"type":"object","properties":{"findings":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"source_range":{"type":"object","additionalProperties":false,"properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"rule_ids":{"type":"array","minItems":1,"items":{"type":"string"}},"reason":{"type":"string"},"replacement":{"type":"string"},"confidence":{"type":"number","minimum":0,"maximum":1}},"required":["source_range","rule_ids","reason","replacement","confidence"]}}},"required":["findings"]}`
-		rf.JSONSchema = &JSONSchema{
-			Name:   "advisor_response",
-			Schema: json.RawMessage(schema),
-			Strict: true,
-		}
-	}
-	return rf
-}
-
-// buildReviseResponseFormat builds a revise-specific JSON schema for json_schema mode.
-// This schema is distinct from the advisor schema: it uses principle_ids, kind (enum),
-// and optional question/replacement fields.
+// buildReviseResponseFormat builds the structured revision schema.
 func buildReviseResponseFormat(mode string) *ResponseFormat {
 	if mode == "prompt_json" || mode == "auto" || mode == "" {
 		return nil

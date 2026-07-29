@@ -1,12 +1,12 @@
 # WriteTighter
 
-WriteTighter is a local, standalone Go CLI that checks technical prose against versioned rule profiles. It returns machine-readable findings and can optionally request advisory rewrite suggestions from a local LLM.
+WriteTighter is a local, standalone Go CLI for technical prose. It provides deterministic profile-based lint findings and opt-in, structured revision suggestions from a configured local model.
 
 **Status:** Private development. The embedded default is `software-docs-en@0.2.0`. This repository is not currently cleared for public redistribution.
 
 ## What WriteTighter does (and does not) do
 
-WriteTighter is a **neutral checking host**. It does not have its own opinions; instead, it selects a versioned **profile** that supplies the applicable dictionary and rule policy.
+WriteTighter separates deterministic policy from contextual revision. A versioned **profile** supplies dictionary and rule policy; the revision rubric supplies general technical-writing principles.
 
 ### It checks
 
@@ -49,23 +49,17 @@ but version 0.2.0 does not enable deterministic term findings yet.
 
 ### `writetighter lint` (Deterministic)
 
-`lint` is the deterministic command for running static rule checks. It shares the established `check` behavior but intentionally has no LLM flags.
+`lint` runs deterministic profile rules. It never invokes a model.
 
 ```sh
 ./writetighter lint README.md --kind description --format json
 ```
 
-`check` remains available for backward compatibility, including its legacy optional `--llm` advisory mode.
+### `writetighter revise` (Opt-In Contextual Revision)
 
-### `writetighter check` (Backward-Compatible Alias)
+`revise` runs contextual revision with the configured model. It reads LLM configuration from your user config (`~/.config/writetighter/config.toml [llm]` section) and never modifies target files.
 
-`check` is the original command, kept for backward compatibility. It supports all the same flags, including `--llm` for optional LLM advice.
-
-### `writetighter revise` (Opt-In LLM Advisor)
-
-`revise` runs the LLM-based revision advisor. It reads LLM configuration from your user config (`~/.config/writetighter/config.toml [llm]` section) and never modifies target files.
-
-Unlike `check --llm`, `revise` runs even when `lint` has no findings — semantic compression can occur in short text.
+`revise` runs independently of `lint` findings because semantic compression can occur in short text.
 
 **Output:** A structured JSON response containing revision suggestions, each with:
 - top-level `sources`: every document analyzed, including documents with no suggestions
@@ -90,33 +84,33 @@ Unlike `check --llm`, `revise` runs even when `lint` has no findings — semanti
 ./writetighter revise README.md --kind description
 ```
 
-## Basic Checks
+## Basic Linting
 
-You can check text via `stdin` or by providing paths to files and directories.
+You can lint text via `stdin` or by providing paths to files and directories.
 
-**Check via stdin:**
+**Lint via stdin:**
 
 ```sh
 echo "This change replaces the global mutex with per-repository locks so unrelated repository updates no longer block one another during mirror fetch operations." |
-  ./writetighter check --stdin --kind pr
+  ./writetighter lint --stdin --kind pr
 ```
 
 The human report includes the static finding:
 
 ```text
-status: checked
+status: linted
 warning CORE.SENTENCE_LENGTH Split this sentence into independently verifiable claims.
 ```
 
-**Check one file:**
+**Lint one file:**
 
 ```sh
-./writetighter check README.md --kind description --format human
+./writetighter lint README.md --kind description --format human
 ```
 
-**Check a directory of Markdown files:**
+**Lint a directory of Markdown files:**
 ```sh
-./writetighter check docs/ --kind description --format json
+./writetighter lint docs/ --kind description --format json
 ```
 
 ### Output Formats and Exit Codes
@@ -127,10 +121,10 @@ warning CORE.SENTENCE_LENGTH Split this sentence into independently verifiable c
 - `agent`: Compact, line-oriented output for coding agents.
 
 **Exit Codes:**
-- `0`: `lint`/`check` completed successfully; no findings reached the failure threshold. `revise` also exits `0` on success.
-- `1`: `lint`/`check` completed; findings reached the `--fail-on` threshold.
+- `0`: `lint` completed without reaching the failure threshold, or `revise` completed successfully.
+- `1`: `lint` findings reached the `--fail-on` threshold.
 - `2`: Usage, configuration, profile, or input failure.
-- `3`: A required model call or response failed (`revise`, or `check --require-llm`).
+- `3`: A required `revise` model call or response failed.
 
 You can control failure behavior with `--fail-on`:
 - `--fail-on none` (default): Always exit `0`.
@@ -183,7 +177,7 @@ An addition does not need `override`. A project term that conflicts with a
 discouraged profile term must set `override = true` and provide a non-empty reason.
 Project configuration cannot contain LLM settings or credentials.
 
-## LLM Advisory (Two Workflows)
+## Local Revision Model
 
 LLM configuration is always read from the user config file. Never pass API keys on the command line.
 
@@ -204,30 +198,9 @@ export its value before running `revise`:
 api_key_env = "WRITETIGHTER_API_KEY"
 ```
 
-### Workflow 1: `check --llm` (Finding-Gated Advisory)
+### Revision analysis
 
-**Network Access:** For security, network access is disabled by default. You must explicitly include the `--llm` flag on **every** invocation to use an LLM.
-
-This runs only for files or passages that have already triggered static findings.
-
-1. WriteTighter runs the static rules.
-2. If a finding is found, it builds a compact rewrite rubric from reviewed profile dictionary entries. Corpus-only `observed` terms never become prompt policy.
-3. It asks the model for the minimum context-aware rewrite, using literal alternatives only when they preserve technical meaning.
-4. It discards suggestions that change or omit protected technical content.
-5. Surviving rewrites are advisory findings only; WriteTighter never applies them.
-
-**Example:**
-```sh
-./writetighter check docs/ \
-  --llm \
-  --llm-base-url http://sparky:4000/v1 \
-  --llm-model gemma4 \
-  --llm-response-mode json_object
-```
-
-### Workflow 2: `revise` (Independent Revision Analysis)
-
-Runs the revision advisor on every selected document regardless of static findings. Always reads LLM config from the user config file (no `--llm` flags needed). It sends the document, up to the documented input limit, to that configured endpoint and returns a dedicated JSON structure with `revisions` (either `rewrite` or `clarification`). It never modifies target files.
+Runs contextual revision on every selected document regardless of static findings. Always reads LLM config from the user config file (no `--llm` flags needed). It sends the document, up to the documented input limit, to that configured endpoint and returns a dedicated JSON structure with `revisions` (either `rewrite` or `clarification`). It never modifies target files.
 
 **Example:**
 ```sh

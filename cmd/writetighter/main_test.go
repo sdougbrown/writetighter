@@ -8,18 +8,6 @@ import (
 	"testing"
 )
 
-func TestRunCheckUsage(t *testing.T) {
-	if got := run([]string{"check", "--stdin", "foo"}); got != 2 {
-		t.Fatalf("got %d", got)
-	}
-	if got := run([]string{"check"}); got != 2 {
-		t.Fatalf("got %d", got)
-	}
-	if got := run([]string{"check", "--require-llm", "foo"}); got != 2 {
-		t.Fatalf("got %d", got)
-	}
-}
-
 func TestRunVersion(t *testing.T) {
 	if got := run([]string{"version", "--json"}); got != 0 {
 		t.Fatalf("got %d", got)
@@ -56,19 +44,13 @@ func TestRunExplain(t *testing.T) {
 
 func TestStrictFlagAndEnumValidation(t *testing.T) {
 	for _, args := range [][]string{
-		{"version", "--wat"}, {"check", "--stdin", "--kind", "blog"},
-		{"check", "--stdin", "--format", "yaml"}, {"explain", "--wat", "CORE.SENTENCE_LENGTH"},
+		{"version", "--wat"}, {"lint", "--stdin", "--kind", "blog"},
+		{"lint", "--stdin", "--format", "yaml"}, {"explain", "--wat", "CORE.SENTENCE_LENGTH"},
 		{"profile", "list", "--wat"},
 	} {
 		if got := run(args); got != 2 {
 			t.Fatalf("%v: got %d", args, got)
 		}
-	}
-}
-
-func TestCheckAcceptsFlagsAfterPath(t *testing.T) {
-	if got := run([]string{"check", "missing.txt", "--format", "wat"}); got != 2 {
-		t.Fatalf("got %d", got)
 	}
 }
 
@@ -85,7 +67,7 @@ func TestLintCommand(t *testing.T) {
 }
 
 func TestLintAcceptedFlags(t *testing.T) {
-	// lint should accept the same positional+flags as check (minus --llm).
+	// lint accepts paths before flags.
 	if got := run([]string{"lint", "missing.txt"}); got != 2 {
 		t.Fatalf("got %d", got)
 	}
@@ -111,13 +93,8 @@ func TestReviseNoLLMConfigFails(t *testing.T) {
 	}
 }
 
-func TestCheckIsBackwardCompatible(t *testing.T) {
-	// The check command still handles the same flags.
-	if got := run([]string{"check", "--stdin"}); got != 0 {
-		t.Fatalf("expected exit 0 for stdin with no data, got %d", got)
-	}
-	// Check with --llm but no model should fail with config error (exit 2).
-	if got := run([]string{"check", "--stdin", "--llm"}); got != 2 {
-		t.Fatalf("expected exit 2 for --llm without model, got %d", got)
+func TestCheckCommandDoesNotExist(t *testing.T) {
+	if got := run([]string{"check", "--stdin"}); got != 2 {
+		t.Fatalf("expected removed check command to return exit 2, got %d", got)
 	}
 }
