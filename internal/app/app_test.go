@@ -584,6 +584,21 @@ func writeReviseUserConfig(t *testing.T, baseURL, apiKeyEnv string) {
 	}
 }
 
+func writeReviseStoredKeyConfig(t *testing.T, baseURL, key string) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "[llm]\nprovider = \"openai-compatible\"\nbase_url = \"" + baseURL + "\"\nmodel = \"test-model\"\nresponse_mode = \"json_object\"\napi_key = \"" + key + "\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestRunReviseNoInput(t *testing.T) {
 	err := (&App{}).RunRevise(ReviseParams{})
 	if err == nil {
@@ -614,11 +629,27 @@ func TestRunReviseMissingLLMConfig(t *testing.T) {
 		Paths:  []string{path},
 		Format: "json",
 	})
-	if err == nil {
-		t.Fatal("expected error for missing LLM config")
+	if !errors.Is(err, ErrLLMConfigRequired) {
+		t.Fatalf("expected ErrLLMConfigRequired, got %v", err)
 	}
 	if !strings.Contains(err.Error(), "model is required") && !strings.Contains(err.Error(), "LLM configuration") && !strings.Contains(err.Error(), "revise requires") {
 		t.Fatalf("expected config-related error, got: %v", err)
+	}
+}
+
+func TestRunReviseDoesNotEchoMalformedConfigSecrets(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("[llm]\napi_key='sensitive-value\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := (&App{}).RunRevise(ReviseParams{Paths: []string{writeTempFile(t, "Short text.")}, Format: "json"})
+	if !errors.Is(err, ErrLLMConfigRequired) || strings.Contains(err.Error(), "sensitive-value") {
+		t.Fatalf("expected redacted config error, got %v", err)
 	}
 }
 
@@ -726,6 +757,28 @@ func TestRunReviseReturnsSentinelOnInvalidModelResponse(t *testing.T) {
 	}
 	if response.Status != "failed" || len(response.Errors) != 1 {
 		t.Fatalf("unexpected structured failure: %#v", response)
+	}
+}
+
+func TestRunReviseUsesStoredAPIKey(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer pat-local" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseStoredKeyConfig(t, server.URL, "pat-local")
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{Paths: []string{writeTempFile(t, "Short text.")}, Kind: "description", Format: "json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if strings.Contains(output.String(), "pat-local") {
+		t.Fatal("stored API key leaked into output")
 	}
 }
 

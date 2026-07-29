@@ -30,7 +30,9 @@ EOF
 
 Agents fix only findings they can verify and rerun `lint`. When the configured
 endpoint is permitted to receive the text, a primary agent may request structured
-revision advice without granting file-write access:
+revision advice without granting file-write access. A human can create and preflight
+machine-local model settings with `writetighter config`. Agents must not drive that
+interactive workflow; without configuration, `revise` exits with a setup hint.
 
 ```sh
 writetighter revise PATH --kind description --format json

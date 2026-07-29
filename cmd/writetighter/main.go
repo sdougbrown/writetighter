@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -10,6 +11,8 @@ import (
 
 	"github.com/sdougbrown/writetighter/internal/app"
 	"github.com/sdougbrown/writetighter/internal/profile"
+	"github.com/sdougbrown/writetighter/internal/setup"
+	"golang.org/x/term"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }
@@ -31,6 +34,8 @@ func run(args []string) int {
 		return runLint(args[1:])
 	case "revise":
 		return runRevise(args[1:])
+	case "config":
+		return runConfig(args[1:])
 	case "explain":
 		return runExplain(args[1:])
 	case "profile":
@@ -97,8 +102,21 @@ func runRevise(args []string) int {
 		usageErr("usage: no input specified")
 		return 2
 	}
-	if err := app.New().RunRevise(params); err != nil {
-		// Runtime LLM/response failures => exit 3; configuration/input errors => exit 2.
+	err := app.New().RunRevise(params)
+	if errors.Is(err, app.ErrLLMConfigRequired) {
+		if !params.Stdin && stdinIsTerminal() {
+			fmt.Fprintf(os.Stderr, "%v\nStarting interactive configuration.\n", err)
+			if code := runConfig(nil); code != 0 {
+				return code
+			}
+			err = app.New().RunRevise(params)
+		} else {
+			usageErr(err.Error() + "; run `writetighter config`")
+			return 2
+		}
+	}
+	if err != nil {
+		// Runtime model/response failures => exit 3; configuration/input errors => exit 2.
 		if errors.Is(err, app.ErrReviseFailed) {
 			usageErr(err.Error())
 			return 3
@@ -108,6 +126,33 @@ func runRevise(args []string) int {
 	}
 	return 0
 }
+
+func runConfig(args []string) int {
+	if len(args) != 0 {
+		usageErr("config does not accept arguments")
+		return 2
+	}
+	_, err := setup.Run(context.Background(), setup.Options{
+		In:  os.Stdin,
+		Out: os.Stderr,
+		ReadSecret: func(prompt string) (string, error) {
+			if !stdinIsTerminal() {
+				return "", errors.New("secure API key input requires an interactive terminal")
+			}
+			fmt.Fprint(os.Stderr, prompt)
+			secret, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			return string(secret), err
+		},
+	})
+	if err != nil {
+		usageErr("config failed: " + err.Error())
+		return 2
+	}
+	return 0
+}
+
+func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 
 // The documented CLI permits paths before flags. flag.FlagSet stops at the first
 // positional argument, so normalize the small lint/revise grammar before parsing.

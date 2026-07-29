@@ -1,6 +1,7 @@
 package config
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"os"
@@ -37,7 +38,8 @@ type LLMConfig struct {
 	Provider     string `toml:"provider"`
 	BaseURL      string `toml:"base_url"`
 	Model        string `toml:"model"`
-	APIKeyEnv    string `toml:"api_key_env"`
+	APIKey       string `toml:"api_key,omitempty"`
+	APIKeyEnv    string `toml:"api_key_env,omitempty"`
 	Timeout      string `toml:"timeout"`
 	ResponseMode string `toml:"response_mode"`
 }
@@ -81,6 +83,18 @@ func DiscoverProjectConfig() (*ProjectConfig, string, error) {
 	}
 }
 
+// UserConfigPath returns the platform-specific path used for new user config.
+func UserConfigPath() (string, error) {
+	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
+		return filepath.Join(xdg, "writetighter", "config.toml"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".config", "writetighter", "config.toml"), nil
+}
+
 func LoadUserConfig() (*UserConfig, error) {
 	if xdg := os.Getenv("XDG_CONFIG_HOME"); xdg != "" {
 		path := filepath.Join(xdg, "writetighter", "config.toml")
@@ -95,6 +109,55 @@ func LoadUserConfig() (*UserConfig, error) {
 		return nil, err
 	}
 	return loadUserConfigFile(filepath.Join(home, ".config", "writetighter", "config.toml"))
+}
+
+// WriteUserConfig atomically writes a user config with private permissions.
+func WriteUserConfig(cfg *UserConfig) (string, error) {
+	if cfg == nil {
+		return "", errors.New("user config is required")
+	}
+	path, err := UserConfigPath()
+	if err != nil {
+		return "", err
+	}
+	var data bytes.Buffer
+	if err := toml.NewEncoder(&data).Encode(cfg); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return "", err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), ".config-*.toml")
+	if err != nil {
+		return "", err
+	}
+	tmpPath := tmp.Name()
+	defer os.Remove(tmpPath)
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if _, err := tmp.Write(data.Bytes()); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return "", err
+	}
+	if err := tmp.Close(); err != nil {
+		return "", err
+	}
+	if _, err := loadUserConfigFile(tmpPath); err != nil {
+		return "", fmt.Errorf("validate generated config: %w", err)
+	}
+	if err := os.Rename(tmpPath, path); err != nil {
+		return "", err
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 func MergeConfigs(project *ProjectConfig, user *UserConfig) (*MergedConfig, error) {
@@ -113,6 +176,9 @@ func loadUserConfigFile(path string) (*UserConfig, error) {
 	}
 	if undecoded := md.Undecoded(); len(undecoded) > 0 {
 		return nil, fmt.Errorf("config %s: unknown key(s): %v", path, undecoded)
+	}
+	if cfg.LLM.APIKey != "" && cfg.LLM.APIKeyEnv != "" {
+		return nil, fmt.Errorf("config %s: llm.api_key and llm.api_key_env are mutually exclusive", path)
 	}
 	return &cfg, nil
 }

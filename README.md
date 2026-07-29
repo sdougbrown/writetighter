@@ -47,6 +47,16 @@ but version 0.2.0 does not enable deterministic term findings yet.
 
 ## Commands
 
+### `writetighter config` (Interactive Setup)
+
+`config` creates a working user configuration in the platform-specific XDG path (normally `~/.config/writetighter/config.toml`). It accepts a complete API URL, a `host:port`, or a localhost port. The workflow queries the OpenAI-compatible model list, lets you select a model, preflights structured output, and atomically writes the config with `0600` permissions.
+
+```sh
+./writetighter config
+```
+
+The workflow offers three authentication choices: no key, a key stored in the private user config, or an environment-variable reference. Keys are entered without terminal echo and are never accepted as command-line arguments. An interactive `revise` invocation automatically starts this workflow when model configuration is missing or invalid; non-interactive invocations fail with a `writetighter config` hint instead of waiting for input.
+
 ### `writetighter lint` (Deterministic)
 
 `lint` runs deterministic profile rules. It never invokes a model.
@@ -75,9 +85,10 @@ but version 0.2.0 does not enable deterministic term findings yet.
 - `errors`: Per-document model or response failures; their presence also produces exit code 3
 
 **Requirements:**
-- LLM configuration must be present in `~/.config/writetighter/config.toml` (model and base_url are required); `--config` selects project/profile terminology and does not supply model credentials
-- Local endpoints may omit `api_key_env`
-- API keys are read from environment variables, never from command-line arguments
+- Model configuration must be present in the user config (model and base_url are required); `writetighter config` creates and preflights it
+- Local endpoints may omit authentication
+- Authenticated endpoints may use either `api_key` in the private config or `api_key_env`, but not both
+- API keys are never accepted as command-line arguments
 
 **Example:**
 ```sh
@@ -179,7 +190,7 @@ Project configuration cannot contain LLM settings or credentials.
 
 ## Local Revision Model
 
-LLM configuration is always read from the user config file. Never pass API keys on the command line.
+Model configuration is always read from the user config file. Run `writetighter config` for guided endpoint discovery, model selection, and preflight. Never pass API keys on the command line.
 
 Put machine-specific LLM settings in `~/.config/writetighter/config.toml` (or the matching XDG config path):
 
@@ -191,8 +202,13 @@ model = "gemma4"
 response_mode = "json_object"
 ```
 
-For an authenticated endpoint, configure only the environment-variable name and
-export its value before running `revise`:
+For an authenticated endpoint, choose one credential source. A lower-risk local PAT can be stored in the `0600` user config:
+
+```toml
+api_key = "pat-value"
+```
+
+For credentials you do not want WriteTighter to persist, configure an environment-variable name instead:
 
 ```toml
 api_key_env = "WRITETIGHTER_API_KEY"
@@ -208,7 +224,7 @@ Runs contextual revision on every selected document regardless of static finding
 ```
 
 ### Security: Secret Handling
-Never pass API keys as command-line arguments. WriteTighter reads the key from an environment variable defined in your configuration via `api_key_env`.
+Never pass API keys as command-line arguments. The setup workflow can save a key in the user-only `config.toml` (`0600`) or store only an environment-variable name. Use environment-variable mode for credentials whose persistence policy forbids local config storage.
 
 ## Practical Workflows
 

@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -79,22 +80,68 @@ func TestProjectConfigRejectsUnknownFields(t *testing.T) {
 	t.Logf("got expected error: %v", err)
 }
 
-func TestUserConfigRejectsUnknownFields(t *testing.T) {
+func TestUserConfigAcceptsStoredAPIKey(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "writetighter", "config.toml")
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	data := []byte("[llm]\nprovider='x'\napi_key='sk-abc'\n")
+	if err := os.WriteFile(path, []byte("[llm]\nprovider='openai-compatible'\napi_key='pat-local'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfg, err := LoadUserConfig()
+	if err != nil || cfg.LLM.APIKey != "pat-local" {
+		t.Fatalf("stored API key was not loaded: %#v, err=%v", cfg, err)
+	}
+}
+
+func TestUserConfigRejectsTwoAPIKeySources(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "writetighter", "config.toml")
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	data := []byte("[llm]\napi_key='pat-local'\napi_key_env='WRITETIGHTER_API_KEY'\n")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	_, err := LoadUserConfig()
-	if err == nil {
-		t.Fatal("expected error for unknown api_key field in user config")
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected conflicting API key sources to fail, got %v", err)
 	}
-	t.Logf("got expected error: %v", err)
+}
+
+func TestWriteUserConfigUsesXDGPathAndPrivatePermissions(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	cfg := &UserConfig{LLM: LLMConfig{
+		Provider: "openai-compatible", BaseURL: "http://localhost:4000/v1",
+		Model: "gemma4", APIKeyEnv: "WRITETIGHTER_API_KEY", ResponseMode: "json_object",
+	}}
+	path, err := WriteUserConfig(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(root, "writetighter", "config.toml")
+	if path != want {
+		t.Fatalf("path = %q, want %q", path, want)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode().Perm() != 0o600 {
+		t.Fatalf("mode = %o, want 600", info.Mode().Perm())
+	}
+	loaded, err := LoadUserConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.LLM.Model != "gemma4" || loaded.LLM.APIKeyEnv != "WRITETIGHTER_API_KEY" {
+		t.Fatalf("unexpected config: %#v", loaded)
+	}
 }
 
 func TestProjectConfigRejectsApiKeyEnvInProject(t *testing.T) {

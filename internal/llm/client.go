@@ -12,6 +12,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const (
@@ -20,12 +21,13 @@ const (
 	MaxSuggestions   = 20
 	MaxOutputChars   = 10000
 	MaxEnvelopeChars = 64 * 1024
-	chatPath         = "/v1/chat/completions"
+	chatPath         = "/chat/completions"
 )
 
 type Config struct {
 	BaseURL      string
 	Model        string
+	APIKey       string
 	APIKeyEnv    string
 	Timeout      time.Duration
 	ResponseMode string
@@ -64,6 +66,7 @@ type Choice struct {
 type Client struct {
 	httpClient *http.Client
 	endpoint   string
+	apiKey     string
 	apiKeyEnv  string
 	model      string
 }
@@ -75,11 +78,14 @@ func NewClient(cfg Config) (*Client, error) {
 	if cfg.Model == "" {
 		return nil, errors.New("llm model required")
 	}
+	if cfg.APIKey != "" && cfg.APIKeyEnv != "" {
+		return nil, errors.New("llm api key and api key environment variable are mutually exclusive")
+	}
 	endpoint, err := normalizeEndpoint(cfg.BaseURL)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{httpClient: &http.Client{Timeout: cfg.Timeout}, endpoint: endpoint, apiKeyEnv: cfg.APIKeyEnv, model: cfg.Model}, nil
+	return &Client{httpClient: &http.Client{Timeout: cfg.Timeout}, endpoint: endpoint, apiKey: cfg.APIKey, apiKeyEnv: cfg.APIKeyEnv, model: cfg.Model}, nil
 }
 
 func (c *Client) Endpoint() string { return c.endpoint }
@@ -105,10 +111,12 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
-	if c.apiKeyEnv != "" {
-		if key := os.Getenv(c.apiKeyEnv); key != "" {
-			httpReq.Header.Set("Authorization", "Bearer "+key)
-		}
+	key := c.apiKey
+	if key == "" && c.apiKeyEnv != "" {
+		key = os.Getenv(c.apiKeyEnv)
+	}
+	if key != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+key)
 	}
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
@@ -117,7 +125,17 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("llm http %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		message := strings.TrimSpace(string(b))
+		if key != "" {
+			message = strings.ReplaceAll(message, key, "[REDACTED]")
+		}
+		message = strings.Map(func(r rune) rune {
+			if unicode.IsControl(r) {
+				return ' '
+			}
+			return r
+		}, message)
+		return nil, fmt.Errorf("llm http %d: %s", resp.StatusCode, message)
 	}
 	envelope, err := io.ReadAll(io.LimitReader(resp.Body, MaxEnvelopeChars+1))
 	if err != nil {
@@ -167,7 +185,12 @@ func normalizeEndpoint(base string) (string, error) {
 	if u.User != nil {
 		return "", errors.New("llm base url must not contain credentials")
 	}
-	u.Path = chatPath
+	path := strings.TrimRight(u.Path, "/")
+	path = strings.TrimSuffix(path, chatPath)
+	if path == "" {
+		path = "/v1"
+	}
+	u.Path = strings.TrimRight(path, "/") + chatPath
 	u.RawQuery = ""
 	u.Fragment = ""
 	return u.String(), nil

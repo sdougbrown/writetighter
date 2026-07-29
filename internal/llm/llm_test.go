@@ -2,6 +2,8 @@ package llm
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -19,6 +21,16 @@ func testDoc() *document.Document {
 
 func testProfile() *profile.Resolution {
 	return &profile.Resolution{ID: "PROFILE_ID", Version: "1", Rules: &profile.RulesConfig{Rules: []profile.Rule{{ID: "CORE.TERM_DISCOURAGED", Version: 1, Enabled: true}}}, Dict: &profile.Dictionary{Entries: []profile.Entry{{Term: "deprecated term", Status: profile.StatusDiscouraged}}}}
+}
+
+func TestClientPreservesAPIRootPath(t *testing.T) {
+	client, err := NewClient(Config{BaseURL: "https://example.test/openai/v1", Model: "test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := client.Endpoint(), "https://example.test/openai/v1/chat/completions"; got != want {
+		t.Fatalf("endpoint = %q, want %q", got, want)
+	}
 }
 
 func TestClientRejectsCredentialsInBaseURL(t *testing.T) {
@@ -60,6 +72,40 @@ func TestNoAuthorizationHeader(t *testing.T) {
 	resp, err := c.Do(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
 	if err != nil || len(resp.Choices) == 0 {
 		t.Fatalf("expected response, got %v %v", resp, err)
+	}
+}
+
+func TestStoredKeyIsRedactedFromHTTPError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "rejected "+strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "), http.StatusUnauthorized)
+	}))
+	defer server.Close()
+	client, err := NewClient(Config{BaseURL: server.URL, Model: "gpt", APIKey: "pat-sensitive", Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.Do(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}})
+	if err == nil || strings.Contains(err.Error(), "pat-sensitive") || !strings.Contains(err.Error(), "[REDACTED]") {
+		t.Fatalf("expected redacted HTTP error, got %v", err)
+	}
+}
+
+func TestStoredKeyMode(t *testing.T) {
+	srv := newFakeServer(true, "ok")
+	defer srv.Close()
+	client, err := NewClient(Config{BaseURL: srv.URL, Model: "gpt", APIKey: "local-pat", Timeout: time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Do(context.Background(), Request{Messages: []Message{{Role: "user", Content: "hi"}}}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestClientRejectsTwoKeySources(t *testing.T) {
+	_, err := NewClient(Config{BaseURL: "http://localhost:4000/v1", Model: "gpt", APIKey: "one", APIKeyEnv: "OTHER"})
+	if err == nil || !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("expected conflicting key sources to fail, got %v", err)
 	}
 }
 

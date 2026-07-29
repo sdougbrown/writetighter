@@ -73,6 +73,12 @@ func TestLintAcceptedFlags(t *testing.T) {
 	}
 }
 
+func TestConfigRejectsArguments(t *testing.T) {
+	if got := run([]string{"config", "extra"}); got != 2 {
+		t.Fatalf("expected exit 2, got %d", got)
+	}
+}
+
 func TestReviseCommand(t *testing.T) {
 	if got := run([]string{"revise"}); got != 2 {
 		t.Fatalf("expected exit 2 for missing input, got %d", got)

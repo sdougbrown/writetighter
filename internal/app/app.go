@@ -18,10 +18,11 @@ import (
 )
 
 var (
-	Version          = "0.1.0"
-	Commit           = "unknown"
-	ErrFailThreshold = errors.New("fail threshold reached")
-	ErrReviseFailed  = errors.New("revise failed")
+	Version              = "0.1.0"
+	Commit               = "unknown"
+	ErrFailThreshold     = errors.New("fail threshold reached")
+	ErrLLMConfigRequired = errors.New("model configuration required")
+	ErrReviseFailed      = errors.New("revise failed")
 )
 
 type LintParams struct {
@@ -233,10 +234,10 @@ func (a *App) RunRevise(params ReviseParams) error {
 		return fmt.Errorf("invalid format %q for revise", params.Format)
 	}
 
-	// Load user config (required for LLM settings).
+	// Load user config (required for model settings).
 	userCfg, err := config.LoadUserConfig()
 	if err != nil && !errors.Is(err, os.ErrNotExist) {
-		return err
+		return fmt.Errorf("%w: user config could not be loaded", ErrLLMConfigRequired)
 	}
 	if errors.Is(err, os.ErrNotExist) {
 		userCfg = nil
@@ -285,20 +286,21 @@ func (a *App) RunRevise(params ReviseParams) error {
 
 	// Read LLM config from user config. Require usable configuration.
 	if merged == nil || merged.User == nil || merged.User.LLM.Model == "" {
-		return fmt.Errorf("revise requires LLM configuration in ~/.config/writetighter/config.toml [llm] section (model is required)")
+		return fmt.Errorf("%w: revise requires an [llm] model", ErrLLMConfigRequired)
 	}
 	uc := merged.User.LLM
 
 	llmProvider := uc.Provider
 	llmBaseURL := uc.BaseURL
 	llmModel := uc.Model
+	llmAPIKey := uc.APIKey
 	llmAPIKeyEnv := uc.APIKeyEnv
 	llmResponseMode := uc.ResponseMode
 	llmTimeout := llm.DefaultTimeout
 	if uc.Timeout != "" {
 		d, e := time.ParseDuration(uc.Timeout)
 		if e != nil {
-			return fmt.Errorf("invalid llm timeout: %w", e)
+			return fmt.Errorf("%w: invalid llm timeout: %v", ErrLLMConfigRequired, e)
 		}
 		llmTimeout = d
 	}
@@ -307,24 +309,25 @@ func (a *App) RunRevise(params ReviseParams) error {
 		llmProvider = "openai-compatible"
 	}
 	if llmProvider != "openai-compatible" {
-		return fmt.Errorf("unsupported llm provider %q", llmProvider)
+		return fmt.Errorf("%w: unsupported llm provider %q", ErrLLMConfigRequired, llmProvider)
 	}
 	if llmResponseMode == "" {
 		llmResponseMode = "auto"
 	}
 	if !validResponseMode(llmResponseMode) {
-		return fmt.Errorf("invalid llm response mode %q", llmResponseMode)
+		return fmt.Errorf("%w: invalid llm response mode %q", ErrLLMConfigRequired, llmResponseMode)
 	}
 	if llmModel == "" || llmBaseURL == "" {
-		return fmt.Errorf("revise requires llm model and base_url in config")
+		return fmt.Errorf("%w: revise requires llm model and base_url", ErrLLMConfigRequired)
 	}
-	if llmAPIKeyEnv != "" && os.Getenv(llmAPIKeyEnv) == "" {
-		return fmt.Errorf("revise api_key_env %q is configured but the environment variable is unset", llmAPIKeyEnv)
+	if llmAPIKey == "" && llmAPIKeyEnv != "" && os.Getenv(llmAPIKeyEnv) == "" {
+		return fmt.Errorf("%w: api_key_env %q is configured but the environment variable is unset", ErrLLMConfigRequired, llmAPIKeyEnv)
 	}
 
 	llmCfg := llm.Config{
 		BaseURL:      llmBaseURL,
 		Model:        llmModel,
+		APIKey:       llmAPIKey,
 		APIKeyEnv:    llmAPIKeyEnv,
 		Timeout:      llmTimeout,
 		ResponseMode: llmResponseMode,
@@ -332,7 +335,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 
 	// Validate LLM config before reading input.
 	if _, err := llm.NewClient(llmCfg); err != nil {
-		return fmt.Errorf("invalid llm configuration: %w", err)
+		return fmt.Errorf("%w: %v", ErrLLMConfigRequired, err)
 	}
 
 	// Collect input documents.
