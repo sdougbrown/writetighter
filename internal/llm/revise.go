@@ -411,6 +411,10 @@ func buildRevisePromptWithExcerpt(doc *document.Document, res *profile.Resolutio
 	if err != nil {
 		rubric, _ = guidance.ForKind(guidance.KindDescription)
 	}
+	fmt.Fprintf(&b, "\nPrimary document-kind objective (%s):\n", rubric.Kind)
+	for _, direction := range rubric.KindDirections {
+		fmt.Fprintf(&b, "- %s\n", direction)
+	}
 	b.WriteString("\nRevision principles:\n")
 	for _, principle := range rubric.Principles {
 		fmt.Fprintf(&b, "- %s: %s\n", principle.ID, principle.Direction)
@@ -419,16 +423,20 @@ func buildRevisePromptWithExcerpt(doc *document.Document, res *profile.Resolutio
 	for _, direction := range rubric.CoreDirections {
 		fmt.Fprintf(&b, "- %s\n", direction)
 	}
-	b.WriteString("\nDocument-kind directions:\n")
-	for _, direction := range rubric.KindDirections {
-		fmt.Fprintf(&b, "- %s\n", direction)
+	if doc.Kind == guidance.KindStatusUpdate {
+		b.WriteString("- For example, if an update uses unexplained mechanism labels and does not report observable progress, evidence, or the next diagnostic action, ask for those operational facts instead of asking the writer to expand the labels.\n")
+	} else {
+		b.WriteString("- For example, if a sentence says an update 'pluralizes three values' but does not establish whether that means renaming fields or changing scalars to collections, ask which transformation occurred.\n")
 	}
-	b.WriteString("- For example, if a sentence says an update 'pluralizes three values' but does not establish whether that means renaming fields or changing scalars to collections, ask which transformation occurred.\n")
 	b.WriteString("- source_text must copy the exact text being revised or questioned. Source ranges are byte offsets relative to the supplied passage, starting at byte 0, and must cover that exact source_text.\n")
 	b.WriteString("- Return only one JSON object with this shape and no Markdown:\n")
 	b.WriteString(`{"findings":[{"kind":"rewrite","source_text":"x","source_range":{"start":0,"end":1},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"...","replacement":"...","question":null,"confidence":0.9}]}`)
 	b.WriteString("\n")
-	b.WriteString(`For clarification use a complete item such as: {"kind":"clarification","source_text":"x","source_range":{"start":0,"end":1},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"The transformation has multiple plausible meanings.","replacement":null,"question":"Does this rename fields or change scalar values to collections?","confidence":0.8}.`)
+	clarificationExample := `For clarification use a complete item such as: {"kind":"clarification","source_text":"x","source_range":{"start":0,"end":1},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"The transformation has multiple plausible meanings.","replacement":null,"question":"Does this rename fields or change scalar values to collections?","confidence":0.8}.`
+	if doc.Kind == guidance.KindStatusUpdate {
+		clarificationExample = `For clarification use a complete item such as: {"kind":"clarification","source_text":"x","source_range":{"start":0,"end":1},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS","CORE.PLAIN_MECHANISM"],"reason":"The update does not establish observable progress or the next diagnostic action.","replacement":null,"question":"What result has been observed, what is the current hypothesis, and what diagnostic action happens next?","confidence":0.8}.`
+	}
+	b.WriteString(clarificationExample)
 	b.WriteString("\nUse {\"findings\":[]} when no revision is warranted. Suggestions are advisory and must not claim to modify the file.\n\n")
 
 	fmt.Fprintf(&b, "profile: %s@%s\n", res.ID, res.Version)

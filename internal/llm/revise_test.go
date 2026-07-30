@@ -263,6 +263,19 @@ func TestBuildRevisePromptAddsPRDecisionOrder(t *testing.T) {
 	}
 }
 
+func TestBuildRevisePromptUsesStatusUpdateExample(t *testing.T) {
+	doc, _ := document.FromReader(strings.NewReader("The work is still running."), "test.md", guidance.KindStatusUpdate)
+	prompt, _ := BuildRevisePrompt(doc, &profile.Resolution{ID: "PROFILE_ID", Version: "1"}, nil, nil)
+	for _, expected := range []string{"Primary document-kind objective (status-update)", "observable progress", "current hypothesis", "diagnostic action happens next"} {
+		if !strings.Contains(prompt, expected) {
+			t.Fatalf("status prompt missing %q: %s", expected, prompt)
+		}
+	}
+	if strings.Index(prompt, "Primary document-kind objective") > strings.Index(prompt, "Revision principles") {
+		t.Fatal("document-kind objective must precede shared principles")
+	}
+}
+
 func TestBuildRevisePromptUsesExportedGuidanceForEveryKind(t *testing.T) {
 	for _, kind := range guidance.Kinds() {
 		doc, _ := document.FromReader(strings.NewReader("Technical prose."), "test.md", kind)

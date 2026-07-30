@@ -6,7 +6,7 @@ import (
 )
 
 func TestKindsHaveCompleteIndependentGuidance(t *testing.T) {
-	for _, kind := range []string{KindDescription, KindProcedure, KindPR, KindCodeComment, KindReference, KindDecision, KindIncident, KindAgentInstruction} {
+	for _, kind := range []string{KindDescription, KindProcedure, KindPR, KindCodeComment, KindReference, KindDecision, KindIncident, KindAgentInstruction, KindStatusUpdate} {
 		set, err := ForKind(kind)
 		if err != nil {
 			t.Fatal(err)
@@ -26,7 +26,7 @@ func TestKindsHaveCompleteIndependentGuidance(t *testing.T) {
 }
 
 func TestNewKindsInheritDescriptionSentenceLimit(t *testing.T) {
-	for _, kind := range []string{KindCodeComment, KindReference, KindDecision, KindIncident, KindAgentInstruction} {
+	for _, kind := range []string{KindCodeComment, KindReference, KindDecision, KindIncident, KindAgentInstruction, KindStatusUpdate} {
 		if got := SentenceLimitParameter(kind); got != "description_max_words" {
 			t.Fatalf("%s parameter = %q", kind, got)
 		}
@@ -42,6 +42,7 @@ func TestSpecializedKindsExposeDistinctDirections(t *testing.T) {
 		KindDecision:         {"considered alternatives", "tradeoffs", "engineering preferences"},
 		KindIncident:         {"observed facts", "chronological order", "root-cause claim"},
 		KindAgentInstruction: {"one control system", "change an agent action", "delegated responsibilities", "reliable execution", "decision points", "trigger metadata", "observable verification"},
+		KindStatusUpdate:     {"operationally useful update", "observable state", "hypotheses", "next reporting point", "Do not manufacture a mechanism"},
 	}
 	for kind, expected := range checks {
 		set, err := ForKind(kind)

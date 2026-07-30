@@ -14,6 +14,7 @@ const (
 	KindDecision         = "decision"
 	KindIncident         = "incident"
 	KindAgentInstruction = "agent-instruction"
+	KindStatusUpdate     = "status-update"
 )
 
 // Principle is a stable semantic revision principle exposed to models and agents.
@@ -112,6 +113,16 @@ var directionsByKind = map[string][]string{
 		"Prefer literal, action-oriented instructions over motivational prose or clever compression. Preserve necessary rationale when it changes how the agent should act.",
 		"Require observable verification and define what the agent should report or do when it cannot complete a required step without guessing.",
 	},
+	KindStatusUpdate: {
+		"Give the reader an operationally useful update: the current observable state, concrete progress or result, any blocker, the next action, and the next reporting point when delay is material.",
+		"Lead with plain state such as running, waiting, failed, blocked, or investigating. Do not substitute metaphor, coined mechanism labels, or compressed internal shorthand for the actual operation.",
+		"Separate observations from hypotheses. State what command, test, component, or condition produced the evidence when the source establishes it, and label an unconfirmed diagnosis as a hypothesis.",
+		"If the cause is not known, say that it is not known and report the concrete diagnostic action in progress. Do not manufacture a mechanism to sound specific.",
+		"Explain why progress is taking longer than expected when the source establishes the reason. Do not invent an ETA; give the next check or update point instead.",
+		"Include only details that help the reader decide whether to wait, intervene, provide information, or change course. Omit private-looking process narration that has no observable meaning for the reader.",
+		"When unclear shorthand appears in an incomplete update, do not ask only what the coined terms mean or offer speculative technical interpretations. Ask for the observable progress, evidence, current hypothesis, and next diagnostic action needed to replace the shorthand.",
+		"Ask for clarification when the source does not establish the literal operation, evidence, blocker, or next action needed for an accurate update.",
+	},
 }
 
 // ValidKind reports whether kind has a defined revision lens.
@@ -135,7 +146,7 @@ func Kinds() []string {
 // inherit its description threshold until a reviewed profile defines them.
 func SentenceLimitParameter(kind string) string {
 	switch kind {
-	case KindCodeComment, KindReference, KindDecision, KindIncident, KindAgentInstruction:
+	case KindCodeComment, KindReference, KindDecision, KindIncident, KindAgentInstruction, KindStatusUpdate:
 		return "description_max_words"
 	default:
 		return kind + "_max_words"
