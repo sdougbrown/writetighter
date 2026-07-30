@@ -103,6 +103,11 @@ func (nounStackChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 	var out []report.Finding
 
 	for _, block := range blocks {
+		// Skip headings, list items, and blockquotes — noun stacks in
+		// these contexts are intentional shorthand, not prose problems.
+		if block.Marker != "" {
+			continue
+		}
 		sentences := document.SentenceUnits(block, ctx.Document.Content)
 		for _, s := range sentences {
 			tokens := document.ExportLexicalTokens(s.Text)

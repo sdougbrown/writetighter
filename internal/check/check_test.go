@@ -403,3 +403,21 @@ func TestGerundOpenerSixCharFlagged(t *testing.T) {
 		t.Fatalf("'Arming' (6 runes, stem 'arm' = 3) should be flagged, got %d: %v", len(findings), findings)
 	}
 }
+
+func TestNounStackSkipsHeadings(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("## Review fixes applied\n\nSome prose here.")}
+	findings, _ := Get("CORE.NOUN_STACK").Run(ctx)
+	for _, f := range findings {
+		if strings.Contains(f.Evidence, "Review fixes applied") {
+			t.Fatalf("noun stack should not flag heading: %s", f.Evidence)
+		}
+	}
+}
+
+func TestNounStackSkipsListItems(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("- method returning OS process ID\n- fix early return guard")}
+	findings, _ := Get("CORE.NOUN_STACK").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("noun stack should not flag list items, got %d: %v", len(findings), findings)
+	}
+}

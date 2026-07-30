@@ -154,8 +154,11 @@ type ReviseLLMFinding struct {
 }
 
 // ReviseLLMResponse is the LLM response envelope for revise.
+// Some models return "questions" instead of "findings" when all items
+// are clarifications; accept both and merge.
 type ReviseLLMResponse struct {
-	Findings []ReviseLLMFinding `json:"findings"`
+	Findings  []ReviseLLMFinding `json:"findings"`
+	Questions []ReviseLLMFinding `json:"questions,omitempty"`
 }
 
 // ValidateReviseResponse validates the LLM response JSON for revise.
@@ -171,6 +174,11 @@ func ValidateReviseResponse(raw []byte) (*report.ReviseResponse, error) {
 	var resp ReviseLLMResponse
 	if err := dec.Decode(&resp); err != nil {
 		return nil, err
+	}
+	// Some models use "questions" instead of "findings" when all items
+	// are clarifications. Merge if findings is empty.
+	if len(resp.Findings) == 0 && len(resp.Questions) > 0 {
+		resp.Findings = resp.Questions
 	}
 	// Check trailing content.
 	remaining := dec.InputOffset()

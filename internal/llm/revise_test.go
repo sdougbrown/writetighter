@@ -527,3 +527,31 @@ func TestReviseWithKey(t *testing.T) {
 		t.Fatal("expected non-nil response")
 	}
 }
+
+func TestValidateReviseResponseQuestionsField(t *testing.T) {
+	raw := `{"questions":[{"kind":"clarification","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"unclear referent","replacement":null,"question":"What does this refer to?","confidence":0.8}]}`
+	resp, err := ValidateReviseResponse([]byte(raw))
+	if err != nil {
+		t.Fatalf("expected questions field to be accepted, got: %v", err)
+	}
+	if len(resp.Revisions) != 1 {
+		t.Fatalf("expected 1 revision from questions field, got %d", len(resp.Revisions))
+	}
+	if resp.Revisions[0].Kind != "clarification" {
+		t.Fatalf("expected clarification, got %q", resp.Revisions[0].Kind)
+	}
+}
+
+func TestValidateReviseResponseFindingsPreferredOverQuestions(t *testing.T) {
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"too long","replacement":"hi","confidence":0.9}],"questions":[{"kind":"clarification","source_text":"world","source_range":{"start":0,"end":5},"principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"unclear","replacement":null,"question":"What?","confidence":0.7}]}`
+	resp, err := ValidateReviseResponse([]byte(raw))
+	if err != nil {
+		t.Fatalf("expected valid response, got: %v", err)
+	}
+	if len(resp.Revisions) != 1 {
+		t.Fatalf("expected findings to be used (not questions), got %d revisions", len(resp.Revisions))
+	}
+	if resp.Revisions[0].Kind != "rewrite" {
+		t.Fatalf("expected rewrite from findings, got %q", resp.Revisions[0].Kind)
+	}
+}
