@@ -57,12 +57,16 @@ func reviseExcerpt(ctx context.Context, config Config, doc *document.Document, r
 	if len(excerpt.Text) != chunkBytes {
 		return nil, errors.New("revision chunk exceeds model input budget after adding prompt context")
 	}
+	rf, err := buildReviseResponseFormat(config.ResponseMode)
+	if err != nil {
+		return nil, err
+	}
 	req := Request{
 		Messages: []Message{
 			{Role: "system", Content: prompt},
 			{Role: "user", Content: excerpt.Text},
 		},
-		ResponseFormat: buildReviseResponseFormat(config.ResponseMode),
+		ResponseFormat: rf,
 	}
 	resp, err := client.Do(ctx, req)
 	if err != nil {

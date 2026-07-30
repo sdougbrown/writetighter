@@ -94,7 +94,7 @@ but version 0.2.0 does not enable deterministic term findings yet.
 
 `config` creates a working user configuration in the platform-specific XDG path (normally `~/.config/writetighter/config.toml`). It accepts a complete API URL, a `host:port`, or a localhost port.
 
-The workflow queries the OpenAI-compatible model list and lets you select a model. It sends a small chat request to verify that the model returns a JSON object, selecting `json_object` mode when supported and `prompt_json` otherwise. After the preflight succeeds, it atomically writes the config with `0600` permissions.
+The workflow queries the OpenAI-compatible model list and lets you select a model. It sends a small chat request to verify that the model supports structured JSON output, selecting `json_schema` mode when supported, then falling back to `json_object`, then `prompt_json`. After the preflight succeeds, it atomically writes the config with `0600` permissions.
 
 ```sh
 ./writetighter config
@@ -292,9 +292,11 @@ Put machine-specific LLM settings in `~/.config/writetighter/config.toml` (or th
 provider = "openai-compatible"
 base_url = "http://sparky:4000/v1"
 model = "gemma4"
-response_mode = "json_object"
+response_mode = "json_schema"
 max_requests = 32
 ```
+
+`response_mode` controls how the model is asked to produce structured output. `json_schema` sends a full JSON Schema (see `schemas/revise-response-v1.schema.json`). It is preferred for smaller models that benefit from grammar-constrained generation. `json_object` sends a lighter `{"type":"json_object"}` hint. `prompt_json` relies on prompt instructions only and is the universal fallback. The setup wizard discovers the best supported mode automatically.
 
 For an authenticated endpoint, choose one credential source. A lower-risk local PAT can be stored in the `0600` user config:
 

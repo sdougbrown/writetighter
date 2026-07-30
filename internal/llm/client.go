@@ -15,6 +15,7 @@ import (
 	"unicode"
 
 	"github.com/sdougbrown/writetighter/internal/guidance"
+	"github.com/sdougbrown/writetighter/schemas"
 )
 
 const (
@@ -157,21 +158,24 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 }
 
 // buildReviseResponseFormat builds the structured revision schema.
-func buildReviseResponseFormat(mode string) *ResponseFormat {
+func buildReviseResponseFormat(mode string) (*ResponseFormat, error) {
 	if mode == "prompt_json" || mode == "auto" || mode == "" {
-		return nil
+		return nil, nil
 	}
 	rf := &ResponseFormat{Type: mode}
 	if mode == "json_schema" {
-		principleIDs, _ := json.Marshal(guidance.PrincipleIDs())
-		schema := fmt.Sprintf(`{"type":"object","additionalProperties":false,"properties":{"findings":{"type":"array","maxItems":20,"items":{"type":"object","additionalProperties":false,"properties":{"kind":{"type":"string","enum":["rewrite","clarification"]},"source_text":{"type":"string","minLength":1},"source_range":{"type":"object","additionalProperties":false,"properties":{"start":{"type":"integer"},"end":{"type":"integer"}},"required":["start","end"]},"principle_ids":{"type":"array","minItems":1,"items":{"type":"string","enum":%s}},"reason":{"type":"string","minLength":1},"replacement":{"type":["string","null"]},"question":{"type":["string","null"]},"confidence":{"type":"number","minimum":0,"maximum":1}},"required":["kind","source_text","source_range","principle_ids","reason","replacement","question","confidence"]}}},"required":["findings"]}`, principleIDs)
+		principleIDs, err := json.Marshal(guidance.PrincipleIDs())
+		if err != nil {
+			return nil, fmt.Errorf("marshal principle IDs: %w", err)
+		}
+		schema := strings.Replace(schemas.ReviseResponseSchemaV1, `["{{PRINCIPLE_IDS}}"]`, string(principleIDs), 1)
 		rf.JSONSchema = &JSONSchema{
 			Name:   "revise_response",
 			Schema: json.RawMessage(schema),
 			Strict: true,
 		}
 	}
-	return rf
+	return rf, nil
 }
 
 func normalizeEndpoint(base string) (string, error) {

@@ -2,7 +2,11 @@ package llm
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
@@ -16,15 +20,22 @@ import (
 )
 
 func TestReviseResponseModes(t *testing.T) {
-	if got := buildReviseResponseFormat("auto"); got != nil {
-		t.Fatalf("auto must rely on prompt JSON, got %#v", got)
+	if got, err := buildReviseResponseFormat("auto"); got != nil || err != nil {
+		t.Fatalf("auto must rely on prompt JSON, got %#v, err %v", got, err)
 	}
-	if got := buildReviseResponseFormat("json_object"); got == nil || got.Type != "json_object" {
-		t.Fatalf("json_object revise format = %#v", got)
+	if got, err := buildReviseResponseFormat("prompt_json"); got != nil || err != nil {
+		t.Fatalf("prompt_json must rely on prompt JSON, got %#v, err %v", got, err)
 	}
-	got := buildReviseResponseFormat("json_schema")
-	if got == nil || got.JSONSchema == nil {
-		t.Fatalf("missing revise JSON schema: %#v", got)
+	got, err := buildReviseResponseFormat("json_object")
+	if err != nil || got == nil || got.Type != "json_object" {
+		t.Fatalf("json_object revise format = %#v, err %v", got, err)
+	}
+	if got.JSONSchema != nil {
+		t.Fatalf("json_object must not set JSONSchema, got %#v", got.JSONSchema)
+	}
+	got, err = buildReviseResponseFormat("json_schema")
+	if err != nil || got == nil || got.JSONSchema == nil {
+		t.Fatalf("missing revise JSON schema: %#v, err %v", got, err)
 	}
 	schema := string(got.JSONSchema.Schema)
 	for _, expected := range []string{`"source_text"`, `"principle_ids"`, `"clarification"`, `"replacement"`, `"question"`, `"CORE.EXPLICIT_RELATIONSHIPS"`, `"CORE.CAUSAL_ORDER"`, `"CORE.PLAIN_MECHANISM"`, `"CORE.RELEVANT_DETAIL"`} {
@@ -525,6 +536,43 @@ func TestReviseWithKey(t *testing.T) {
 	}
 	if resp == nil {
 		t.Fatal("expected non-nil response")
+	}
+}
+
+func TestReviseSendsJSONSchemaResponseFormat(t *testing.T) {
+	var capturedRequest map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(body, &capturedRequest)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"role": "assistant", "content": `{"findings":[]}`}}},
+		})
+	}))
+	defer srv.Close()
+
+	doc, _ := document.FromReader(strings.NewReader("Short text."), "test.md", "description")
+	res := &profile.Resolution{ID: "PROFILE_ID", Version: "1"}
+	cfg := Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second, ResponseMode: "json_schema"}
+	if _, err := Revise(context.Background(), cfg, doc, res, nil, nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rf, ok := capturedRequest["response_format"].(map[string]any)
+	if !ok || rf["type"] != "json_schema" {
+		t.Fatalf("expected response_format type json_schema, got %#v", capturedRequest["response_format"])
+	}
+	js, ok := rf["json_schema"].(map[string]any)
+	if !ok || js["name"] != "revise_response" {
+		t.Fatalf("expected json_schema name revise_response, got %#v", rf["json_schema"])
+	}
+	schema, _ := json.Marshal(js["schema"])
+	schemaStr := string(schema)
+	for _, id := range guidance.PrincipleIDs() {
+		if !strings.Contains(schemaStr, id) {
+			t.Fatalf("schema missing principle ID %s: %s", id, schemaStr)
+		}
+	}
+	if strings.Contains(schemaStr, "{{PRINCIPLE_IDS}}") {
+		t.Fatal("schema contains unreplaced placeholder")
 	}
 }
 

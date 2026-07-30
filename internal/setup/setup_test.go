@@ -54,14 +54,14 @@ func TestRunWritesSelectedModelWithoutAuthentication(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Model != "qwen" || result.ResponseMode != "json_object" {
+	if result.Model != "qwen" || result.ResponseMode != "json_schema" {
 		t.Fatalf("unexpected result: %#v", result)
 	}
 	cfg, err := config.LoadUserConfig()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LLM.Model != "qwen" || cfg.LLM.MaxRequests != 32 || cfg.LLM.APIKey != "" || cfg.LLM.APIKeyEnv != "" {
+	if cfg.LLM.Model != "qwen" || cfg.LLM.MaxRequests != 32 || cfg.LLM.APIKey != "" || cfg.LLM.APIKeyEnv != "" || cfg.LLM.ResponseMode != "json_schema" {
 		t.Fatalf("unexpected config: %#v", cfg.LLM)
 	}
 	info, err := os.Stat(filepath.Join(root, "writetighter", "config.toml"))
@@ -148,12 +148,65 @@ func TestRunFallsBackToPromptJSON(t *testing.T) {
 	defer server.Close()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	input := strings.NewReader(server.URL + "/v1\n1\n1\n")
-	result, err := Run(context.Background(), Options{In: input, Out: io.Discard, HTTPClient: server.Client()})
+	var output strings.Builder
+	result, err := Run(context.Background(), Options{In: input, Out: &output, HTTPClient: server.Client()})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if result.ResponseMode != "prompt_json" {
 		t.Fatalf("response mode = %q", result.ResponseMode)
+	}
+	// Verify the full 3-step cascade was exercised, not just the final mode.
+	for _, expected := range []string{"json_schema was not accepted", "json_object was not accepted", "trying prompt-only JSON"} {
+		if !strings.Contains(output.String(), expected) {
+			t.Fatalf("missing fallback log %q in output: %s", expected, output.String())
+		}
+	}
+	cfg, err := config.LoadUserConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LLM.ResponseMode != "prompt_json" {
+		t.Fatalf("persisted response mode = %q, want prompt_json", cfg.LLM.ResponseMode)
+	}
+}
+
+func TestRunFallsBackFromJSONSchemaToJSONObject(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/v1/models":
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]string{{"id": "qwen"}}})
+		case "/v1/chat/completions":
+			var request map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			if rf, ok := request["response_format"].(map[string]any); ok && rf["type"] == "json_schema" {
+				http.Error(w, "json_schema unsupported", http.StatusBadRequest)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": `{"ok":true}`}}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	input := strings.NewReader(server.URL + "/v1\n1\n1\n")
+	result, err := Run(context.Background(), Options{In: input, Out: io.Discard, HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ResponseMode != "json_object" {
+		t.Fatalf("response mode = %q, want json_object", result.ResponseMode)
+	}
+	cfg, err := config.LoadUserConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LLM.ResponseMode != "json_object" {
+		t.Fatalf("persisted response mode = %q, want json_object", cfg.LLM.ResponseMode)
 	}
 }
 
