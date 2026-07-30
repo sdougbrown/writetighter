@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sdougbrown/writetighter/internal/config"
+	"github.com/sdougbrown/writetighter/internal/llm"
 )
 
 const (
@@ -178,13 +179,27 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	fmt.Fprintf(opts.Out, "Preflighting model %s ...\n", model)
-	responseMode := "json_object"
-	if err := probeModel(ctx, opts.HTTPClient, baseURL, model, apiKey, responseMode); err != nil {
-		fmt.Fprintf(opts.Out, "json_object was not accepted (%v); trying prompt-only JSON.\n", err)
-		responseMode = "prompt_json"
-		if err := probeModel(ctx, opts.HTTPClient, baseURL, model, apiKey, responseMode); err != nil {
-			return nil, fmt.Errorf("model preflight failed: %w", err)
+	// Probe from most constrained to least; stop at the first mode the
+	// endpoint accepts.
+	probeOrder := []struct {
+		mode      string
+		nextLabel string
+	}{
+		{"json_schema", "json_object"},
+		{"json_object", "prompt-only JSON"},
+		{"prompt_json", ""},
+	}
+	var responseMode string
+	for i, step := range probeOrder {
+		if err := probeModel(ctx, opts.HTTPClient, baseURL, model, apiKey, step.mode); err != nil {
+			if i == len(probeOrder)-1 {
+				return nil, fmt.Errorf("model preflight failed: %w", err)
+			}
+			fmt.Fprintf(opts.Out, "%s was not accepted (%v); trying %s.\n", step.mode, err, step.nextLabel)
+			continue
 		}
+		responseMode = step.mode
+		break
 	}
 
 	existing.LLM = config.LLMConfig{
@@ -339,8 +354,8 @@ func probeModel(ctx context.Context, client *http.Client, baseURL, model, apiKey
 			{"role": "user", "content": "Preflight the connection."},
 		},
 	}
-	if responseMode == "json_object" {
-		request["response_format"] = map[string]string{"type": "json_object"}
+	if rf := buildProbeResponseFormat(responseMode); rf != nil {
+		request["response_format"] = rf
 	}
 	payload, err := json.Marshal(request)
 	if err != nil {
@@ -368,6 +383,26 @@ func probeModel(ctx context.Context, client *http.Client, baseURL, model, apiKey
 		return fmt.Errorf("assistant did not return JSON: %w", err)
 	}
 	return nil
+}
+
+// buildProbeResponseFormat constructs the response_format field for the
+// preflight probe using the same llm types sent during actual revision.
+func buildProbeResponseFormat(mode string) *llm.ResponseFormat {
+	switch mode {
+	case "json_object":
+		return &llm.ResponseFormat{Type: "json_object"}
+	case "json_schema":
+		return &llm.ResponseFormat{
+			Type: "json_schema",
+			JSONSchema: &llm.JSONSchema{
+				Name:   "preflight",
+				Schema: json.RawMessage(`{"type":"object","additionalProperties":false,"properties":{"ok":{"type":"boolean"}},"required":["ok"]}`),
+				Strict: true,
+			},
+		}
+	default:
+		return nil
+	}
 }
 
 func doJSON(ctx context.Context, client *http.Client, method, endpoint, apiKey string, payload []byte) ([]byte, error) {

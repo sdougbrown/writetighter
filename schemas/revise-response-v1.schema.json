@@ -1,0 +1,71 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://github.com/sdougbrown/writetighter/schemas/revise-response-v1.schema.json",
+  "title": "Revise Response v1",
+  "description": "JSON Schema sent to OpenAI-compatible endpoints when response_mode = \"json_schema\". The enum placeholder in principle_ids is replaced at runtime with the JSON array of active principle IDs from the loaded guidance profile.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "findings": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": ["rewrite", "clarification"]
+          },
+          "source_text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "source_range": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "start": { "type": "integer" },
+              "end": { "type": "integer" }
+            },
+            "required": ["start", "end"]
+          },
+          "principle_ids": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "enum": {{PRINCIPLE_IDS}}
+            }
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1
+          },
+          "replacement": {
+            "type": ["string", "null"]
+          },
+          "question": {
+            "type": ["string", "null"]
+          },
+          "confidence": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          }
+        },
+        "required": [
+          "kind",
+          "source_text",
+          "source_range",
+          "principle_ids",
+          "reason",
+          "replacement",
+          "question",
+          "confidence"
+        ]
+      }
+    }
+  },
+  "required": ["findings"]
+}
