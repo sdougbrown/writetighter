@@ -24,6 +24,8 @@ func testProfile() *profile.Resolution {
 		{ID: "CORE.TERM_UNKNOWN", Enabled: true},
 		{ID: "CORE.TERM_CONSISTENCY", Enabled: true},
 		{ID: "CORE.PROCEDURE_MULTI_ACTION", Enabled: true},
+		{ID: "CORE.NOUN_STACK", Enabled: true, Parameters: map[string]any{"min_stack_length": 3}},
+		{ID: "CORE.GERUND_OPENER", Enabled: true},
 	}
 	return &profile.Resolution{Rules: &profile.RulesConfig{UnknownTermPolicy: "candidate", Rules: rules}, Dict: dict}
 }
@@ -142,6 +144,8 @@ func TestTermDiscouragedUnicode(t *testing.T) {
 		{ID: "CORE.TERM_UNKNOWN", Enabled: true},
 		{ID: "CORE.TERM_CONSISTENCY", Enabled: true},
 		{ID: "CORE.PROCEDURE_MULTI_ACTION", Enabled: true},
+		{ID: "CORE.NOUN_STACK", Enabled: true, Parameters: map[string]any{"min_stack_length": 3}},
+		{ID: "CORE.GERUND_OPENER", Enabled: true},
 	}
 	p := &profile.Resolution{Rules: &profile.RulesConfig{UnknownTermPolicy: "candidate", Rules: rules}, Dict: dict}
 	ctx := &RunContext{Document: testDoc("café culture matters."), Profile: p}
@@ -311,5 +315,91 @@ func TestCodePointColumn(t *testing.T) {
 	col = codePointColumn("über text", 4, 1) // byte 4 = rune index 3
 	if col != 4 {
 		t.Fatalf("expected col 4 for byte 4 (after 'ü'+'b'+'e'+'r'), got %d", col)
+	}
+}
+
+func TestNounStack(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("The assumptions-side entry wrappers are configured."), Profile: testProfile()}
+	findings, _ := Get("CORE.NOUN_STACK").Run(ctx)
+	if len(findings) == 0 {
+		t.Fatal("expected noun stack finding for 'assumptions-side entry wrappers'")
+	}
+	if !strings.Contains(findings[0].Evidence, "assumptions-side") {
+		t.Fatalf("expected evidence to contain the noun stack, got %q", findings[0].Evidence)
+	}
+}
+
+func TestNounStackShortRunNotFlagged(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("The hot loop is fast."), Profile: testProfile()}
+	findings, _ := Get("CORE.NOUN_STACK").Run(ctx)
+	for _, f := range findings {
+		if strings.Contains(f.Evidence, "hot loop") {
+			t.Fatalf("2-word run should not be flagged: %s", f.Evidence)
+		}
+	}
+}
+
+func TestNounStackThreshold(t *testing.T) {
+	p := testProfile()
+	for i := range p.Rules.Rules {
+		if p.Rules.Rules[i].ID == "CORE.NOUN_STACK" {
+			p.Rules.Rules[i].Parameters = map[string]any{"min_stack_length": 4}
+		}
+	}
+	ctx := &RunContext{Document: testDoc("The assumptions-side entry wrappers are configured."), Profile: p}
+	findings, _ := Get("CORE.NOUN_STACK").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("3-word stack should not be flagged at threshold 4, got %d findings", len(findings))
+	}
+}
+
+func TestGerundOpener(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Arming the assumptions-side entry wrappers and consume in their recursive cores."), Profile: testProfile()}
+	findings, _ := Get("CORE.GERUND_OPENER").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected exactly 1 gerund opener finding, got %d", len(findings))
+	}
+	if !strings.Contains(findings[0].Evidence, "Arming") {
+		t.Fatalf("expected evidence to contain 'Arming', got %q", findings[0].Evidence)
+	}
+}
+
+func TestGerundOpenerNotInList(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("1. Configuring the server requires a restart.\n2. Running the test suite.")}
+	findings, _ := Get("CORE.GERUND_OPENER").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("expected no findings in list items, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestGerundOpenerShortWordNotFlagged(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Ring the bell to signal completion."), Profile: testProfile()}
+	findings, _ := Get("CORE.GERUND_OPENER").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("'Ring' (4 runes) should not be flagged, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestGerundOpenerNoDeterminerNotFlagged(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Running takes five minutes."), Profile: testProfile()}
+	findings, _ := Get("CORE.GERUND_OPENER").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("gerund without determiner should not be flagged, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestGerundOpenerBaseVerbNotFlagged(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Bring the server online."), Profile: testProfile()}
+	findings, _ := Get("CORE.GERUND_OPENER").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("'Bring' is a base verb (stem 'br' < 3), should not be flagged, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestGerundOpenerSixCharFlagged(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Arming the system takes time."), Profile: testProfile()}
+	findings, _ := Get("CORE.GERUND_OPENER").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("'Arming' (6 runes, stem 'arm' = 3) should be flagged, got %d: %v", len(findings), findings)
 	}
 }

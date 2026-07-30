@@ -282,7 +282,7 @@ func TestEmbeddedProfilePinnedManifestHashes(t *testing.T) {
 	}
 	// Expected payload hashes from the reviewed manifest for software-docs-en@0.2.0
 	const wantDictHash = "d4db517230d0cd22b0bce9a064f47886246604bf7605539154bd28af82a2f04a"
-	const wantRulesHash = "7692a7708a9d321015050ea4d77410e40ee62eca74ef45ec933bee05e1da0760"
+	const wantRulesHash = "ec5100eb2aff2ea374fed3cb0aff83953845bd2ac9afe081afd488c144e1ce1a"
 
 	if res.Manifest.Payloads.DictionarySHA256.SHA256 != wantDictHash {
 		t.Errorf("dictionary hash:\n  got:  %s\n  want: %s",
@@ -299,7 +299,7 @@ func TestEmbeddedProfileCanonicalResolutionHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("embedded profile load failed: %v", err)
 	}
-	const expectedSHA = "b169350dc44d7ecb42f9064db00ef8f338db9c189ba0c3804fb6e75ff9894850"
+	const expectedSHA = "2f18fcbb5c2aadc7bf024606d960b89b35f05f21fafaf80d729756d8ec6f2c4b"
 	if res.SHA256 != expectedSHA {
 		t.Errorf("resolution SHA256:\n  got:  %s\n  want: %s", res.SHA256, expectedSHA)
 	}

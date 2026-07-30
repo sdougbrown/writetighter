@@ -23,6 +23,23 @@
       },
       "severity": "info",
       "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.NOUN_STACK",
+      "parameters": {
+        "min_stack_length": 3
+      },
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.GERUND_OPENER",
+      "severity": "info",
+      "version": 1
     }
   ],
   "unknown_term_policy": "candidate"

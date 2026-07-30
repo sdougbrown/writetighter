@@ -32,16 +32,21 @@ var knownRuleParams = map[string]map[string]bool{
 		"max_sentences": true,
 		"max_words":     true,
 	},
+	"CORE.NOUN_STACK": {
+		"min_stack_length": true,
+	},
 	"CORE.TERM_DISCOURAGED":       {},
 	"CORE.TERM_CASE":              {},
 	"CORE.TERM_UNKNOWN":           {},
 	"CORE.TERM_CONSISTENCY":       {},
 	"CORE.PROCEDURE_MULTI_ACTION": {},
+	"CORE.GERUND_OPENER":          {},
 }
 
 var knownRules = map[string]bool{
 	"CORE.SENTENCE_LENGTH": true, "CORE.DENSE_PARAGRAPH": true, "CORE.TERM_DISCOURAGED": true,
 	"CORE.TERM_CASE": true, "CORE.TERM_UNKNOWN": true, "CORE.TERM_CONSISTENCY": true, "CORE.PROCEDURE_MULTI_ACTION": true,
+	"CORE.NOUN_STACK": true, "CORE.GERUND_OPENER": true,
 }
 
 func (rc *RulesConfig) Validate() error {
@@ -101,7 +106,7 @@ func (rc *RulesConfig) Validate() error {
 		// Rejection rule 5: Validate parameter values are positive integers.
 		for k, v := range rule.Parameters {
 			switch rule.ID {
-			case "CORE.SENTENCE_LENGTH", "CORE.DENSE_PARAGRAPH":
+			case "CORE.SENTENCE_LENGTH", "CORE.DENSE_PARAGRAPH", "CORE.NOUN_STACK":
 				n, ok := toInt(v)
 				if !ok {
 					errs = append(errs, fmt.Errorf("rules[%d]: parameter %q must be an integer, got %T(%v)", i, k, v, v))
