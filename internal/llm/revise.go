@@ -98,12 +98,12 @@ func reviseExcerpt(ctx context.Context, config Config, doc *document.Document, r
 			return nil, fmt.Errorf("%w: range [%d, %d) is out of excerpt bounds", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
 		}
 		if excerpt.Text[rev.Range.StartByte:rev.Range.EndByte] != rev.SourceText {
-			start, ok := nearestSourceOccurrence(excerpt.Text, rev.SourceText, rev.Range.StartByte)
+			start, end, ok := resolveSourceText(excerpt.Text, rev.SourceText, rev.Range.StartByte)
 			if !ok {
 				return nil, fmt.Errorf("%w: source_text does not identify a nearest occurrence", ErrInvalidModelResponse)
 			}
 			rev.Range.StartByte = start
-			rev.Range.EndByte = start + len(rev.SourceText)
+			rev.Range.EndByte = end
 		}
 		if rev.Range.StartByte < 0 || rev.Range.EndByte < rev.Range.StartByte || rev.Range.EndByte > len(excerpt.Text) {
 			return nil, fmt.Errorf("%w: range [%d, %d) is out of excerpt bounds", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
@@ -173,24 +173,17 @@ func ValidateReviseResponse(raw []byte) (*report.ReviseResponse, error) {
 	if len(raw) > MaxOutputChars {
 		return nil, errors.New("llm response too large")
 	}
-	dec := json.NewDecoder(bytes.NewReader(raw))
-	dec.DisallowUnknownFields()
+	// Decode leniently first. Models may include extra top-level fields
+	// (e.g. a summary "reason" field) that are not part of the contract.
+	// The explicit validation below catches any real issues.
 	var resp ReviseLLMResponse
-	if err := dec.Decode(&resp); err != nil {
+	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil, err
 	}
 	// Some models use "questions" instead of "findings" when all items
 	// are clarifications. Merge if findings is empty.
 	if len(resp.Findings) == 0 && len(resp.Questions) > 0 {
 		resp.Findings = resp.Questions
-	}
-	// Check trailing content.
-	remaining := dec.InputOffset()
-	if remaining < int64(len(raw)) {
-		trailing := string(raw[remaining:])
-		if strings.TrimSpace(trailing) != "" {
-			return nil, fmt.Errorf("trailing content after JSON value")
-		}
 	}
 	if len(resp.Findings) > MaxSuggestions {
 		return nil, errors.New("too many revise suggestions")
@@ -375,6 +368,97 @@ func nearestSourceOccurrence(text, source string, preferred int) (int, bool) {
 		offset = start + 1
 	}
 	return best, best >= 0 && !tied
+}
+
+// resolveSourceText finds source text in the document excerpt by trying
+// exact matching first and falling back to whitespace-insensitive matching.
+// Returns the corrected start and end byte offsets in the excerpt.
+func resolveSourceText(text, source string, preferred int) (start, end int, ok bool) {
+	s, ok := nearestSourceOccurrence(text, source, preferred)
+	if ok {
+		return s, s + len(source), true
+	}
+	// Some models normalize whitespace (e.g. collapsing newlines to spaces)
+	// or add/remove small words in source_text. Try whitespace-insensitive
+	// matching as a fallback.
+	return findSourceTextNormalized(text, source, preferred)
+}
+
+// findSourceTextNormalized finds source in text by comparing
+// non-whitespace characters only. This handles models that normalize
+// whitespace in source_text. Returns start and end byte offsets in the
+// original (non-normalized) text.
+func findSourceTextNormalized(text, source string, preferred int) (start, end int, ok bool) {
+	if source == "" {
+		return 0, 0, false
+	}
+
+	// Build index of non-whitespace rune positions in text.
+	type charPos struct {
+		orig int  // byte offset in original text
+		size int  // byte size of the rune
+		r    rune // the rune itself
+	}
+	var textChars []charPos
+	for i, r := range text {
+		if !unicode.IsSpace(r) {
+			_, size := utf8.DecodeRuneInString(text[i:])
+			textChars = append(textChars, charPos{orig: i, size: size, r: r})
+		}
+	}
+
+	// Extract non-whitespace runes from source.
+	var sourceRunes []rune
+	for _, r := range source {
+		if !unicode.IsSpace(r) {
+			sourceRunes = append(sourceRunes, r)
+		}
+	}
+
+	if len(sourceRunes) == 0 {
+		return 0, 0, false
+	}
+	if len(sourceRunes) > len(textChars) {
+		return 0, 0, false
+	}
+
+	best := -1
+	bestEnd := -1
+	bestDistance := int(^uint(0) >> 1)
+	tied := false
+
+	for startIdx := 0; startIdx <= len(textChars)-len(sourceRunes); startIdx++ {
+		match := true
+		for j := 0; j < len(sourceRunes); j++ {
+			if textChars[startIdx+j].r != sourceRunes[j] {
+				match = false
+				break
+			}
+		}
+		if !match {
+			continue
+		}
+
+		origStart := textChars[startIdx].orig
+		lastChar := textChars[startIdx+len(sourceRunes)-1]
+		origEnd := lastChar.orig + lastChar.size
+
+		distance := origStart - preferred
+		if distance < 0 {
+			distance = -distance
+		}
+		switch {
+		case distance < bestDistance:
+			best, bestEnd, bestDistance, tied = origStart, origEnd, distance, false
+		case distance == bestDistance:
+			tied = true
+		}
+	}
+
+	if best < 0 || tied {
+		return 0, 0, false
+	}
+	return best, bestEnd, true
 }
 
 func trimmedOptional(value *string) *string {
