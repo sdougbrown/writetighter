@@ -175,7 +175,10 @@ func ValidateReviseResponse(raw []byte) (*report.ReviseResponse, error) {
 	}
 	// Decode leniently first. Models may include extra top-level fields
 	// (e.g. a summary "reason" field) that are not part of the contract.
-	// The explicit validation below catches any real issues.
+	// json.Unmarshal still catches type mismatches (string vs array, etc.);
+	// extra unknown fields are silently ignored. The per-field validation
+	// below (kind enum, non-empty checks, principle allowlist, confidence
+	// bounds, etc.) catches remaining contract violations.
 	var resp ReviseLLMResponse
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil, err
@@ -379,8 +382,9 @@ func resolveSourceText(text, source string, preferred int) (start, end int, ok b
 		return s, s + len(source), true
 	}
 	// Some models normalize whitespace (e.g. collapsing newlines to spaces)
-	// or add/remove small words in source_text. Try whitespace-insensitive
-	// matching as a fallback.
+	// in source_text. Try whitespace-insensitive matching as a fallback.
+	// Note: this does not handle models that add/remove content words;
+	// those findings will still fail source_text validation.
 	return findSourceTextNormalized(text, source, preferred)
 }
 
@@ -402,8 +406,7 @@ func findSourceTextNormalized(text, source string, preferred int) (start, end in
 	var textChars []charPos
 	for i, r := range text {
 		if !unicode.IsSpace(r) {
-			_, size := utf8.DecodeRuneInString(text[i:])
-			textChars = append(textChars, charPos{orig: i, size: size, r: r})
+			textChars = append(textChars, charPos{orig: i, size: utf8.RuneLen(r), r: r})
 		}
 	}
 
