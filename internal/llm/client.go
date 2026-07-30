@@ -158,21 +158,24 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 }
 
 // buildReviseResponseFormat builds the structured revision schema.
-func buildReviseResponseFormat(mode string) *ResponseFormat {
+func buildReviseResponseFormat(mode string) (*ResponseFormat, error) {
 	if mode == "prompt_json" || mode == "auto" || mode == "" {
-		return nil
+		return nil, nil
 	}
 	rf := &ResponseFormat{Type: mode}
 	if mode == "json_schema" {
-		principleIDs, _ := json.Marshal(guidance.PrincipleIDs())
-		schema := strings.Replace(schemas.ReviseResponseSchemaV1, "{{PRINCIPLE_IDS}}", string(principleIDs), 1)
+		principleIDs, err := json.Marshal(guidance.PrincipleIDs())
+		if err != nil {
+			return nil, fmt.Errorf("marshal principle IDs: %w", err)
+		}
+		schema := strings.Replace(schemas.ReviseResponseSchemaV1, `["{{PRINCIPLE_IDS}}"]`, string(principleIDs), 1)
 		rf.JSONSchema = &JSONSchema{
 			Name:   "revise_response",
 			Schema: json.RawMessage(schema),
 			Strict: true,
 		}
 	}
-	return rf
+	return rf, nil
 }
 
 func normalizeEndpoint(base string) (string, error) {

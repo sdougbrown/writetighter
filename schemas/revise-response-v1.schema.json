@@ -35,7 +35,7 @@
             "minItems": 1,
             "items": {
               "type": "string",
-              "enum": {{PRINCIPLE_IDS}}
+              "enum": ["{{PRINCIPLE_IDS}}"]
             }
           },
           "reason": {
