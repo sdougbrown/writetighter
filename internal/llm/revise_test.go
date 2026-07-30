@@ -603,3 +603,91 @@ func TestValidateReviseResponseFindingsPreferredOverQuestions(t *testing.T) {
 		t.Fatalf("expected rewrite from findings, got %q", resp.Revisions[0].Kind)
 	}
 }
+
+func TestValidateReviseResponseAcceptsExtraTopLevelFields(t *testing.T) {
+	raw := `{"findings":[],"reason":"no revisions needed","model_info":"gemma4","confidence":0.9}`
+	resp, err := ValidateReviseResponse([]byte(raw))
+	if err != nil {
+		t.Fatalf("expected extra top-level fields to be silently accepted, got: %v", err)
+	}
+	if len(resp.Revisions) != 0 {
+		t.Fatalf("expected 0 revisions, got %d", len(resp.Revisions))
+	}
+}
+
+func TestValidateReviseResponseAcceptsExtraFieldsWithValidFindings(t *testing.T) {
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"too long","replacement":"hi","confidence":0.9}],"usage":{"prompt_tokens":100,"completion_tokens":50}}`
+	resp, err := ValidateReviseResponse([]byte(raw))
+	if err != nil {
+		t.Fatalf("expected valid response with extra fields, got: %v", err)
+	}
+	if len(resp.Revisions) != 1 {
+		t.Fatalf("expected 1 revision, got %d", len(resp.Revisions))
+	}
+	if resp.Revisions[0].Replacement == nil || *resp.Revisions[0].Replacement != "hi" {
+		t.Fatalf("expected replacement hi, got %#v", resp.Revisions[0].Replacement)
+	}
+}
+
+func TestValidateReviseResponseStillRejectsErrorsWithExtraFields(t *testing.T) {
+	// Extra top-level fields must not silence existing validation.
+	raw := `{"findings":[{"kind":"rewrite","source_text":"hello","source_range":{"start":0,"end":5},"principle_ids":["CORE.SHORT_SENTENCE"],"reason":"test","confidence":0.9}],"extra":"field"}`
+	_, err := ValidateReviseResponse([]byte(raw))
+	if err == nil || !strings.Contains(err.Error(), "requires replacement") {
+		t.Fatalf("expected requires replacement error despite extra fields, got: %v", err)
+	}
+}
+
+func TestFindSourceTextNormalizedTie(t *testing.T) {
+	start, end, ok := findSourceTextNormalized("abc abc", "abc", 2)
+	if ok {
+		t.Fatalf("expected tie to be rejected, got start=%d end=%d ok=%v", start, end, ok)
+	}
+}
+
+func TestFindSourceTextNormalizedWhitespace(t *testing.T) {
+	// Model says "on deploy" but document has "on\ndeploy".
+	// Non-whitespace chars match: o,n,d,e,p,l,o,y.
+	text := "waits on\ndeploy + CloudBees"
+	source := "on deploy"
+	start, end, ok := findSourceTextNormalized(text, source, 6)
+	if !ok {
+		t.Fatalf("expected match, got start=%d end=%d ok=%v", start, end, ok)
+	}
+	if text[start:end] != "on\ndeploy" {
+		t.Fatalf("expected match at on\\ndeploy, got %q at [%d,%d)", text[start:end], start, end)
+	}
+}
+
+func TestFindSourceTextNormalizedNoMatch(t *testing.T) {
+	_, _, ok := findSourceTextNormalized("some random text here", "something else", 0)
+	if ok {
+		t.Fatal("expected no match for non-existent source text")
+	}
+}
+
+func TestFindSourceTextNormalizedUnicode(t *testing.T) {
+	text := "élève une question"
+	source := "élève une"
+	start, end, ok := findSourceTextNormalized(text, source, 0)
+	if !ok {
+		t.Fatalf("expected match for unicode text, got start=%d end=%d ok=%v", start, end, ok)
+	}
+	if text[start:end] != "élève une" {
+		t.Fatalf("expected match élève une, got %q at [%d,%d)", text[start:end], start, end)
+	}
+}
+
+func TestFindSourceTextNormalizedLeadingWhitespaceInSource(t *testing.T) {
+	// Model sometimes adds/removes small words. This tests that
+	// leading/trailing whitespace in source is ignored.
+	text := "the quick brown fox"
+	source := "  quick brown  "
+	start, end, ok := findSourceTextNormalized(text, source, 0)
+	if !ok {
+		t.Fatalf("expected match ignoring whitespace, got start=%d end=%d ok=%v", start, end, ok)
+	}
+	if text[start:end] != "quick brown" {
+		t.Fatalf("expected quick brown, got %q at [%d,%d)", text[start:end], start, end)
+	}
+}
