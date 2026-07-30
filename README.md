@@ -314,11 +314,17 @@ api_key_env = "WRITETIGHTER_API_KEY"
 
 `revise` analyzes every selected document regardless of static findings. It reads model settings from the user config file; it has no model-related command-line flags.
 
-The command splits large documents at Markdown block boundaries and sends each chunk sequentially to the configured endpoint. Returned revisions retain original-document ranges. The response reports whether every byte was analyzed.
+The command splits large Markdown documents at block boundaries and sends each chunk sequentially to the configured endpoint. Returned Markdown and text revisions retain original-document ranges. The response reports whether every byte was analyzed.
 
 The default `max_requests = 32` prevents an unexpectedly large input from producing hundreds of model calls. The limit counts initial chunk requests and runtime fallbacks. Increase it deliberately in user config when a document requires more chunks.
 
 When `json_object` or `json_schema` assistant content violates the revision contract, `revise` retries that chunk once with `prompt_json` if the request budget can still cover every remaining chunk. A model-returned `error` object is reported as a model error rather than an unknown JSON field. `revise` returns structured `rewrite` or `clarification` revisions and never modifies target files.
+
+### HTML input
+
+Direct `.html` and `.htm` files, including those discovered in directories, are supported. WriteTighter extracts visible text while excluding comments and the `head`, `script`, `style`, `template`, and `noscript` subtrees. This is not browser rendering: CSS and JavaScript visibility are not evaluated.
+
+HTML revisions declare `source_format: "html"` and `range_basis: "visible_text"`. Their `source_spans` identify the related original HTML byte ranges; visible-text offsets are never presented as HTML offsets. Suggestions remain advisory, and WriteTighter never modifies the HTML file.
 
 **Example:**
 ```sh

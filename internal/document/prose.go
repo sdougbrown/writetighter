@@ -38,7 +38,43 @@ func AnalyzeProse(doc *Document) []ProseBlock {
 	if doc == nil {
 		return nil
 	}
+	if doc.Format == FormatHTML {
+		return scanHTMLProse(doc)
+	}
 	return scanPhysicalBlocks(doc.Content)
+}
+
+func scanHTMLProse(doc *Document) []ProseBlock {
+	text := doc.AnalysisContent()
+	if strings.TrimSpace(text) == "" {
+		return nil
+	}
+	// The extractor represents HTML block boundaries as virtual newlines.
+	// Reuse its provenance map for sentence analysis.
+	return []ProseBlock{{
+		StartByte:    0,
+		EndByte:      len(doc.Content),
+		StartLine:    1,
+		StartColumn:  1,
+		EndLine:      offsetToPos(doc.Content, len(doc.Content)).Line,
+		EndColumn:    offsetToPos(doc.Content, len(doc.Content)).Column,
+		AnalysisText: text,
+		analysisMap:  projectionOffsets(doc),
+	}}
+}
+
+func projectionOffsets(doc *Document) []int {
+	text := doc.AnalysisContent()
+	offsets := make([]int, len(text)+1)
+	for i := range offsets {
+		offsets[i] = len(doc.Content)
+	}
+	for _, segment := range doc.Projection {
+		for i := segment.StartByte; i < segment.EndByte && i < len(text); i++ {
+			offsets[i] = segment.Source.StartByte
+		}
+	}
+	return offsets
 }
 
 // SentenceUnits splits a ProseBlock into sentence units.

@@ -25,11 +25,13 @@ type ReviseResponse struct {
 // SourceAnalysis reports revision coverage for one input document.
 type SourceAnalysis struct {
 	SourcePath    string `json:"source_path"`
-	InputBytes    int    `json:"input_bytes"`
+	InputBytes    int    `json:"input_bytes"` // original source bytes
 	AnalyzedBytes int    `json:"analyzed_bytes"`
 	Chunks        int    `json:"chunks"`
 	ModelRequests int    `json:"model_requests"`
 	Complete      bool   `json:"complete"`
+	SourceFormat  string `json:"source_format,omitempty"`
+	RangeBasis    string `json:"range_basis,omitempty"`
 }
 
 // RevisionError identifies a document whose required model call or response failed.
@@ -49,6 +51,17 @@ type RevisionItem struct {
 	Replacement  *string     `json:"replacement,omitempty"` // rewrite only
 	Question     *string     `json:"question,omitempty"`    // clarification only
 	Confidence   float64     `json:"confidence"`
+	// SourceFormat and RangeBasis identify Range coordinates.
+	// HTML ranges use visible_text and include raw source spans.
+	SourceFormat string       `json:"source_format,omitempty"`
+	RangeBasis   string       `json:"range_basis,omitempty"`
+	SourceSpans  []SourceSpan `json:"source_spans,omitempty"`
+}
+
+// SourceSpan is a half-open byte range in the original input document.
+type SourceSpan struct {
+	StartByte int `json:"start_byte"`
+	EndByte   int `json:"end_byte"`
 }
 
 // ReviseRange describes the source range of a revision suggestion.
@@ -103,6 +116,12 @@ func RenderReviseHuman(r *ReviseResponse) (string, error) {
 			rev.Range.StartLine, rev.Range.StartColumn,
 			rev.Range.EndLine, rev.Range.EndColumn,
 			rev.Range.StartByte, rev.Range.EndByte)
+		if rev.RangeBasis != "" {
+			fmt.Fprintf(&b, "range basis: %s\n", rev.RangeBasis)
+		}
+		if len(rev.SourceSpans) > 0 {
+			fmt.Fprintf(&b, "source spans: %v\n", rev.SourceSpans)
+		}
 		fmt.Fprintf(&b, "principles: %s\n", strings.Join(rev.PrincipleIDs, ", "))
 		fmt.Fprintf(&b, "reason: %s\n", rev.Reason)
 		fmt.Fprintf(&b, "confidence: %.2f\n", rev.Confidence)
