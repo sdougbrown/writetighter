@@ -165,6 +165,21 @@ func MergeConfigs(project *ProjectConfig, user *UserConfig) (*MergedConfig, erro
 	return &MergedConfig{Project: project, User: user}, nil
 }
 
+// SanitizedTOML returns the user configuration in TOML format.
+// It redacts the API key but preserves the api_key_env field, which contains
+// the name of the environment variable rather than the secret itself.
+// The shallow copy is safe because UserConfig and LLMConfig contain only value
+// types; if either gains a slice or pointer field, copy the fields explicitly.
+func (c *UserConfig) SanitizedTOML() (string, error) {
+	sanitized := *c
+	sanitized.LLM.APIKey = ""
+	var buf bytes.Buffer
+	if err := toml.NewEncoder(&buf).Encode(&sanitized); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
 func ValidateTermBase(entries []TermEntry) error {
 	return validateTermBase(entries)
 }

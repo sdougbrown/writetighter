@@ -144,6 +144,50 @@ func TestWriteUserConfigUsesXDGPathAndPrivatePermissions(t *testing.T) {
 	}
 }
 
+func TestSanitizedTOMLRedactsAPIKey(t *testing.T) {
+	cfg := &UserConfig{LLM: LLMConfig{
+		Provider:     "openai-compatible",
+		BaseURL:      "http://localhost:4000/v1",
+		Model:        "test-model",
+		APIKey:       "sk-secret-key-12345",
+		Timeout:      "45s",
+		ResponseMode: "json_object",
+		MaxRequests:  32,
+	}}
+	tomlStr, err := cfg.SanitizedTOML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(tomlStr, "sk-secret-key-12345") {
+		t.Fatalf("API key was not redacted: %s", tomlStr)
+	}
+	if !strings.Contains(tomlStr, "test-model") {
+		t.Fatalf("model name was lost: %s", tomlStr)
+	}
+	if !strings.Contains(tomlStr, "http://localhost:4000/v1") {
+		t.Fatalf("base_url was lost: %s", tomlStr)
+	}
+}
+
+func TestSanitizedTOMLPreservesAPIKeyEnv(t *testing.T) {
+	cfg := &UserConfig{LLM: LLMConfig{
+		Provider:     "openai-compatible",
+		BaseURL:      "http://localhost:4000/v1",
+		Model:        "test-model",
+		APIKeyEnv:    "WRITETIGHTER_API_KEY",
+		Timeout:      "45s",
+		ResponseMode: "json_object",
+	}}
+	tomlStr, err := cfg.SanitizedTOML()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// api_key_env is an env var name, not a secret — should be visible.
+	if !strings.Contains(tomlStr, "WRITETIGHTER_API_KEY") {
+		t.Fatalf("api_key_env was lost: %s", tomlStr)
+	}
+}
+
 func TestProjectConfigRejectsApiKeyEnvInProject(t *testing.T) {
 	// Project config should reject [llm] sections entirely.
 	dir := t.TempDir()

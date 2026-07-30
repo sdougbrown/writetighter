@@ -5,8 +5,64 @@ import (
 	"encoding/json"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
+
+// captureStdout runs fn with os.Stdout replaced by a pipe and returns the captured text.
+func captureStdout(t *testing.T, fn func()) string {
+	t.Helper()
+	old := os.Stdout
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+	os.Stdout = w
+	defer func() { os.Stdout = old }()
+	done := make(chan struct{})
+	var out bytes.Buffer
+	go func() {
+		io.Copy(&out, r)
+		close(done)
+	}()
+	fn()
+	_ = w.Close()
+	<-done
+	return out.String()
+}
+
+// captureStdoutStderr captures both streams and returns (stdout, stderr).
+func captureStdoutStderr(t *testing.T, fn func()) (string, string) {
+	t.Helper()
+	oldOut, oldErr := os.Stdout, os.Stderr
+	rOut, wOut, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stdout: %v", err)
+	}
+	rErr, wErr, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe stderr: %v", err)
+	}
+	os.Stdout, os.Stderr = wOut, wErr
+	defer func() { os.Stdout, os.Stderr = oldOut, oldErr }()
+	doneOut, doneErr := make(chan struct{}), make(chan struct{})
+	var outBuf, errBuf bytes.Buffer
+	go func() {
+		io.Copy(&outBuf, rOut)
+		close(doneOut)
+	}()
+	go func() {
+		io.Copy(&errBuf, rErr)
+		close(doneErr)
+	}()
+	fn()
+	_ = wOut.Close()
+	_ = wErr.Close()
+	<-doneOut
+	<-doneErr
+	return outBuf.String(), errBuf.String()
+}
 
 func TestRunVersion(t *testing.T) {
 	if got := run([]string{"version", "--json"}); got != 0 {
@@ -152,5 +208,214 @@ func TestReviseNoLLMConfigFails(t *testing.T) {
 func TestCheckCommandDoesNotExist(t *testing.T) {
 	if got := run([]string{"check", "--stdin"}); got != 2 {
 		t.Fatalf("expected removed check command to return exit 2, got %d", got)
+	}
+}
+
+// --- Help and self-discovery tests ---
+
+func TestNoArgsShowsHelp(t *testing.T) {
+	out := captureStdout(t, func() {
+		if got := run(nil); got != 0 {
+			t.Fatalf("expected exit 0 for no args, got %d", got)
+		}
+	})
+	if !strings.Contains(out, "USAGE") {
+		t.Fatalf("expected help text on stdout, got: %s", out)
+	}
+	if !strings.Contains(out, "COMMANDS") {
+		t.Fatalf("expected command list in help, got: %s", out)
+	}
+}
+
+func TestTopLevelHelpFlag(t *testing.T) {
+	for _, args := range [][]string{{"--help"}, {"-h"}} {
+		out := captureStdout(t, func() {
+			if got := run(args); got != 0 {
+				t.Fatalf("%v: expected exit 0, got %d", args, got)
+			}
+		})
+		if !strings.Contains(out, "COMMANDS") {
+			t.Fatalf("%v: expected help text, got: %s", args, out)
+		}
+	}
+}
+
+func TestHelpCommand(t *testing.T) {
+	out := captureStdout(t, func() {
+		if got := run([]string{"help"}); got != 0 {
+			t.Fatalf("expected exit 0, got %d", got)
+		}
+	})
+	if !strings.Contains(out, "COMMANDS") {
+		t.Fatalf("expected main help, got: %s", out)
+	}
+}
+
+func TestHelpCommandForSubcommand(t *testing.T) {
+	out := captureStdout(t, func() {
+		if got := run([]string{"help", "lint"}); got != 0 {
+			t.Fatalf("expected exit 0, got %d", got)
+		}
+	})
+	if !strings.Contains(out, "writetighter lint") {
+		t.Fatalf("expected lint help, got: %s", out)
+	}
+}
+
+func TestSubcommandHelpFlags(t *testing.T) {
+	for _, tc := range []struct {
+		args     string
+		contains string
+	}{
+		{"lint --help", "--fail-on"},
+		{"revise --help", "CONFIGURATION"},
+		{"prompt --help", "revision guidance"},
+		{"config --help", "--wizard"},
+		{"explain --help", "rule-id"},
+		{"profile --help", "SUBCOMMANDS"},
+		{"version --help", "--json"},
+	} {
+		t.Run(tc.args, func(t *testing.T) {
+			out := captureStdout(t, func() {
+				if got := run(strings.Fields(tc.args)); got != 0 {
+					t.Fatalf("expected exit 0, got %d", got)
+				}
+			})
+			if !strings.Contains(out, tc.contains) {
+				t.Fatalf("expected %q in help output, got: %s", tc.contains, out)
+			}
+		})
+	}
+}
+
+func TestUnknownCommandShowsHelp(t *testing.T) {
+	out := captureStdout(t, func() {
+		if got := run([]string{"bogus"}); got != 2 {
+			t.Fatalf("expected exit 2 for unknown command, got %d", got)
+		}
+	})
+	if !strings.Contains(out, "COMMANDS") {
+		t.Fatalf("expected help text after unknown command, got: %s", out)
+	}
+}
+
+func TestConfigShowsSanitizedWhenConfigured(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	configDir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "config.toml")
+	data := []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='test-model'\napi_key='sk-secret-key-12345'\ntimeout='45s'\nresponse_mode='json_object'\nmax_requests=32\n")
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := captureStdoutStderr(t, func() {
+		if got := run([]string{"config"}); got != 0 {
+			t.Fatalf("expected exit 0, got %d", got)
+		}
+	})
+	// Config should be shown on stdout.
+	if !strings.Contains(stdout, "test-model") {
+		t.Fatalf("expected model name in stdout, got: %s", stdout)
+	}
+	// API key must be redacted everywhere.
+	if strings.Contains(stdout, "sk-secret-key-12345") {
+		t.Fatalf("API key was not redacted in stdout: %s", stdout)
+	}
+	if strings.Contains(stderr, "sk-secret-key-12345") {
+		t.Fatalf("API key leaked to stderr: %s", stderr)
+	}
+	// Redaction note on stderr.
+	if !strings.Contains(stderr, "redacted") {
+		t.Fatalf("expected redaction note on stderr, got: %s", stderr)
+	}
+	// Should hint at --wizard on stderr.
+	if !strings.Contains(stderr, "--wizard") {
+		t.Fatalf("expected --wizard hint on stderr, got: %s", stderr)
+	}
+}
+
+func TestConfigShowsSanitizedWithAPIKeyEnv(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	configDir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "config.toml")
+	data := []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='test-model'\napi_key_env='WRITETIGHTER_API_KEY'\ntimeout='45s'\nresponse_mode='json_object'\n")
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr := captureStdoutStderr(t, func() {
+		if got := run([]string{"config"}); got != 0 {
+			t.Fatalf("expected exit 0, got %d", got)
+		}
+	})
+	// api_key_env is an env var name, not a secret, so it should be visible.
+	if !strings.Contains(stdout, "WRITETIGHTER_API_KEY") {
+		t.Fatalf("expected api_key_env in stdout, got: %s", stdout)
+	}
+	// Should hint at --wizard on stderr.
+	if !strings.Contains(stderr, "--wizard") {
+		t.Fatalf("expected --wizard hint on stderr, got: %s", stderr)
+	}
+}
+
+func TestConfigWizardFlagAccepted(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	configDir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "config.toml")
+	data := []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='test-model'\napi_key='sk-secret'\n")
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// --wizard should not show sanitized config; it should enter the wizard.
+	// Since stdin is not a terminal in tests, the wizard will fail, returning 2.
+	stdout, _ := captureStdoutStderr(t, func() {
+		if got := run([]string{"config", "--wizard"}); got != 2 {
+			t.Fatalf("expected exit 2 (wizard fails without terminal), got %d", got)
+		}
+	})
+	// Should not have printed the sanitized config.
+	if strings.Contains(stdout, "test-model") {
+		t.Fatalf("--wizard should not print sanitized config, got: %s", stdout)
+	}
+}
+
+func TestConfigShortWizardFlag(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	configDir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(configDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	configPath := filepath.Join(configDir, "config.toml")
+	data := []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='test-model'\napi_key='sk-secret'\n")
+	if err := os.WriteFile(configPath, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// -w is the short form of --wizard.
+	stdout, _ := captureStdoutStderr(t, func() {
+		if got := run([]string{"config", "-w"}); got != 2 {
+			t.Fatalf("expected exit 2 (wizard fails without terminal), got %d", got)
+		}
+	})
+	if strings.Contains(stdout, "test-model") {
+		t.Fatalf("-w should not print sanitized config, got: %s", stdout)
 	}
 }
