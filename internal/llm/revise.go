@@ -34,10 +34,13 @@ func Revise(ctx context.Context, config Config, doc *document.Document, res *pro
 	return reviseExcerpt(ctx, config, doc, res, findings, terms, buildReviseExcerpt(doc))
 }
 
-// ReviseChunk analyzes one contiguous range while returning original-document ranges.
+// ReviseChunk uses raw offsets for Markdown/text and virtual offsets for HTML.
 func ReviseChunk(ctx context.Context, config Config, doc *document.Document, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry, start, end int) (*report.ReviseResponse, error) {
-	if doc == nil || start < 0 || end <= start || end > len(doc.Content) {
+	if doc == nil || start < 0 || end <= start || end > len(doc.AnalysisContent()) {
 		return nil, fmt.Errorf("invalid revision chunk [%d, %d)", start, end)
+	}
+	if doc.Format == document.FormatHTML {
+		return reviseExcerpt(ctx, config, doc, res, findings, terms, newVirtualExcerpt(doc.AnalysisContent()[start:end], start))
 	}
 	offsets := make([]int, end-start)
 	for i := range offsets {
@@ -116,28 +119,41 @@ func reviseExcerpt(ctx context.Context, config Config, doc *document.Document, r
 			return nil, fmt.Errorf("%w: range [%d, %d) crosses excerpt gap or noncontiguous region", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
 		}
 
-		// Remap to original offsets.
+		rev.SourcePath = doc.Source
+		if doc.Format == document.FormatHTML {
+			// Keep HTML offsets virtual; source_spans relate them to immutable HTML.
+			start := excerpt.analysisStart + rev.Range.StartByte
+			end := excerpt.analysisStart + rev.Range.EndByte
+			rev.Range.StartByte, rev.Range.EndByte = start, end
+			rev.Range.StartLine, rev.Range.StartColumn = byteOffsetToLineColumn(doc.AnalysisContent(), start)
+			rev.Range.EndLine, rev.Range.EndColumn = byteOffsetToLineColumn(doc.AnalysisContent(), end)
+			rev.SourceFormat = "html"
+			rev.RangeBasis = "visible_text"
+			for _, span := range doc.SourceSpansForAnalysisRange(start, end) {
+				rev.SourceSpans = append(rev.SourceSpans, report.SourceSpan{StartByte: span.StartByte, EndByte: span.EndByte})
+			}
+			if rev.Kind == "rewrite" && (rev.Replacement == nil || doc.IsProtectedAnalysisRange(start, end) || !preservesProtectedText(rev.SourceText, *rev.Replacement, terms)) {
+				discardedRewrites++
+				continue
+			}
+			validated = append(validated, rev)
+			continue
+		}
+
+		// Remap Markdown and text ranges to original offsets.
 		startOrig := excerpt.OrigOffset(rev.Range.StartByte)
 		endOrig := excerpt.OrigOffset(rev.Range.EndByte)
 		if startOrig < 0 || endOrig < 0 {
 			continue
 		}
-
-		rev.SourcePath = doc.Source
 		rev.Range.StartByte = startOrig
 		rev.Range.EndByte = endOrig
 		rev.Range.StartLine, rev.Range.StartColumn = byteOffsetToLineColumn(doc.Content, startOrig)
 		rev.Range.EndLine, rev.Range.EndColumn = byteOffsetToLineColumn(doc.Content, endOrig)
-
-		// For rewrites, verify protected content is preserved.
-		if rev.Kind == "rewrite" {
-			if rev.Replacement == nil || !preservesProtectedContent(doc, startOrig, endOrig, *rev.Replacement, terms) {
-				discardedRewrites++
-				continue
-			}
+		if rev.Kind == "rewrite" && (rev.Replacement == nil || !preservesProtectedContent(doc, startOrig, endOrig, *rev.Replacement, terms)) {
+			discardedRewrites++
+			continue
 		}
-		// Clarifications do not mutate text, so no protected-content check.
-
 		validated = append(validated, rev)
 	}
 	reviseResp.Revisions = validated
@@ -701,10 +717,13 @@ func BuildReviseWritingGuidelines(d *profile.Dictionary, excerpt string) string 
 // can analyze text even when lint has no findings.
 // Truncation is UTF-8 safe.
 func buildReviseExcerpt(doc *document.Document) *Excerpt {
-	content := doc.Content
+	content := doc.AnalysisContent()
 	if len(content) > MaxInputChars {
 		n := utf8ValidPrefixLen(content, MaxInputChars)
 		content = content[:n]
+	}
+	if doc.Format == document.FormatHTML {
+		return newVirtualExcerpt(content, 0)
 	}
 	return newExcerpt(content, nil)
 }

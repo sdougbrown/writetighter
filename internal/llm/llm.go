@@ -16,13 +16,7 @@ func preservesProtectedContent(doc *document.Document, start, end int, replaceme
 		return false
 	}
 	source := doc.Content[start:end]
-	protected := map[string]struct{}{}
-	for _, token := range protectedTokenPattern.FindAllString(source, -1) {
-		token = strings.TrimRight(token, ".,;:!?)]}")
-		if token != "" {
-			protected[token] = struct{}{}
-		}
-	}
+	protected := protectedTokens(source, terms)
 	for _, seg := range doc.Segments {
 		if seg.Range.Start.Byte >= end || seg.Range.End.Byte <= start {
 			continue
@@ -34,11 +28,31 @@ func preservesProtectedContent(doc *document.Document, start, end int, replaceme
 			}
 		}
 	}
+	return replacementPreserves(protected, replacement)
+}
+
+// preservesProtectedText applies the protected-token policy to HTML visible text.
+func preservesProtectedText(source, replacement string, terms []config.TermEntry) bool {
+	return replacementPreserves(protectedTokens(source, terms), replacement)
+}
+
+func protectedTokens(source string, terms []config.TermEntry) map[string]struct{} {
+	protected := map[string]struct{}{}
+	for _, token := range protectedTokenPattern.FindAllString(source, -1) {
+		token = strings.TrimRight(token, ".,;:!?)]}")
+		if token != "" {
+			protected[token] = struct{}{}
+		}
+	}
 	for _, term := range terms {
 		if term.Term != "" && strings.Contains(source, term.Term) {
 			protected[term.Term] = struct{}{}
 		}
 	}
+	return protected
+}
+
+func replacementPreserves(protected map[string]struct{}, replacement string) bool {
 	for token := range protected {
 		if !strings.Contains(replacement, token) {
 			return false

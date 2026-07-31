@@ -33,11 +33,22 @@ type Segment struct {
 	Text  string
 }
 
+type DocumentFormat string
+
+const (
+	FormatMarkdown DocumentFormat = "markdown"
+	FormatText     DocumentFormat = "text"
+	FormatHTML     DocumentFormat = "html"
+)
+
 type Document struct {
-	Source   string
-	Kind     string
-	Content  string
-	Segments []Segment
+	Source     string
+	Kind       string
+	Format     DocumentFormat
+	Content    string // exact original input; never transformed
+	Analysis   string // virtual visible text for HTML; empty otherwise
+	Projection []ProjectionSegment
+	Segments   []Segment
 }
 
 // ChunkRange is a half-open byte range in a document.
@@ -55,7 +66,7 @@ func FromReader(r io.Reader, source, kind string) (*Document, error) {
 		return nil, errors.New("invalid UTF-8")
 	}
 	content := string(data)
-	return &Document{Source: source, Kind: kind, Content: content, Segments: segmentMarkdown(content)}, nil
+	return newDocument(source, kind, content), nil
 }
 
 // maxAggregateBytes is the maximum total input size across all selected files.
@@ -147,7 +158,7 @@ func FromFile(path, kind string) (*Document, error) {
 		return nil, errors.New("invalid UTF-8")
 	}
 	content := string(data)
-	return &Document{Source: path, Kind: kind, Content: content, Segments: segmentMarkdown(content)}, nil
+	return newDocument(path, kind, content), nil
 }
 
 func collectDir(root string, total *int64) ([]*Document, error) {
@@ -197,10 +208,10 @@ func collectDir(root string, total *int64) ([]*Document, error) {
 // ChunkRanges splits a document at Markdown block boundaries when possible.
 // It preserves complete, non-overlapping coverage and UTF-8 boundaries.
 func ChunkRanges(doc *Document, maxBytes int) []ChunkRange {
-	if doc == nil || len(doc.Content) == 0 || maxBytes <= 0 {
+	if doc == nil || len(doc.AnalysisContent()) == 0 || maxBytes <= 0 {
 		return nil
 	}
-	content := doc.Content
+	content := doc.AnalysisContent()
 	atomic := make([]Range, 0)
 	for _, seg := range doc.Segments {
 		switch seg.Type {
@@ -253,11 +264,45 @@ func preferredChunkEnd(content string, start, limit int) int {
 
 func isAllowed(path string) bool {
 	switch strings.ToLower(filepath.Ext(path)) {
-	case ".md", ".markdown", ".txt":
+	case ".md", ".markdown", ".txt", ".html", ".htm":
 		return true
 	default:
 		return false
 	}
+}
+
+func newDocument(source, kind, content string) *Document {
+	format := detectFormat(source, content)
+	doc := &Document{Source: source, Kind: kind, Format: format, Content: content}
+	if format == FormatHTML {
+		projection := ExtractHTMLVisibleText(content)
+		doc.Analysis = projection.Text
+		doc.Projection = projection.Segments
+		return doc
+	}
+	doc.Segments = segmentMarkdown(content)
+	return doc
+}
+
+func detectFormat(source, content string) DocumentFormat {
+	switch strings.ToLower(filepath.Ext(source)) {
+	case ".html", ".htm":
+		return FormatHTML
+	case ".txt":
+		return FormatText
+	case ".md", ".markdown":
+		return FormatMarkdown
+	}
+	// stdin and --text can provide an HTML fragment.
+	prefix := content
+	if len(prefix) > 1024 {
+		prefix = prefix[:1024]
+	}
+	lower := strings.ToLower(prefix)
+	if strings.Contains(lower, "<!doctype") || strings.Contains(lower, "<html") {
+		return FormatHTML
+	}
+	return FormatMarkdown
 }
 
 func segmentMarkdown(content string) []Segment {

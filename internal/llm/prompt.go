@@ -19,6 +19,9 @@ type Excerpt struct {
 	// It is stored so that OrigToExcerpt can invert it and so that
 	// cross-gap validation can inspect the mapping.
 	origOffsets []int
+	// analysisStart is the virtual HTML offset, not a raw-source coordinate.
+	analysisStart int
+	virtual       bool
 }
 
 // validExcerptRange reports whether an excerpt-relative byte range [start, end)
@@ -33,6 +36,9 @@ func (e *Excerpt) validExcerptRange(start, end int) bool {
 		return false
 	}
 	if start == end {
+		return true
+	}
+	if e.virtual {
 		return true
 	}
 	// Both start and end-1 must be real (non-separator) positions.
@@ -84,6 +90,9 @@ func (e *Excerpt) exclusiveOrigEnd() int {
 // OrigToExcerpt maps an original-document byte offset to an excerpt byte offset.
 // Returns -1 if the original offset is not present in the excerpt.
 func (e *Excerpt) OrigToExcerpt(origPos int) int {
+	if e.virtual {
+		return -1
+	}
 	if e.origOffsets == nil {
 		if origPos >= 0 && origPos <= len(e.Text) {
 			return origPos
@@ -108,6 +117,12 @@ func (e *Excerpt) OrigToExcerpt(origPos int) int {
 func newExcerpt(text string, offsets []int) *Excerpt {
 	e := &Excerpt{Text: text, origOffsets: offsets}
 	e.OrigOffset = e.originalOffset
+	return e
+}
+
+func newVirtualExcerpt(text string, start int) *Excerpt {
+	e := &Excerpt{Text: text, analysisStart: start, virtual: true}
+	e.OrigOffset = func(int) int { return -1 }
 	return e
 }
 
@@ -143,6 +158,9 @@ func truncateExcerpt(e *Excerpt, n int) *Excerpt {
 	// Find the largest valid UTF-8 prefix within n bytes.
 	nValid := utf8ValidPrefixLen(e.Text, n)
 	newText := e.Text[:nValid]
+	if e.virtual {
+		return newVirtualExcerpt(newText, e.analysisStart)
+	}
 	// Also truncate origOffsets if present.
 	var newOffsets []int
 	if e.origOffsets != nil {

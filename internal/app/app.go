@@ -500,6 +500,10 @@ func (a *App) RunRevise(params ReviseParams) error {
 			}
 		}
 		coverage := report.SourceAnalysis{SourcePath: plan.doc.Source, InputBytes: len(plan.doc.Content), Chunks: len(plan.chunks)}
+		if plan.doc.Format == document.FormatHTML {
+			coverage.SourceFormat = "html"
+			coverage.RangeBasis = "visible_text"
+		}
 		for _, chunk := range plan.chunks {
 			requestsMade++
 			remainingPrimaryRequests--
@@ -529,7 +533,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 			discardedRewrites += revResp.DiscardedRewrites
 			allRevisions = append(allRevisions, revResp.Revisions...)
 		}
-		coverage.Complete = coverage.AnalyzedBytes == coverage.InputBytes
+		coverage.Complete = coverage.AnalyzedBytes == len(plan.doc.AnalysisContent())
 		analysis = append(analysis, coverage)
 	}
 	sort.SliceStable(allRevisions, func(i, j int) bool {

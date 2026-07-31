@@ -222,6 +222,17 @@ func TestPreservesProtectedContent(t *testing.T) {
 	}
 }
 
+func TestPreservesProtectedTextWithTerms(t *testing.T) {
+	terms := []config.TermEntry{{Term: "release train"}}
+	source := "Deploy API v1.2.3 on the release train."
+	if !preservesProtectedText(source, "Deploy API v1.2.3 with the release train.", terms) {
+		t.Fatal("expected protected HTML-visible text to be accepted")
+	}
+	if preservesProtectedText(source, "Deploy API v1.2.3 on the rollout.", terms) {
+		t.Fatal("expected dropped project term to be rejected")
+	}
+}
+
 func TestByteOffsetToLineColumnUTF8(t *testing.T) {
 	// "\u00fcber" is 5 bytes, 4 code points
 	content := "\u00fcber"
