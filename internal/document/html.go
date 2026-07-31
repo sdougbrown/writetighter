@@ -244,7 +244,7 @@ func (d *Document) SourceSpansForAnalysisRange(start, end int) []SourceSpan {
 		if segment.StartByte >= end || segment.EndByte <= start {
 			continue
 		}
-		span := segment.Source
+		resultSpan := segment.Source
 		overlapStart := start
 		if segment.StartByte > overlapStart {
 			overlapStart = segment.StartByte
@@ -256,10 +256,10 @@ func (d *Document) SourceSpansForAnalysisRange(start, end int) []SourceSpan {
 		// Literal text maps byte-for-byte to source. Entities and synthetic
 		// separators retain full raw spans because their lengths differ.
 		if !segment.Atomic && segment.Source.EndByte-segment.Source.StartByte == segment.EndByte-segment.StartByte {
-			span.StartByte += overlapStart - segment.StartByte
-			span.EndByte = span.StartByte + overlapEnd - overlapStart
+			resultSpan.StartByte += overlapStart - segment.StartByte
+			resultSpan.EndByte = resultSpan.StartByte + overlapEnd - overlapStart
 		}
-		spans = append(spans, span)
+		spans = append(spans, resultSpan)
 	}
 	return spans
 }

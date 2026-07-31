@@ -58,10 +58,20 @@ func TestExtractHTMLVisibleTextExcludesNonContentAndProtectsCodeAndLinks(t *test
 	}
 }
 
-func TestCollectInputsDiscoversHTMLFiles(t *testing.T) {
+func TestCollectInputsDiscoversAllowedFormats(t *testing.T) {
 	dir := t.TempDir()
-	for name := range map[string]bool{"page.html": true, "fragment.htm": true} {
+	files := map[string]DocumentFormat{
+		"page.html": FormatHTML, "fragment.htm": FormatHTML,
+		"guide.md": FormatMarkdown, "notes.markdown": FormatMarkdown,
+		"plain.txt": FormatText,
+	}
+	for name := range files {
 		if err := os.WriteFile(filepath.Join(dir, name), []byte("<p>Text.</p>"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, name := range []string{"skip.js", "skip.go"} {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("ignored"), 0o600); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -69,8 +79,13 @@ func TestCollectInputsDiscoversHTMLFiles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(docs) != 2 || docs[0].Format != FormatHTML || docs[1].Format != FormatHTML {
+	if len(docs) != len(files) {
 		t.Fatalf("docs = %#v", docs)
+	}
+	for _, doc := range docs {
+		if want := files[filepath.Base(doc.Source)]; doc.Format != want {
+			t.Errorf("format for %s = %q, want %q", doc.Source, doc.Format, want)
+		}
 	}
 }
 
@@ -145,5 +160,16 @@ func TestAnalyzeProseHTMLUsesProjectionMap(t *testing.T) {
 	}
 	if blocks[0].analysisMap[0] != strings.Index(source, "First") {
 		t.Fatalf("first mapping = %d", blocks[0].analysisMap[0])
+	}
+}
+
+func TestSourceSpansForAnalysisRangeUsesIdentityForText(t *testing.T) {
+	doc, err := FromReader(strings.NewReader("plain text"), "notes.txt", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spans := doc.SourceSpansForAnalysisRange(1, 6)
+	if len(spans) != 1 || spans[0] != (SourceSpan{StartByte: 1, EndByte: 6}) {
+		t.Fatalf("identity spans = %#v", spans)
 	}
 }
