@@ -26,6 +26,9 @@ func TestReviseResponseJSON(t *testing.T) {
 				Reason:       "Sentence too long.",
 				Replacement:  &replacement,
 				Confidence:   0.85,
+				SourceFormat: "html",
+				RangeBasis:   "visible_text",
+				SourceSpans:  []SourceSpan{{StartByte: 4, EndByte: 14}},
 			},
 		},
 	}
@@ -51,6 +54,9 @@ func TestReviseResponseJSON(t *testing.T) {
 	if *parsed.Revisions[0].Replacement != replacement {
 		t.Fatalf("bad replacement: %q", *parsed.Revisions[0].Replacement)
 	}
+	if parsed.Revisions[0].SourceFormat != "html" || parsed.Revisions[0].RangeBasis != "visible_text" || len(parsed.Revisions[0].SourceSpans) != 1 {
+		t.Fatalf("missing HTML metadata: %#v", parsed.Revisions[0])
+	}
 }
 
 func TestReviseResponseHuman(t *testing.T) {
@@ -73,6 +79,9 @@ func TestReviseResponseHuman(t *testing.T) {
 				Reason:       "Sentence too long.",
 				Replacement:  &replacement,
 				Confidence:   0.85,
+				SourceFormat: "html",
+				RangeBasis:   "visible_text",
+				SourceSpans:  []SourceSpan{{StartByte: 4, EndByte: 14}},
 			},
 		},
 	}
@@ -89,6 +98,9 @@ func TestReviseResponseHuman(t *testing.T) {
 	}
 	if !strings.Contains(got, "test.md") {
 		t.Fatal("expected path in human output")
+	}
+	if !strings.Contains(got, "range basis: visible_text") || !strings.Contains(got, "source spans:") {
+		t.Fatalf("expected HTML metadata in human output: %s", got)
 	}
 }
 

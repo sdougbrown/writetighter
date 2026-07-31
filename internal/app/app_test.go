@@ -1006,3 +1006,29 @@ func TestReviseAcceptsInputFlags(t *testing.T) {
 		t.Fatalf("should fail on LLM config, not flag validation: %v", err)
 	}
 }
+
+func TestRunReviseHTMLReportsVisibleTextAnalysis(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	path := filepath.Join(t.TempDir(), "page.html")
+	if err := os.WriteFile(path, []byte(`<p>Visible text.</p>`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{Paths: []string{path}, Kind: "description", Format: "json"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var response report.ReviseResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Analysis) != 1 || response.Analysis[0].SourceFormat != "html" || response.Analysis[0].RangeBasis != "visible_text" || !response.Analysis[0].Complete {
+		t.Fatalf("analysis = %#v", response.Analysis)
+	}
+}

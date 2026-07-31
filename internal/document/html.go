@@ -233,6 +233,9 @@ func (d *Document) SourceSpansForAnalysisRange(start, end int) []SourceSpan {
 	if d == nil || start < 0 || end < start || end > len(d.AnalysisContent()) {
 		return nil
 	}
+	if start == end {
+		return []SourceSpan{}
+	}
 	if d.Format != FormatHTML {
 		return []SourceSpan{{StartByte: start, EndByte: end}}
 	}

@@ -90,3 +90,60 @@ func TestHTMLDocumentDiscoveryAndVirtualChunking(t *testing.T) {
 		t.Fatalf("last chunk = %#v", chunks[len(chunks)-1])
 	}
 }
+
+func TestHTMLProjectionRangeEdgeCases(t *testing.T) {
+	source := `<p>first <em>second</em> third</p>`
+	projection := ExtractHTMLVisibleText(source)
+	doc := &Document{Format: FormatHTML, Content: source, Analysis: projection.Text, Projection: projection.Segments}
+
+	second := strings.Index(projection.Text, "second")
+	spans := doc.SourceSpansForAnalysisRange(second, second+len("second"))
+	if len(spans) != 1 || source[spans[0].StartByte:spans[0].EndByte] != "second" {
+		t.Fatalf("second spans = %#v", spans)
+	}
+	if got := doc.SourceSpansForAnalysisRange(-1, 1); got != nil {
+		t.Fatalf("negative range = %#v", got)
+	}
+	if got := doc.SourceSpansForAnalysisRange(0, len(projection.Text)+1); got != nil {
+		t.Fatalf("out-of-bounds range = %#v", got)
+	}
+	if got := doc.SourceSpansForAnalysisRange(second, second); len(got) != 0 {
+		t.Fatalf("empty range = %#v", got)
+	}
+	if doc.IsProtectedAnalysisRange(0, len("first")) {
+		t.Fatal("ordinary prose must not be protected")
+	}
+}
+
+func TestExtractHTMLVisibleTextHandlesCommonEdgeCases(t *testing.T) {
+	source := `<div>One<br>Two<img src="x"><script>hidden</script>&nbsp;&lt;three</div><p>Unclosed`
+	got := ExtractHTMLVisibleText(source)
+	for _, forbidden := range []string{"hidden", "<script"} {
+		if strings.Contains(got.Text, forbidden) {
+			t.Fatalf("%q leaked into %q", forbidden, got.Text)
+		}
+	}
+	for _, expected := range []string{"One", "Two", "\u00a0", "<three", "Unclosed"} {
+		if !strings.Contains(got.Text, expected) {
+			t.Fatalf("%q missing from %q", expected, got.Text)
+		}
+	}
+}
+
+func TestAnalyzeProseHTMLUsesProjectionMap(t *testing.T) {
+	source := `<p>First.</p><p>Second.</p>`
+	doc, err := FromReader(strings.NewReader(source), "page.html", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := AnalyzeProse(doc)
+	if len(blocks) != 1 || blocks[0].AnalysisText != "First.\nSecond.\n" {
+		t.Fatalf("blocks = %#v", blocks)
+	}
+	if blocks[0].StartByte != 0 || blocks[0].EndByte != len(source) {
+		t.Fatalf("raw bounds = %#v", blocks[0])
+	}
+	if blocks[0].analysisMap[0] != strings.Index(source, "First") {
+		t.Fatalf("first mapping = %d", blocks[0].analysisMap[0])
+	}
+}
