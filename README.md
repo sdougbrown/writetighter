@@ -22,6 +22,11 @@ Passage-matching profile policy and project glossary definitions provide termino
 
 - **Sentence length:** Applies profile thresholds for PRs, procedures, and descriptions.
 - **Dense paragraphs:** Reports candidate findings for blocks that exceed configured sentence or word counts.
+- **Noun stacks:** Flags long runs of consecutive content words that may need unpacking.
+- **Gerund openers:** Flags sentences that open with a gerund phrase.
+- **Contractions:** Flags common English contractions (n't, 'll, 're, 've, 'd, it's) in prose.
+- **Banned modals:** Flags STE-unapproved modal verbs (should, would, may, might, could).
+- **Latin abbreviations:** Flags e.g., i.e., and etc. in prose.
 - **Term policy:** Supports discouraged terms, canonical case, unknown terms, and project term bases when the selected profile enables those rules.
 
 ## Safety boundaries
