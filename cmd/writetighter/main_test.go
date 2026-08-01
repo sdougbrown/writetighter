@@ -8,6 +8,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/sdougbrown/writetighter/internal/app"
+	"github.com/sdougbrown/writetighter/internal/profile"
 )
 
 // captureStdout runs fn with os.Stdout replaced by a pipe and returns the captured text.
@@ -65,12 +68,99 @@ func captureStdoutStderr(t *testing.T, fn func()) (string, string) {
 }
 
 func TestRunVersion(t *testing.T) {
-	if got := run([]string{"version", "--json"}); got != 0 {
-		t.Fatalf("got %d", got)
-	}
-	if got := run([]string{"version"}); got != 0 {
-		t.Fatalf("bare version: got %d", got)
-	}
+	// --json: assert exit code and decode the payload
+	t.Run("json", func(t *testing.T) {
+		var payload struct {
+			Version          string `json:"version"`
+			Commit           string `json:"commit"`
+			EmbeddedProfiles []struct {
+				ID      string `json:"id"`
+				Version string `json:"version"`
+			} `json:"embedded_profiles"`
+		}
+		out := captureStdout(t, func() {
+			if got := run([]string{"version", "--json"}); got != 0 {
+				t.Fatalf("exit %d", got)
+			}
+		})
+		if err := json.Unmarshal([]byte(out), &payload); err != nil {
+			t.Fatalf("invalid JSON: %v\n%s", err, out)
+		}
+		if payload.Version == "" {
+			t.Fatal("missing version in JSON payload")
+		}
+		if payload.Commit == "" {
+			t.Fatal("missing commit in JSON payload")
+		}
+	})
+
+	// bare version: assert stdout contains the version string
+	t.Run("human-readable", func(t *testing.T) {
+		out := captureStdout(t, func() {
+			if got := run([]string{"version"}); got != 0 {
+				t.Fatalf("exit %d", got)
+			}
+		})
+		if !strings.Contains(out, "writetighter "+app.Version) {
+			t.Fatalf("expected 'writetighter %s' in output, got: %s", app.Version, out)
+		}
+		// default commit is "unknown" — must not appear in output
+		if strings.Contains(out, "(commit") {
+			t.Fatalf("commit should not appear when unknown, got: %s", out)
+		}
+		// an embedded profile exists in the test binary — line must be present
+		if !strings.Contains(out, "embedded profile:") {
+			t.Fatalf("expected 'embedded profile:' in output, got: %s", out)
+		}
+	})
+
+	// commit present: seed a real commit and verify it appears
+	t.Run("commit-present", func(t *testing.T) {
+		oldCommit := app.Commit
+		app.Commit = "abc1234"
+		defer func() { app.Commit = oldCommit }()
+		out := captureStdout(t, func() {
+			if got := run([]string{"version"}); got != 0 {
+				t.Fatalf("exit %d", got)
+			}
+		})
+		if !strings.Contains(out, "(commit abc1234)") {
+			t.Fatalf("expected '(commit abc1234)' in output, got: %s", out)
+		}
+	})
+
+	// commit unknown: explicitly verify it is suppressed
+	t.Run("commit-unknown", func(t *testing.T) {
+		oldCommit := app.Commit
+		app.Commit = "unknown"
+		defer func() { app.Commit = oldCommit }()
+		out := captureStdout(t, func() {
+			if got := run([]string{"version"}); got != 0 {
+				t.Fatalf("exit %d", got)
+			}
+		})
+		if strings.Contains(out, "(commit") {
+			t.Fatalf("commit should not appear when 'unknown', got: %s", out)
+		}
+	})
+
+	// no embedded profile: override the loader to return nil
+	t.Run("no-embedded-profile", func(t *testing.T) {
+		oldLoader := loadEmbedded
+		loadEmbedded = func() (*profile.Resolution, error) { return nil, nil }
+		defer func() { loadEmbedded = oldLoader }()
+		out := captureStdout(t, func() {
+			if got := run([]string{"version"}); got != 0 {
+				t.Fatalf("exit %d", got)
+			}
+		})
+		if strings.Contains(out, "embedded profile:") {
+			t.Fatalf("embedded profile line should be absent, got: %s", out)
+		}
+		if !strings.Contains(out, "writetighter "+app.Version) {
+			t.Fatalf("expected 'writetighter %s' in output, got: %s", app.Version, out)
+		}
+	})
 }
 
 func TestRunExplain(t *testing.T) {

@@ -18,6 +18,10 @@ import (
 
 func main() { os.Exit(run(os.Args[1:])) }
 
+// loadEmbedded provides a package-level hook so tests can replace the
+// embedded profile loader to simulate a no-profile state.
+var loadEmbedded = profile.LoadEmbedded
+
 type optionalStringFlag struct {
 	value string
 	set   bool
@@ -385,7 +389,7 @@ func runVersion(args []string) int {
 		fmt.Fprintln(os.Stderr, "Run `writetighter version --help` for usage.")
 		return 2
 	}
-	r, _ := profile.LoadEmbedded()
+	r, _ := loadEmbedded()
 	profiles := []any{}
 	if r != nil {
 		profiles = append(profiles, map[string]any{"id": string(r.ID), "version": string(r.Version), "sha256": r.SHA256})
