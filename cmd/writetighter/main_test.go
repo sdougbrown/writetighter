@@ -160,6 +160,24 @@ func TestRunVersion(t *testing.T) {
 		if !strings.Contains(out, "writetighter "+app.Version) {
 			t.Fatalf("expected 'writetighter %s' in output, got: %s", app.Version, out)
 		}
+
+		// --json with no embedded profile: embedded_profiles must be empty
+		jsonOut := captureStdout(t, func() {
+			if got := run([]string{"version", "--json"}); got != 0 {
+				t.Fatalf("exit %d", got)
+			}
+		})
+		var payload struct {
+			EmbeddedProfiles []struct {
+				ID string `json:"id"`
+			} `json:"embedded_profiles"`
+		}
+		if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+			t.Fatalf("invalid JSON: %v\n%s", err, jsonOut)
+		}
+		if len(payload.EmbeddedProfiles) != 0 {
+			t.Fatalf("expected empty embedded_profiles, got %d items", len(payload.EmbeddedProfiles))
+		}
 	})
 }
 
