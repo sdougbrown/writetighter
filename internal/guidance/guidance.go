@@ -63,6 +63,8 @@ var directionsByKind = map[string][]string{
 	KindProcedure: {
 		"Organize established information as prerequisites, ordered actions, expected results, and relevant exceptions.",
 		"Use direct imperatives for actions and retain safety, verification, rollback, or recovery details when the source provides them.",
+		"Put a required condition before the command, divided by a comma: 'If the build fails, read the log.' A reader who executes the command before reading the trailing condition has already failed.",
+		"For warnings, state the command or condition first, then the risk or consequence.",
 		"Do not sacrifice operational completeness for brevity.",
 	},
 	KindPR: {
@@ -96,6 +98,8 @@ var directionsByKind = map[string][]string{
 		"Present timeline events in chronological order and preserve timestamps, measurements, affected scope, and stated uncertainty.",
 		"Use causal language only at the confidence level established by the source. Do not turn correlation or sequence into a root-cause claim.",
 		"Describe systems and actions without assigning blame or inventing an actor, owner, cause, or remediation commitment.",
+		"Use simple past for timeline events. Present perfect ('has been', 'have been') hides when things happened.",
+		"State what is known and say 'unknown' for the rest. Do not hedge with 'may have' or 'might have' when the facts are available.",
 		"Ask for clarification when a missing distinction between detection time, occurrence time, mitigation, recovery, or prevention changes the incident's interpretation.",
 	},
 	KindAgentInstruction: {
@@ -111,6 +115,8 @@ var directionsByKind = map[string][]string{
 		"Identify contradictions, unreachable steps, duplicated requirements, and output requirements that no preceding step can satisfy.",
 		"Keep intentional repetition only when it reinforces safety or precedence; otherwise consolidate it so the agent has one authoritative instruction.",
 		"Prefer literal, action-oriented instructions over motivational prose or clever compression. Preserve necessary rationale when it changes how the agent should act.",
+		"Write 'must' for requirements or delete the rule. Models read 'should' as optional.",
+		"Put conditions before commands. A trailing 'if' clause after an imperative is executed too late for a reader that cannot ask questions.",
 		"Require observable verification and define what the agent should report or do when it cannot complete a required step without guessing.",
 	},
 	KindStatusUpdate: {
