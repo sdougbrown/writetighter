@@ -23,7 +23,7 @@ Docs-writer never has shell access. The parent owns the lint/review loop.
 
 ```sh
 writetighter lint --stdin --kind pr --format json \
-  --profile software-docs-en@0.2.0 <<'EOF'
+  --profile software-docs-en@0.4.0 <<'EOF'
 <PR title and body>
 EOF
 ```
@@ -52,7 +52,7 @@ writetighter lint docs/ --kind description --format json --fail-on none
 ### Verify embedded profile
 
 ```sh
-writetighter profile verify software-docs-en@0.2.0 --format json
+writetighter profile verify software-docs-en@0.4.0 --format json
 ```
 
 ### List available profiles

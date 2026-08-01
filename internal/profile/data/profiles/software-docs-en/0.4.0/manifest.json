@@ -1,0 +1,54 @@
+{
+  "claims": {
+    "certification": "none",
+    "issue": null,
+    "standard": null
+  },
+  "display_name": "Software Documentation English",
+  "format_version": 1,
+  "id": "software-docs-en",
+  "language": "en",
+  "license": {
+    "spdx": "LicenseRef-Private-Research"
+  },
+  "payloads": {
+    "dictionary.json": {
+      "sha256": "26acb9d56c603c951e7e6e67fd625a5f1d29507adb3b7d1e427d613302d7063f"
+    },
+    "rules.json": {
+      "sha256": "29969cb34fdf2a5f64ae679dcb5959e78363bcb0a713d17f76665a4ba86be3c7"
+    }
+  },
+  "provenance": [
+    {
+      "license": "LicenseRef-Private-Research",
+      "name": "software-dictionary",
+      "release": "fc39cfb0330d52562cecd28c3e248184c032e527",
+      "source_url": "https://github.com/sdougbrown/software-dictionary"
+    },
+    {
+      "license": "CC0-1.0",
+      "name": "plainlanguage.gov",
+      "release": "fd7694740f19c0ed20ed71c2dd1dc92699e920fa",
+      "source_url": "https://github.com/GSA/plainlanguage.gov"
+    },
+    {
+      "license": "MIT",
+      "name": "no-ai-slop",
+      "release": "61c21c351da4dcb40946a11fead978f2078a2c65",
+      "source_url": "https://github.com/petergyang/no-ai-slop"
+    },
+    {
+      "license": "MIT",
+      "name": "SimpleEnglish",
+      "release": "379728b51981b6d2ee1de0f201164483a9648972",
+      "source_url": "https://github.com/AminBlg/SimpleEnglish"
+    }
+  ],
+  "supported_kinds": [
+    "description",
+    "procedure",
+    "pr"
+  ],
+  "version": "0.4.0"
+}

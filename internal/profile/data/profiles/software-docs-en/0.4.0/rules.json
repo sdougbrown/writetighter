@@ -1,0 +1,53 @@
+{
+  "format_version": 1,
+  "rules": [
+    {
+      "enabled": true,
+      "enforcement": "enforced",
+      "id": "CORE.SENTENCE_LENGTH",
+      "parameters": {
+        "description_max_words": 25,
+        "pr_max_words": 20,
+        "procedure_max_words": 20
+      },
+      "severity": "warning",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.DENSE_PARAGRAPH",
+      "parameters": {
+        "max_sentences": 3,
+        "max_words": 80
+      },
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.NOUN_STACK",
+      "parameters": {
+        "min_stack_length": 3
+      },
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.GERUND_OPENER",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.TERM_DISCOURAGED",
+      "severity": "info",
+      "version": 1
+    }
+  ],
+  "unknown_term_policy": "candidate"
+}
