@@ -413,8 +413,16 @@ func TestGerundOpenerSixCharFlagged(t *testing.T) {
 func TestContraction(t *testing.T) {
 	ctx := &RunContext{Document: testDoc("You'll need to don't worry, it's fine."), Profile: testProfile()}
 	findings, _ := Get("CORE.CONTRACTION").Run(ctx)
-	if len(findings) < 3 {
-		t.Fatalf("expected at least 3 contraction findings (You'll, don't, it's), got %d", len(findings))
+	if len(findings) != 3 {
+		t.Fatalf("expected exactly 3 contraction findings (You'll, don't, it's), got %d: %v", len(findings), findings)
+	}
+}
+
+func TestContractionSuffixes(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("We've tried. They're here. I'd say. He'll know."), Profile: testProfile()}
+	findings, _ := Get("CORE.CONTRACTION").Run(ctx)
+	if len(findings) != 4 {
+		t.Fatalf("expected 4 suffix contractions ('ve, 're, 'd, 'll), got %d: %v", len(findings), findings)
 	}
 }
 
@@ -436,11 +444,49 @@ func TestContractionPossessiveNotFlagged(t *testing.T) {
 	}
 }
 
+func TestContractionNilContext(t *testing.T) {
+	checker := Get("CORE.CONTRACTION")
+	findings, err := checker.Run(nil)
+	if err != nil || findings != nil {
+		t.Fatalf("nil context should return empty, got %d findings, err=%v", len(findings), err)
+	}
+	findings, err = checker.Run(&RunContext{Document: nil})
+	if err != nil || findings != nil {
+		t.Fatalf("nil document should return empty, got %d findings, err=%v", len(findings), err)
+	}
+}
+
+func TestContractionHonorsRulePolicy(t *testing.T) {
+	p := testProfile()
+	for i := range p.Rules.Rules {
+		if p.Rules.Rules[i].ID == "CORE.CONTRACTION" {
+			p.Rules.Rules[i].Enforcement = "enforced"
+			p.Rules.Rules[i].Severity = "warning"
+		}
+	}
+	ctx := &RunContext{Document: testDoc("It's fine."), Profile: p}
+	findings, _ := Get("CORE.CONTRACTION").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].Enforcement != "enforced" || findings[0].Severity != "warning" {
+		t.Fatalf("expected enforced/warning, got %s/%s", findings[0].Enforcement, findings[0].Severity)
+	}
+}
+
 func TestBannedModal(t *testing.T) {
 	ctx := &RunContext{Document: testDoc("You should verify the config. It may fail."), Profile: testProfile()}
 	findings, _ := Get("CORE.BANNED_MODAL").Run(ctx)
 	if len(findings) != 2 {
 		t.Fatalf("expected 2 banned modal findings (should, may), got %d: %v", len(findings), findings)
+	}
+}
+
+func TestBannedModalAllVariants(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("You should, would, may, might, could try."), Profile: testProfile()}
+	findings, _ := Get("CORE.BANNED_MODAL").Run(ctx)
+	if len(findings) != 5 {
+		t.Fatalf("expected 5 banned modal findings (should, would, may, might, could), got %d: %v", len(findings), findings)
 	}
 }
 
@@ -460,11 +506,49 @@ func TestBannedModalApprovedNotFlagged(t *testing.T) {
 	}
 }
 
+func TestBannedModalNilContext(t *testing.T) {
+	checker := Get("CORE.BANNED_MODAL")
+	findings, err := checker.Run(nil)
+	if err != nil || findings != nil {
+		t.Fatalf("nil context should return empty, got %d findings, err=%v", len(findings), err)
+	}
+	findings, err = checker.Run(&RunContext{Document: nil})
+	if err != nil || findings != nil {
+		t.Fatalf("nil document should return empty, got %d findings, err=%v", len(findings), err)
+	}
+}
+
+func TestBannedModalHonorsRulePolicy(t *testing.T) {
+	p := testProfile()
+	for i := range p.Rules.Rules {
+		if p.Rules.Rules[i].ID == "CORE.BANNED_MODAL" {
+			p.Rules.Rules[i].Enforcement = "enforced"
+			p.Rules.Rules[i].Severity = "warning"
+		}
+	}
+	ctx := &RunContext{Document: testDoc("You should try."), Profile: p}
+	findings, _ := Get("CORE.BANNED_MODAL").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].Enforcement != "enforced" || findings[0].Severity != "warning" {
+		t.Fatalf("expected enforced/warning, got %s/%s", findings[0].Enforcement, findings[0].Severity)
+	}
+}
+
 func TestLatinAbbrev(t *testing.T) {
 	ctx := &RunContext{Document: testDoc("Use the flag, e.g. --force. See the docs (i.e. README). And more etc."), Profile: testProfile()}
 	findings, _ := Get("CORE.LATIN_ABBREV").Run(ctx)
-	if len(findings) < 3 {
-		t.Fatalf("expected at least 3 Latin abbreviation findings (e.g., i.e., etc.), got %d: %v", len(findings), findings)
+	if len(findings) != 3 {
+		t.Fatalf("expected exactly 3 Latin abbreviation findings (e.g., i.e., etc.), got %d: %v", len(findings), findings)
+	}
+}
+
+func TestLatinAbbrevTrailingPeriod(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Use files, logs, etc. for debugging."), Profile: testProfile()}
+	findings, _ := Get("CORE.LATIN_ABBREV").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding for 'etc.' with trailing period, got %d: %v", len(findings), findings)
 	}
 }
 
@@ -475,6 +559,36 @@ func TestLatinAbbrevNotInCodeSpan(t *testing.T) {
 		if strings.Contains(f.Evidence, "-e") {
 			t.Fatalf("'e.' inside code span should not be flagged: %s", f.Evidence)
 		}
+	}
+}
+
+func TestLatinAbbrevNilContext(t *testing.T) {
+	checker := Get("CORE.LATIN_ABBREV")
+	findings, err := checker.Run(nil)
+	if err != nil || findings != nil {
+		t.Fatalf("nil context should return empty, got %d findings, err=%v", len(findings), err)
+	}
+	findings, err = checker.Run(&RunContext{Document: nil})
+	if err != nil || findings != nil {
+		t.Fatalf("nil document should return empty, got %d findings, err=%v", len(findings), err)
+	}
+}
+
+func TestLatinAbbrevHonorsRulePolicy(t *testing.T) {
+	p := testProfile()
+	for i := range p.Rules.Rules {
+		if p.Rules.Rules[i].ID == "CORE.LATIN_ABBREV" {
+			p.Rules.Rules[i].Enforcement = "enforced"
+			p.Rules.Rules[i].Severity = "warning"
+		}
+	}
+	ctx := &RunContext{Document: testDoc("Use e.g. this."), Profile: p}
+	findings, _ := Get("CORE.LATIN_ABBREV").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].Enforcement != "enforced" || findings[0].Severity != "warning" {
+		t.Fatalf("expected enforced/warning, got %s/%s", findings[0].Enforcement, findings[0].Severity)
 	}
 }
 

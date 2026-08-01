@@ -15,10 +15,10 @@ var latinAbbrevRe = regexp.MustCompile(`(?i)\b(e\.g\.|i\.e\.|etc\.?)`)
 
 // latinAbbrevSuggestions maps each abbreviation to its replacement guidance.
 var latinAbbrevSuggestions = map[string]string{
-	"e.g.":  "Write 'for example'.",
-	"i.e.":  "Write 'that is'.",
-	"etc":   "Name the items or write 'and more'.",
-	"etc.":  "Name the items or write 'and more'.",
+	"e.g.": "Write 'for example'.",
+	"i.e.": "Write 'that is'.",
+	"etc":  "Name the items or write 'and more'.",
+	"etc.": "Name the items or write 'and more'.",
 }
 
 type latinAbbrevChecker struct{}
@@ -30,21 +30,7 @@ func (latinAbbrevChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 	if ctx == nil || ctx.Document == nil {
 		return nil, nil
 	}
-	enforcement, severity := "candidate", "info"
-	if ctx.Profile != nil && ctx.Profile.Rules != nil {
-		for _, rule := range ctx.Profile.Rules.Rules {
-			if rule.ID != (latinAbbrevChecker{}).ID() {
-				continue
-			}
-			if rule.Enforcement != "" {
-				enforcement = rule.Enforcement
-			}
-			if rule.Severity != "" {
-				severity = rule.Severity
-			}
-			break
-		}
-	}
+	enforcement, severity := ruleEnforcement(ctx, latinAbbrevChecker{}.ID())
 
 	var out []report.Finding
 	for _, seg := range ctx.Document.Segments {
@@ -62,7 +48,7 @@ func (latinAbbrevChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 			path := ctx.Document.Source
 			out = append(out, report.Finding{
 				RuleID:         latinAbbrevChecker{}.ID(),
-				RuleVersion:    1,
+				RuleVersion:    latinAbbrevChecker{}.Version(),
 				Checker:        latinAbbrevChecker{}.ID(),
 				CheckerVersion: 1,
 				Enforcement:    enforcement,

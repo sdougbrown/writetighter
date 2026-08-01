@@ -32,21 +32,7 @@ func (bannedModalChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 	if ctx == nil || ctx.Document == nil {
 		return nil, nil
 	}
-	enforcement, severity := "candidate", "info"
-	if ctx.Profile != nil && ctx.Profile.Rules != nil {
-		for _, rule := range ctx.Profile.Rules.Rules {
-			if rule.ID != (bannedModalChecker{}).ID() {
-				continue
-			}
-			if rule.Enforcement != "" {
-				enforcement = rule.Enforcement
-			}
-			if rule.Severity != "" {
-				severity = rule.Severity
-			}
-			break
-		}
-	}
+	enforcement, severity := ruleEnforcement(ctx, bannedModalChecker{}.ID())
 
 	var out []report.Finding
 	for _, seg := range ctx.Document.Segments {
@@ -64,10 +50,10 @@ func (bannedModalChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 			path := ctx.Document.Source
 			out = append(out, report.Finding{
 				RuleID:         bannedModalChecker{}.ID(),
-				RuleVersion:    1,
+				RuleVersion:    bannedModalChecker{}.Version(),
 				Checker:        bannedModalChecker{}.ID(),
 				CheckerVersion: 1,
-				Enforcement:   enforcement,
+				Enforcement:    enforcement,
 				Severity:       severity,
 				Path:           &path,
 				Range: &report.FindingRange{

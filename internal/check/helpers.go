@@ -7,6 +7,27 @@ import (
 
 func lower(s string) string { return strings.ToLower(s) }
 
+// ruleEnforcement returns the enforcement and severity configured for the
+// given rule ID in the profile, falling back to "candidate"/"info".
+func ruleEnforcement(ctx *RunContext, ruleID string) (enforcement, severity string) {
+	enforcement, severity = "candidate", "info"
+	if ctx != nil && ctx.Profile != nil && ctx.Profile.Rules != nil {
+		for _, rule := range ctx.Profile.Rules.Rules {
+			if rule.ID != ruleID {
+				continue
+			}
+			if rule.Enforcement != "" {
+				enforcement = rule.Enforcement
+			}
+			if rule.Severity != "" {
+				severity = rule.Severity
+			}
+			break
+		}
+	}
+	return enforcement, severity
+}
+
 func isConjunctionWord(s string) bool {
 	s = strings.Trim(s, "()[]{}.,;:!?'\"")
 	s = strings.ToLower(s)
