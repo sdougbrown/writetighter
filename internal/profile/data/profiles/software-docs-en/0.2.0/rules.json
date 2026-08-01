@@ -40,6 +40,27 @@
       "id": "CORE.GERUND_OPENER",
       "severity": "info",
       "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.CONTRACTION",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.BANNED_MODAL",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.LATIN_ABBREV",
+      "severity": "info",
+      "version": 1
     }
   ],
   "unknown_term_policy": "candidate"
