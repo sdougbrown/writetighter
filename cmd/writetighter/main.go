@@ -18,6 +18,10 @@ import (
 
 func main() { os.Exit(run(os.Args[1:])) }
 
+// loadEmbedded provides a package-level hook so tests can replace the
+// embedded profile loader to simulate a no-profile state.
+var loadEmbedded = profile.LoadEmbedded
+
 type optionalStringFlag struct {
 	value string
 	set   bool
@@ -381,15 +385,25 @@ func runVersion(args []string) int {
 	jsonFlag := fs.Bool("json", false, "")
 	fs.SetOutput(os.Stderr)
 	fs.Usage = func() { printHelp("version") }
-	if err := fs.Parse(args); err != nil || !*jsonFlag || len(fs.Args()) != 0 {
-		fmt.Fprintln(os.Stderr, "version requires --json")
-		fmt.Fprintln(os.Stderr, "  Run `writetighter version --help` for usage.")
+	if err := fs.Parse(args); err != nil || len(fs.Args()) != 0 {
+		fmt.Fprintln(os.Stderr, "Run `writetighter version --help` for usage.")
 		return 2
 	}
-	r, _ := profile.LoadEmbedded()
+	r, _ := loadEmbedded()
 	profiles := []any{}
 	if r != nil {
 		profiles = append(profiles, map[string]any{"id": string(r.ID), "version": string(r.Version), "sha256": r.SHA256})
+	}
+	if !*jsonFlag {
+		fmt.Fprintf(os.Stdout, "writetighter %s", app.Version)
+		if app.Commit != "" && app.Commit != "unknown" {
+			fmt.Fprintf(os.Stdout, " (commit %s)", app.Commit)
+		}
+		if r != nil {
+			fmt.Fprintf(os.Stdout, "\nembedded profile: %s@%s", r.ID, r.Version)
+		}
+		fmt.Fprintln(os.Stdout)
+		return 0
 	}
 	payload := map[string]any{"version": app.Version, "commit": app.Commit, "embedded_profiles": profiles}
 	_ = json.NewEncoder(os.Stdout).Encode(payload)
@@ -583,12 +597,13 @@ EXAMPLES
 const versionHelp = `writetighter version — print version information
 
 USAGE
-  writetighter version --json
+  writetighter version [--json]
 
 FLAGS
-  --json    Output version information as JSON
+  --json    Output version information as JSON (default: human-readable)
 
-The output includes the tool version, build commit, and embedded profile details.
+Without --json, prints a compact human-readable summary. With --json, the
+output includes the tool version, build commit, and embedded profile details.
 `
 
 var helpTexts = map[string]string{
