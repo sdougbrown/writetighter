@@ -2,7 +2,7 @@
 
 WriteTighter is a local technical-writing revision harness for Markdown. Its primary command, `revise`, asks a configured OpenAI-compatible model for structured rewrites or clarification requests. Its deterministic companion, `lint`, reports narrow, auditable profile findings.
 
-**Status:** Private development. The embedded default is `software-docs-en@0.2.0`. This repository is not currently cleared for public redistribution.
+**Status:** Private development. The embedded default is `software-docs-en@0.4.0`. This repository is not currently cleared for public redistribution.
 
 ## What WriteTighter does
 
@@ -70,7 +70,7 @@ go build -o writetighter ./cmd/writetighter
 
 ### Current default policy
 
-The embedded `software-docs-en@0.2.0` profile uses these limits:
+The embedded `software-docs-en@0.4.0` profile uses these limits:
 
 | Document kind | Sentence limit |
 |---|---:|
@@ -85,8 +85,9 @@ The embedded `software-docs-en@0.2.0` profile uses these limits:
 | `status-update` | 25 words (inherits `description`) |
 
 It also emits an informational candidate when a paragraph has more than three
-sentences or more than 80 words. The profile carries a small reviewed dictionary,
-but version 0.2.0 does not enable deterministic term findings yet.
+sentences or more than 80 words. The profile carries a reviewed dictionary
+with discouraged-term policies for common filler and AI-slop vocabulary,
+enabled as a non-enforcing `candidate`/`info` rule.
 
 ## Commands
 
@@ -236,7 +237,7 @@ You can control failure behavior with `--fail-on`:
 
 ### Profiles
 
-WriteTighter uses profiles to define its logic. The embedded default is `software-docs-en@0.2.0`.
+WriteTighter uses profiles to define its logic. The embedded default is `software-docs-en@0.4.0`.
 
 **Manage profiles:**
 ```sh
@@ -244,7 +245,7 @@ WriteTighter uses profiles to define its logic. The embedded default is `softwar
 ./writetighter profile list
 
 # Verify a specific profile or bundle path
-./writetighter profile verify software-docs-en@0.2.0
+./writetighter profile verify software-docs-en@0.4.0
 
 # Install a new profile bundle from a local path
 ./writetighter profile install ./path/to/bundle
@@ -261,7 +262,7 @@ WriteTighter searches upward from the current working directory for
 ```toml
 [profile]
 id = "software-docs-en"
-version = "0.2.0"
+version = "0.4.0"
 
 [[terms]]
 term = "hydrate"

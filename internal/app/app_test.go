@@ -342,7 +342,7 @@ func TestExplainWithOptionsKnownRule(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := (&App{}).RunExplainWithOptions("CORE.SENTENCE_LENGTH", "software-docs-en@0.2.0", "json")
+	err := (&App{}).RunExplainWithOptions("CORE.SENTENCE_LENGTH", "software-docs-en@0.4.0", "json")
 	w.Close()
 	os.Stdout = oldStdout
 
@@ -361,7 +361,7 @@ func TestExplainWithOptionsKnownRule(t *testing.T) {
 }
 
 func TestExplainWithOptionsUnknownRule(t *testing.T) {
-	err := (&App{}).RunExplainWithOptions("NONEXISTENT_RULE", "software-docs-en@0.2.0", "json")
+	err := (&App{}).RunExplainWithOptions("NONEXISTENT_RULE", "software-docs-en@0.4.0", "json")
 	if err == nil {
 		t.Fatal("expected error for unknown rule")
 	}
@@ -378,7 +378,7 @@ func TestExplainWithOptionsUnknownProfile(t *testing.T) {
 }
 
 func TestExplainWithOptionsUnsupportedFormat(t *testing.T) {
-	err := (&App{}).RunExplainWithOptions("CORE.SENTENCE_LENGTH", "software-docs-en@0.2.0", "xml")
+	err := (&App{}).RunExplainWithOptions("CORE.SENTENCE_LENGTH", "software-docs-en@0.4.0", "xml")
 	if err == nil {
 		t.Fatal("expected error for unsupported format")
 	}
@@ -393,7 +393,7 @@ func TestExplainWithOptionsHumanFormat(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := (&App{}).RunExplainWithOptions("CORE.SENTENCE_LENGTH", "software-docs-en@0.2.0", "human")
+	err := (&App{}).RunExplainWithOptions("CORE.SENTENCE_LENGTH", "software-docs-en@0.4.0", "human")
 	w.Close()
 	os.Stdout = oldStdout
 
@@ -468,7 +468,7 @@ func TestProfileVerifyKnownSpec(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := (&App{}).RunProfileVerify("software-docs-en@0.2.0", "json")
+	err := (&App{}).RunProfileVerify("software-docs-en@0.4.0", "json")
 	w.Close()
 	os.Stdout = oldStdout
 
