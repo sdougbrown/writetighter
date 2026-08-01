@@ -68,6 +68,9 @@ func TestRunVersion(t *testing.T) {
 	if got := run([]string{"version", "--json"}); got != 0 {
 		t.Fatalf("got %d", got)
 	}
+	if got := run([]string{"version"}); got != 0 {
+		t.Fatalf("bare version: got %d", got)
+	}
 }
 
 func TestRunExplain(t *testing.T) {
