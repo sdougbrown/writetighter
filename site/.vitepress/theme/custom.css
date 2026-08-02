@@ -1,0 +1,252 @@
+/* ─── Ink & Paper — The WriteTighter Theme ─── */
+
+/**
+ * Design notes:
+ * Parchment backgrounds, iron-gall ink text, a red pen for what gets cut
+ * and a green pen for what replaces it. Serif prose, monospace code —
+ * the page should read like a manuscript with margin notes, not a
+ * dashboard.
+ */
+
+/* ─── Colors: Brand (iron-gall ink blue-black) ─── */
+
+:root {
+  --vp-c-brand-1: #33415C;
+  --vp-c-brand-2: #47597D;
+  --vp-c-brand-3: #6B7FA3;
+  --vp-c-brand-soft: rgba(51, 65, 92, 0.12);
+}
+
+.dark {
+  --vp-c-brand-1: #A9BBDA;
+  --vp-c-brand-2: #8FA3C7;
+  --vp-c-brand-3: #7A8FB8;
+  --vp-c-brand-soft: rgba(143, 163, 199, 0.16);
+}
+
+/* ─── Colors: Background (parchment) ─── */
+
+:root {
+  --vp-c-bg: #F7F2E7;
+  --vp-c-bg-alt: #EFE7D6;
+  --vp-c-bg-elv: #FBF7EE;
+  --vp-c-bg-soft: #EFE7D6;
+}
+
+.dark {
+  --vp-c-bg: #1B1712;
+  --vp-c-bg-alt: #221D17;
+  --vp-c-bg-elv: #26201A;
+  --vp-c-bg-soft: #221D17;
+}
+
+/* ─── Colors: Text (ink) ─── */
+
+:root {
+  --vp-c-text-1: #2B2620;
+  --vp-c-text-2: #5B5346;
+  --vp-c-text-3: #8A8171;
+}
+
+.dark {
+  --vp-c-text-1: #EDE6D6;
+  --vp-c-text-2: #C2B8A0;
+  --vp-c-text-3: #8C8270;
+}
+
+/* ─── Colors: Borders ─── */
+
+:root {
+  --vp-c-border: #D8CBA8;
+  --vp-c-divider: #E3D7B8;
+  --vp-c-gutter: #E3D7B8;
+}
+
+.dark {
+  --vp-c-border: #3B3327;
+  --vp-c-divider: #2E2820;
+  --vp-c-gutter: #14110D;
+}
+
+/* ─── Colors: Function ─── */
+
+:root {
+  --vp-c-default-1: #D8CBA8;
+  --vp-c-default-2: #E3D7B8;
+  --vp-c-default-3: #EDE3C6;
+  --vp-c-default-soft: rgba(139, 126, 90, 0.12);
+}
+
+.dark {
+  --vp-c-default-1: #5B5346;
+  --vp-c-default-2: #3B3327;
+  --vp-c-default-3: #2E2820;
+  --vp-c-default-soft: rgba(194, 184, 160, 0.14);
+}
+
+/* ─── Colors: Red pen (cut) / Green pen (kept) ─── */
+
+:root {
+  --wt-cut: #A6362A;
+  --wt-cut-soft: rgba(166, 54, 42, 0.09);
+  --wt-keep: #3B6B45;
+  --wt-keep-soft: rgba(59, 107, 69, 0.09);
+}
+
+.dark {
+  --wt-cut: #E0917F;
+  --wt-cut-soft: rgba(224, 145, 127, 0.14);
+  --wt-keep: #93C298;
+  --wt-keep-soft: rgba(147, 194, 152, 0.14);
+}
+
+/* ─── Components: Button ─── */
+
+:root {
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-text: #FBF7EE;
+  --vp-button-brand-bg: #33415C;
+  --vp-button-brand-hover-border: transparent;
+  --vp-button-brand-hover-text: #FBF7EE;
+  --vp-button-brand-hover-bg: #47597D;
+  --vp-button-brand-active-border: transparent;
+  --vp-button-brand-active-text: #FBF7EE;
+  --vp-button-brand-active-bg: #26314A;
+}
+
+.dark {
+  --vp-button-brand-text: #1B1712;
+  --vp-button-brand-bg: #A9BBDA;
+  --vp-button-brand-hover-text: #1B1712;
+  --vp-button-brand-hover-bg: #C0CEE6;
+  --vp-button-brand-active-text: #1B1712;
+  --vp-button-brand-active-bg: #8FA3C7;
+}
+
+/* ─── Components: Home Hero ─── */
+
+:root {
+  --vp-home-hero-name-color: transparent;
+  --vp-home-hero-name-background: linear-gradient(
+    120deg,
+    #33415C 35%,
+    var(--wt-cut) 100%
+  );
+}
+
+/* ─── Typography: serif prose, mono stays default for code ─── */
+
+:root {
+  --vp-font-family-base: 'Iowan Old Style', 'Palatino Linotype', Palatino, Charter, Georgia, 'Times New Roman', serif;
+}
+
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3 {
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* ─── Red pen / green pen diff marks ───
+ * Used directly in Markdown as:
+ *   <del class="wt-cut">wordy original</del>
+ *   <ins class="wt-keep">tightened replacement</ins>
+ */
+
+del.wt-cut {
+  color: var(--wt-cut);
+  background: var(--wt-cut-soft);
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+  text-decoration-color: var(--wt-cut);
+  padding: 0.05em 0.3em;
+  border-radius: 2px;
+}
+
+ins.wt-keep {
+  color: var(--wt-keep);
+  background: var(--wt-keep-soft);
+  text-decoration: none;
+  border-bottom: 1.5px solid var(--wt-keep);
+  padding: 0.05em 0.3em;
+  border-radius: 2px;
+  font-weight: 600;
+}
+
+.wt-note {
+  display: block;
+  margin-top: 0.5em;
+  font-size: 0.85em;
+  font-family: var(--vp-font-family-mono);
+  color: var(--vp-c-text-3);
+}
+
+.wt-note::before {
+  content: '— ';
+}
+
+.wt-context {
+  border-left: 2px solid var(--vp-c-border);
+  padding-left: 0.9em;
+  margin: 1em 0;
+  color: var(--vp-c-text-2);
+  font-style: italic;
+}
+
+/* ─── Quoted reactions ───
+ * Attributed real-world quotes, styled as a card distinct from the
+ * wt-cut/wt-keep manuscript mark-up so the two never look interchangeable.
+ */
+
+.wt-tweet {
+  border: 1px solid var(--vp-c-border);
+  border-radius: 6px;
+  padding: 1em 1.3em;
+  margin: 1.5em 0;
+  background: #FFFFFF;
+}
+
+.dark .wt-tweet {
+  background: #332B21;
+}
+
+.wt-tweet-body {
+  font-style: italic;
+  margin: 0 0 0.6em 0;
+}
+
+.wt-tweet-img {
+  display: block;
+  max-width: 100%;
+  border: 1px solid var(--vp-c-border);
+  border-radius: 4px;
+  margin: 0 0 0.6em 0;
+}
+
+.wt-tweet-byline {
+  font-size: 0.85em;
+  font-family: var(--vp-font-family-mono);
+  color: var(--vp-c-text-3);
+  margin: 0;
+}
+
+.wt-tweet-byline a {
+  color: var(--vp-c-text-2);
+}
+
+/* ─── Hand-drawn line icons ───
+ * Inline SVGs pasted into content pages with class="wt-icon".
+ * stroke="currentColor" so they follow prose color in light/dark.
+ */
+
+.wt-icon {
+  vertical-align: -0.25em;
+  margin-right: 0.4em;
+  color: var(--vp-c-brand-1);
+}
+
+h2 .wt-icon,
+h1 .wt-icon {
+  width: 0.85em;
+  height: 0.85em;
+}
