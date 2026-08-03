@@ -93,7 +93,7 @@ func Collect(paths []string, sourcePaths []string) (*Pack, error) {
 		}
 
 		// Explicit file path: any extension allowed, subject to limits and validation.
-		entry, err := collectFile(path, path, sourceSet, seenCanon, &totalInput)
+		entry, err := collectFile(path, path, sourceSet, seenCanon, &totalInput, &warnings, true)
 		if err != nil {
 			return nil, err
 		}
@@ -153,8 +153,15 @@ func collectDirectory(root string, sourceSet map[string]bool, seenCanon map[stri
 			return nil
 		}
 
-		// Check secret/binary filename patterns — silently skip.
+		// Known credential/secret filenames are skipped (never read) and reported
+		// via a warning so the exclusion is not silent. Content-level credential
+		// detection happens in collectFile, since only it reads file bytes.
 		if isSecretFile(base) {
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				rel = path
+			}
+			*warnings = append(*warnings, fmt.Sprintf("skipping secret file: %s", rel))
 			return nil
 		}
 
@@ -180,7 +187,7 @@ func collectDirectory(root string, sourceSet map[string]bool, seenCanon map[stri
 		}
 		displayPath := filepath.Join(filepath.Base(root), rel)
 
-		entry, err := collectFile(path, displayPath, sourceSet, seenCanon, totalInput)
+		entry, err := collectFile(path, displayPath, sourceSet, seenCanon, totalInput, warnings, false)
 		if err != nil {
 			return nil, err
 		}
@@ -192,8 +199,12 @@ func collectDirectory(root string, sourceSet map[string]bool, seenCanon map[stri
 }
 
 // collectFile reads, validates, and processes a single reference file.
-// Returns nil entry if the file is skipped due to source path exclusion.
-func collectFile(path, displayPath string, sourceSet map[string]bool, seenCanon map[string]bool, totalInput *int) (*Entry, error) {
+// Returns nil entry if the file is skipped due to source path exclusion or a
+// credential match. For a file matched as secret by name or by content, an
+// explicitly-passed path (explicit=true) fails the whole collection, while a
+// directory-collected file (explicit=false) is skipped and reported in
+// warnings — so a credential can never be transmitted to the model endpoint.
+func collectFile(path, displayPath string, sourceSet map[string]bool, seenCanon map[string]bool, totalInput *int, warnings *[]string, explicit bool) (*Entry, error) {
 	// Resolve canonical path for dedup and source exclusion.
 	canon, err := canonicalPath(path)
 	if err != nil {
@@ -210,9 +221,15 @@ func collectFile(path, displayPath string, sourceSet map[string]bool, seenCanon 
 		return nil, nil
 	}
 
-	// Check secret/binary filename patterns — explicit file match returns error.
+	// Credential/secret filename match: explicit paths fail, directory files
+	// are skipped with a warning (collectDirectory also warns for the common
+	// name-based case; this guard also covers files reached by other routes).
 	if isSecretFile(filepath.Base(path)) {
-		return nil, fmt.Errorf("reference path %q matches a secret/binary filename pattern", path)
+		if explicit {
+			return nil, fmt.Errorf("reference path %q matches a secret/credential filename pattern", path)
+		}
+		*warnings = append(*warnings, fmt.Sprintf("skipping secret file: %s", displayPath))
+		return nil, nil
 	}
 
 	// Check file size via stat first.
@@ -241,6 +258,18 @@ func collectFile(path, displayPath string, sourceSet map[string]bool, seenCanon 
 	}
 
 	content := string(data)
+
+	// Content-level credential/private-key detection. A file whose basename is
+	// not denylisted (e.g. notes.json, config.yaml) may still hold a secret;
+	// refuse explicit paths and warn-and-skip directory files rather than
+	// transmitting the content to the model endpoint.
+	if mayContainSecretContent(content) {
+		if explicit {
+			return nil, fmt.Errorf("reference path %q appears to contain a secret/credential marker and was refused", path)
+		}
+		*warnings = append(*warnings, fmt.Sprintf("skipping file with possible secret content: %s", displayPath))
+		return nil, nil
+	}
 
 	// Process content based on file extension.
 	ext := strings.ToLower(filepath.Ext(path))
@@ -342,7 +371,10 @@ func readFileBounded(path string) ([]byte, error) {
 	return data, nil
 }
 
-// isSecretFile checks if a base filename matches secret/binary patterns.
+// isSecretFile checks if a base filename matches credential/secret patterns:
+// the classic private-key/keystore extensions, plus well-known credential and
+// registry files that would transmit secrets even though their content often
+// lives under an allowlisted extension.
 func isSecretFile(name string) bool {
 	// .env files with any suffix.
 	lower := strings.ToLower(name)
@@ -350,18 +382,61 @@ func isSecretFile(name string) bool {
 		return true
 	}
 
-	// Restricted extensions.
+	// Restricted extensions (keys, keystores, secret-bearing formats).
 	ext := strings.ToLower(filepath.Ext(name))
 	switch ext {
 	case ".pem", ".key", ".cert", ".crt", ".cer", ".der",
-		".p12", ".pfx", ".jks", ".keystore", ".kdb", ".ps1":
+		".p12", ".pfx", ".jks", ".keystore", ".kdb", ".ps1",
+		".tfvars", ".tfstate", ".tfstate.backup":
 		return true
 	}
 
-	// SSH private-key filenames have no extension.
+	// Well-known credential/config basenames. SSH private-key filenames have no
+	// extension; the rest are known files that routinely contain secrets.
 	switch lower {
-	case "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "id_xmss":
+	case "kubeconfig",
+		"credentials.json", "credentials",
+		"service-account.yaml", "service-account.yml",
+		"service-accounts.json", "serviceaccount.json",
+		"application_default_credentials.json",
+		".npmrc", ".netrc", ".pypirc", ".dockercfg",
+		"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "id_xmss":
 		return true
+	}
+
+	// service-account*.json (Google Cloud / GKE service-account key files) and
+	// JSON-suffixed Terraform secret/state files, which would otherwise slip
+	// through the .json extension allowlist.
+	if (strings.HasPrefix(lower, "service-account") && strings.HasSuffix(lower, ".json")) ||
+		strings.HasSuffix(lower, ".tfvars.json") ||
+		strings.HasSuffix(lower, ".tfstate.json") {
+		return true
+	}
+	return false
+}
+
+// mayContainSecretContent reports whether content carries strong credential or
+// private-key markers. It is a conservative guard for files whose basename is
+// not denylisted but whose body is clearly sensitive (PEM blocks, OAuth/JSON
+// credential fields). It never stores or transmits the content itself.
+func mayContainSecretContent(content string) bool {
+	// Field names are matched in both snake_case and camelCase. PEM blocks are
+	// detected by the -----BEGIN marker (all private keys/certificates); raw
+	// base64 keys without headers are caught by the credential-field markers,
+	// and kubeconfig client auth material by the client-*-data fields.
+	markers := []string{
+		"-----BEGIN", // all PEM blocks: RSA/EC/OPENSSH private keys, certificates
+		"private_key", "privateKey",
+		"client_secret", "clientSecret",
+		"refresh_token", "refreshToken",
+		"access_token", "accessToken",
+		"client-key-data",
+		"client-certificate-data",
+	}
+	for _, m := range markers {
+		if strings.Contains(content, m) {
+			return true
+		}
 	}
 	return false
 }

@@ -543,6 +543,15 @@ func TestConfigShortWizardFlag(t *testing.T) {
 // /v1/chat/completions (and the same paths without /v1) for targeted config tests.
 func configTestServer(t *testing.T) *httptest.Server {
 	t.Helper()
+	return configTestServerWithChatHandler(t, nil)
+}
+
+// configTestServerWithChatHandler creates an HTTP server that responds to
+// /v1/models and /v1/chat/completions (and the same paths without /v1) for
+// targeted config tests. chatHandler overrides the default chat response; pass
+// nil to serve a plain success envelope.
+func configTestServerWithChatHandler(t *testing.T, chatHandler func(w http.ResponseWriter, r *http.Request)) *httptest.Server {
+	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 		// Normalize path: strip trailing /v1 or add /v1 prefix if missing.
@@ -560,6 +569,10 @@ func configTestServer(t *testing.T) *httptest.Server {
 				},
 			})
 		case "/v1/chat/completions":
+			if chatHandler != nil {
+				chatHandler(w, r)
+				return
+			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"choices": []any{map[string]any{"message": map[string]string{"content": `{"ok":true}`}}},
 			})
@@ -782,25 +795,24 @@ max_requests=32
 	_, restore := writeConfigToTempDir(t, configBody)
 	defer restore()
 
-	// output-tokens >= context-tokens should be rejected.
-	_, stderr := captureStdoutStderr(t, func() {
-		if got := run([]string{"config", "--context", "4096", "--output-tokens", "8192"}); got != 2 {
-			t.Fatalf("expected exit 2, got %d", got)
+	assertRejected := func(t *testing.T, args ...string) {
+		t.Helper()
+		_, stderr := captureStdoutStderr(t, func() {
+			if got := run(args); got != 2 {
+				t.Fatalf("expected exit 2, got %d", got)
+			}
+		})
+		if !strings.Contains(stderr, "must be less than") {
+			t.Fatalf("expected validation error in stderr, got: %s", stderr)
 		}
-	})
-	if !strings.Contains(stderr, "must be less than") {
-		t.Fatalf("expected validation error in stderr, got: %s", stderr)
 	}
 
-	// equal values should also be rejected.
-	_, stderr2 := captureStdoutStderr(t, func() {
-		if got := run([]string{"config", "--context", "4096", "--output-tokens", "4096"}); got != 2 {
-			t.Fatalf("expected exit 2, got %d", got)
-		}
+	t.Run("output greater than context", func(t *testing.T) {
+		assertRejected(t, "config", "--context", "4096", "--output-tokens", "8192")
 	})
-	if !strings.Contains(stderr2, "must be less than") {
-		t.Fatalf("expected validation error in stderr, got: %s", stderr2)
-	}
+	t.Run("output equal to context", func(t *testing.T) {
+		assertRejected(t, "config", "--context", "4096", "--output-tokens", "4096")
+	})
 }
 
 func TestConfigModelKeepsContextWhenExplicitlySet(t *testing.T) {
@@ -860,38 +872,23 @@ func TestConfigFailsWithoutExistingConfig(t *testing.T) {
 }
 
 func TestConfigModelRefreshesResponseMode(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		path := r.URL.Path
-		if path == "/models" {
-			path = "/v1/models"
-		} else if path == "/chat/completions" {
-			path = "/v1/chat/completions"
+	// Reuse the shared config server, overriding only the chat handler to reject
+	// json_schema while accepting json_object, to trigger response_mode refresh.
+	server := configTestServerWithChatHandler(t, func(w http.ResponseWriter, r *http.Request) {
+		var request map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
 		}
-		switch path {
-		case "/v1/models":
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"data": []map[string]any{
-					{"id": "qwen", "context_length": 8192},
-				},
-			})
-		case "/v1/chat/completions":
-			var request map[string]any
-			if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
-				http.Error(w, err.Error(), http.StatusBadRequest)
-				return
-			}
-			// Reject json_schema but accept json_object.
-			if rf, ok := request["response_format"].(map[string]any); ok && rf["type"] == "json_schema" {
-				http.Error(w, "json_schema unsupported", http.StatusBadRequest)
-				return
-			}
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"choices": []any{map[string]any{"message": map[string]string{"content": `{"ok":true}`}}},
-			})
-		default:
-			http.NotFound(w, r)
+		// Reject json_schema but accept json_object.
+		if rf, ok := request["response_format"].(map[string]any); ok && rf["type"] == "json_schema" {
+			http.Error(w, "json_schema unsupported", http.StatusBadRequest)
+			return
 		}
-	}))
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []any{map[string]any{"message": map[string]string{"content": `{"ok":true}`}}},
+		})
+	})
 	defer server.Close()
 
 	configBody := fmt.Sprintf(`[llm]

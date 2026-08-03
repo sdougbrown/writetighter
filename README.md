@@ -196,9 +196,15 @@ it is never linted, returned as a rewrite range, or included in the output.
 
 Reference paths are invocation-specific and must exist at the time of the call.
 Directories are recursively scanned; only recognized text and code file types
-are included. Files starting with `.env`, secret-key files, symlinks, binary
-data, and hidden directories are excluded. Files or directories whose canonical
-path matches a source file being revised are automatically excluded.
+are included. Files starting with `.env`, secret-key files, well-known
+credential files (e.g. `kubeconfig`, `credentials.json`, `service-account*.json`,`
+application_default_credentials.json`, `.npmrc`/`.netrc`/`.pypirc`/`.dockercfg`, terraform
+`*.tfvars`), symlinks, binary data, and hidden directories are excluded. Files
+whose content carries strong credential markers (PEM private-key blocks,
+`private_key`/`client_secret`/`refresh_token`/`access_token` fields) are also
+refused: an explicitly-passed such file errors out, and one found inside a
+reference directory is skipped with a warning. Files or directories whose
+canonical path matches a source file being revised are automatically excluded.
 
 Reference content is sent to the configured endpoint. The response reports
 reference metadata (files, bytes, completeness) in the `reference_context` field

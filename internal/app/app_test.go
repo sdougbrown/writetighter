@@ -13,8 +13,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/document"
+	"github.com/sdougbrown/writetighter/internal/llm"
 	"github.com/sdougbrown/writetighter/internal/profile"
+	"github.com/sdougbrown/writetighter/internal/reference"
 	"github.com/sdougbrown/writetighter/internal/report"
 )
 
@@ -1209,8 +1212,10 @@ func TestRunReviseOverBudgetReferences(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for over-budget references")
 	}
-	if !strings.Contains(err.Error(), "context window") && !strings.Contains(err.Error(), "budget") && !strings.Contains(err.Error(), "overhead") {
-		t.Fatalf("expected budget-related error, got: %v", err)
+	// The very small budget (1024/256) fails the base-overhead check in
+	// planBudgetedChunks before the chunk loop runs.
+	if !strings.Contains(err.Error(), "reference overhead exceeds context window") {
+		t.Fatalf("expected base-overhead budget error, got: %v", err)
 	}
 }
 
@@ -1285,11 +1290,12 @@ func TestRunReviseReferenceIsSourceFile(t *testing.T) {
 		t.Errorf("expected InputBytes=0, got %d", response.ReferenceContext.InputBytes)
 	}
 
-	// Also verify the request body does NOT contain reference tags for the source.
+	// Also verify the request body does NOT contain reference tags for the
+	// source. buildUserContent always writes <revise-text>, so the previous
+	// compound guard (AND NOT contains <revise-text>) was a permanent no-op;
+	// assert directly that no <reference> tag appears.
 	if capturedBody != nil {
-		bodyStr := string(capturedBody)
-		// Check for reference tags (JSON-escaped).
-		if strings.Contains(bodyStr, "<reference") && !strings.Contains(bodyStr, "<revise-text>") {
+		if strings.Contains(string(capturedBody), "<reference") {
 			t.Error("request body should not contain <reference> tags when only source file is provided as reference")
 		}
 	}
@@ -1338,25 +1344,119 @@ func TestRunReviseStaleContextWindowModel(t *testing.T) {
 	}
 }
 
+// TestPlanBudgetedChunksCannotFit covers the two shrink-loop failure paths in
+// planBudgetedChunks ("cannot fit any chunk" and "cannot fit final fragment")
+// that a small-budget integration test never reaches because its base-overhead
+// check fails first. The document is a run of double-quotes: JSON escaping
+// roughly doubles the transported byte count, so a candidate that fits by the
+// 4-bytes/token estimate can still overflow the serialized-token budget.
+func TestPlanBudgetedChunksCannotFit(t *testing.T) {
+	dir := t.TempDir()
+	refPath := filepath.Join(dir, "guide.md")
+	if err := os.WriteFile(refPath, []byte("Guide content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pack, err := reference.Collect([]string{refPath}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := testProfile()
+	const maxOutput = 256
+	const noPressure = 1 << 30 // large enough that the base measurement passes
+
+	measureBase := func(doc *document.Document) int {
+		oneByte := llm.NewChunkExcerpt(doc, 0, 1)
+		sys, user, _, err := llm.BuildBudgetedPrompt(doc, res, nil, nil, oneByte, pack, llm.Config{Model: "m", ResponseMode: "json_object", ContextWindowTokens: noPressure, MaxOutputTokens: maxOutput})
+		if err != nil {
+			t.Fatalf("measure base overhead: %v", err)
+		}
+		serialized, err := llm.SerializeRequestBytes(llm.Config{Model: "m", ResponseMode: "json_object"}, sys, user)
+		if err != nil {
+			t.Fatalf("serialize base request: %v", err)
+		}
+		return (serialized + 3) / 4
+	}
+
+	t.Run("cannot fit any chunk", func(t *testing.T) {
+		// 2400 double quotes, no newlines: chunkSize equals the 2048-byte
+		// minimum and can never shrink further nor fit, so the loop exhausts
+		// its fallbacks and reports "cannot fit any chunk".
+		doc := testDoc(strings.Repeat(`"`, 2400))
+		base := measureBase(doc)
+		cfg := llm.Config{
+			Model:               "m",
+			ResponseMode:        "json_object",
+			ContextWindowTokens: base + maxOutput + config.BudgetSafetyTokens + config.MinEditableSourceTokens, // availableSourceBudget == 512 exactly
+			MaxOutputTokens:     maxOutput,
+		}
+		_, _, err := planBudgetedChunks(doc, pack, cfg, 8, res, nil, nil)
+		// A base-overhead failure would surface as "reference overhead exceeds
+		// context window" instead; seeing that message means the budget formula
+		// drifted, not the chunk loop.
+		t.Logf("cannot-fit-any-chunk error: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "cannot fit any chunk") {
+			t.Fatalf("expected 'cannot fit any chunk', got: %v", err)
+		}
+	})
+
+	t.Run("cannot fit final fragment", func(t *testing.T) {
+		// 1800 double quotes (< the 2048-byte minimum): the whole document is a
+		// final fragment that serializes to ~3600 bytes (~900 tokens) against a
+		// 600-token source budget, so it fails rather than silently dropping
+		// coverage.
+		doc := testDoc(strings.Repeat(`"`, 1800))
+		base := measureBase(doc)
+		cfg := llm.Config{
+			Model:               "m",
+			ResponseMode:        "json_object",
+			ContextWindowTokens: base + maxOutput + config.BudgetSafetyTokens + 600, // A=600, base still passes
+			MaxOutputTokens:     maxOutput,
+		}
+		_, _, err := planBudgetedChunks(doc, pack, cfg, 8, res, nil, nil)
+		t.Logf("cannot-fit-final-fragment error: %v", err)
+		if err == nil || !strings.Contains(err.Error(), "cannot fit final fragment") {
+			t.Fatalf("expected 'cannot fit final fragment', got: %v", err)
+		}
+	})
+}
+
 // TestRunReviseEmptySourceWithReferences verifies that an empty source document
 // with references does not panic and produces no model calls (ChunkRanges
 // parity).
 func TestRunReviseEmptySourceWithReferences(t *testing.T) {
-	server := fakeReviseServerWithCapture(t, nil)
+	called := false
+	server := fakeReviseServerWithCapture(t, func(body []byte) { called = true })
 	defer server.Close()
 	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
 	refPath := filepath.Join(t.TempDir(), "ref.md")
 	if err := os.WriteFile(refPath, []byte("reference content"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	err := (&App{}).RunRevise(ReviseParams{
-		Paths:          []string{writeTempFile(t, "")},
-		ReferencePaths: []string{refPath},
-		Kind:           "description",
-		Format:         "json",
+
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:          []string{writeTempFile(t, "")},
+			ReferencePaths: []string{refPath},
+			Kind:           "description",
+			Format:         "json",
+		}); err != nil {
+			t.Fatalf("empty source with references should succeed, got: %v", err)
+		}
 	})
-	if err != nil {
-		t.Fatalf("empty source with references should succeed, got: %v", err)
+
+	// An empty source produces zero chunks, so no request may reach the server.
+	if called {
+		t.Error("empty source should not trigger any model call")
+	}
+	var response report.ReviseResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatalf("invalid revise JSON: %v\n%s", err, output.String())
+	}
+	if response.Status != "ok" {
+		t.Fatalf("expected status ok, got %q: errors=%v", response.Status, response.Errors)
+	}
+	if len(response.Revisions) != 0 {
+		t.Errorf("expected 0 revisions for an empty source, got %d", len(response.Revisions))
 	}
 }
 

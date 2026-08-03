@@ -341,8 +341,8 @@ func TestCollectSecretFileError(t *testing.T) {
 	}
 
 	_, err := Collect([]string{path}, nil)
-	if err == nil || !strings.Contains(err.Error(), "secret/binary") {
-		t.Fatalf("expected secret/binary error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "secret/credential filename pattern") {
+		t.Fatalf("expected secret/credential filename error, got %v", err)
 	}
 }
 
@@ -358,14 +358,15 @@ func TestCollectRejectsSSHPrivateKeyFilename(t *testing.T) {
 				t.Fatal(err)
 			}
 			_, err := Collect([]string{path}, nil)
-			if err == nil || !strings.Contains(err.Error(), "secret/binary") {
-				t.Fatalf("expected secret/binary error for %s, got %v", name, err)
+			if err == nil || !strings.Contains(err.Error(), "secret/credential filename pattern") {
+				t.Fatalf("expected secret/credential filename error for %s, got %v", name, err)
 			}
 		})
 	}
 }
 
-// TestCollectSkipsSecretDirEntry verifies that .env files in a directory are silently skipped.
+// TestCollectSkipsSecretDirEntry verifies that .env files in a directory are
+// skipped and reported via pack.Warnings (not silent).
 func TestCollectSkipsSecretDirEntry(t *testing.T) {
 	dir := t.TempDir()
 
@@ -390,6 +391,137 @@ func TestCollectSkipsSecretDirEntry(t *testing.T) {
 	}
 	if len(pack.Entries) != 1 {
 		t.Fatalf("expected 1 entry (.env skipped), got %d", len(pack.Entries))
+	}
+	if len(pack.Warnings) != 1 {
+		t.Fatalf("expected 1 warning for skipped secret file, got %d: %v", len(pack.Warnings), pack.Warnings)
+	}
+	if !strings.Contains(pack.Warnings[0], ".env") {
+		t.Fatalf("warning %q should name the skipped secret file", pack.Warnings[0])
+	}
+}
+
+// TestCollectRejectsSecretContentExplicit verifies that an explicitly-passed
+// file whose content carries a credential marker (here a PEM block) is refused.
+func TestCollectRejectsSecretContentExplicit(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "notes.json")
+	pem := "-----BEGIN PRIVATE KEY-----\nBASE64_DATA\n-----END PRIVATE KEY-----\n"
+	if err := os.WriteFile(path, []byte(pem), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := Collect([]string{path}, nil)
+	if err == nil || !strings.Contains(err.Error(), "secret/credential marker") {
+		t.Fatalf("expected secret/credential marker error, got %v", err)
+	}
+}
+
+// TestCollectWarnsOnSecretContentInDir verifies that a directory-collected file
+// with an innocuous name but secret-bearing content is skipped with a warning
+// rather than transmitted.
+func TestCollectWarnsOnSecretContentInDir(t *testing.T) {
+	dir := t.TempDir()
+
+	normal := filepath.Join(dir, "readme.md")
+	if err := os.WriteFile(normal, []byte("# Readme"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	leaky := filepath.Join(dir, "config.json")
+	if err := os.WriteFile(leaky, []byte(`{"client_secret":"s3cr3t"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pack, err := Collect([]string{dir}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pack.Entries) != 1 {
+		t.Fatalf("expected only readme.md entry, got %d: %v", len(pack.Entries), pack.Entries)
+	}
+	if len(pack.Warnings) != 1 || !strings.Contains(pack.Warnings[0], "possible secret content") || !strings.Contains(pack.Warnings[0], "config.json") {
+		t.Fatalf("expected content-secret warning for config.json, got %v", pack.Warnings)
+	}
+}
+
+// TestMayContainSecretContent pins the exact credential/private-key markers so
+// the guard cannot silently drift. camelCase field names and kubeconfig client
+// auth fields are covered in addition to PEM blocks and snake_case.
+func TestMayContainSecretContent(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		want    bool
+	}{
+		{"pem rsa", "-----BEGIN RSA PRIVATE KEY-----\nMII...\n-----END RSA PRIVATE KEY-----", true},
+		{"pem ec", "-----BEGIN EC PRIVATE KEY-----\nMII...\n", true},
+		{"snake private_key", `{"private_key":"abc"}`, true},
+		{"camel privateKey", `{"privateKey":"abc"}`, true},
+		{"snake client_secret", `{"client_secret":"x"}`, true},
+		{"camel clientSecret", `{"clientSecret":"x"}`, true},
+		{"snake refresh_token", `{"refresh_token":"x"}`, true},
+		{"camel refreshToken", `{"refreshToken":"x"}`, true},
+		{"camel accessToken", `{"accessToken":"x"}`, true},
+		{"kube client-key-data", "client-key-data: LS0...", true},
+		{"kube client-certificate-data", "client-certificate-data: LS0...", true},
+		{"plain markdown", "Release notes mentioning tokens in plain prose.", false},
+		{"innocuous json", `{"name":"config","retries":3}`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := mayContainSecretContent(tc.content); got != tc.want {
+				t.Fatalf("mayContainSecretContent(%q) = %v, want %v", tc.content, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestCollectSkipsExpandedSecretNamesInDir verifies the expanded credential-name
+// denylist (kubeconfig, credentials.json, service-account*.json, terraform) is
+// enforced in directory collection with a warning.
+func TestCollectSkipsExpandedSecretNamesInDir(t *testing.T) {
+	dir := t.TempDir()
+
+	normal := filepath.Join(dir, "readme.md")
+	if err := os.WriteFile(normal, []byte("# Readme"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	names := []string{"kubeconfig", "credentials.json", "service-account.json", "service-account-prod.json", "application_default_credentials.json", ".npmrc", "terraform.tfvars", "terraform.tfvars.json", "terraform.tfstate.json"}
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte("data"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	pack, err := Collect([]string{dir}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pack.Entries) != 1 {
+		t.Fatalf("expected only readme.md entry, got %d: %v", len(pack.Entries), pack.Entries)
+	}
+	// One warning per known credential filename.
+	if len(pack.Warnings) != len(names) {
+		t.Fatalf("expected %d secret-name warnings, got %d: %v", len(names), len(pack.Warnings), pack.Warnings)
+	}
+}
+
+// TestCollectRejectsExpandedSecretNameExplicit verifies the expanded denylist
+// refuses explicitly-passed credential files.
+func TestCollectRejectsExpandedSecretNameExplicit(t *testing.T) {
+	names := []string{"kubeconfig", "credentials.json", "service-account.json", "service-account-prod.json", "application_default_credentials.json", ".npmrc", "terraform.tfvars", "terraform.tfvars.json", "terraform.tfstate.json"}
+	for _, name := range names {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, name)
+			if err := os.WriteFile(path, []byte("data"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Collect([]string{path}, nil)
+			if err == nil || !strings.Contains(err.Error(), "secret/credential filename pattern") {
+				t.Fatalf("expected secret/credential filename error for %s, got %v", name, err)
+			}
+		})
 	}
 }
 
