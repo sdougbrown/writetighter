@@ -586,6 +586,27 @@ func writeReviseUserConfig(t *testing.T, baseURL, apiKeyEnv string) {
 	}
 }
 
+// extractReviseText pulls the editable source body out of a user message that is
+// wrapped in <revise-text>...</revise-text> tags. It returns the full user text
+// unchanged when the wrapper is absent (defensive fallback).
+func extractReviseText(userContent string) string {
+	const openTag = "<revise-text>"
+	const closeTag = "</revise-text>"
+	start := strings.Index(userContent, openTag)
+	if start < 0 {
+		return userContent
+	}
+	start += len(openTag)
+	end := strings.Index(userContent[start:], closeTag)
+	if end < 0 {
+		return userContent[start:]
+	}
+	body := userContent[start : start+end]
+	// The wrapper inserts a leading newline after the opening tag; trim it so the
+	// returned bytes align with the editable excerpt coordinate space.
+	return strings.TrimPrefix(body, "\n")
+}
+
 func writeReviseUserConfigWithMaxRequests(t *testing.T, baseURL string, maxRequests int) {
 	t.Helper()
 	root := t.TempDir()
@@ -835,7 +856,10 @@ func TestRunReviseChunksEntireLargeDocument(t *testing.T) {
 			return
 		}
 		userText := request.Messages[len(request.Messages)-1].Content
-		sourceText := userText[:5]
+		// Source bytes are now wrapped in <revise-text> tags; extract the body so
+		// the returned source_text matches the editable excerpt coordinate space.
+		editable := extractReviseText(userText)
+		sourceText := editable[:5]
 		modelResponse, _ := json.Marshal(map[string]any{"findings": []map[string]any{{
 			"kind": "clarification", "source_text": sourceText,
 			"source_range":  map[string]int{"start": 0, "end": 5},
@@ -1334,5 +1358,196 @@ func TestRunReviseReferenceContextInReport(t *testing.T) {
 	}
 	if rc.MaxOutputTokens != 1024 {
 		t.Errorf("MaxOutputTokens = %d, want 1024", rc.MaxOutputTokens)
+	}
+}
+
+// --- E2E tests with fake server ---
+
+func TestRunReviseE2EWithReferences(t *testing.T) {
+	var capturedReq struct {
+		Model     string `json:"model"`
+		MaxTokens *int   `json:"max_tokens,omitempty"`
+		Messages  []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	var reqCaptureDone bool
+	modelResponse, _ := json.Marshal(map[string]any{
+		"findings": []map[string]any{
+			{
+				"kind":          "rewrite",
+				"source_text":   "Source text for revision.",
+				"source_range":  map[string]int{"start": 0, "end": 24},
+				"principle_ids": []string{"CORE.SHORT_SENTENCE"},
+				"reason":        "Sentence can be more direct.",
+				"replacement":   "Revised source text.",
+				"confidence":    0.85,
+			},
+		},
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&capturedReq)
+		reqCaptureDone = true
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{"role": "assistant", "content": string(modelResponse)}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+	refDir := t.TempDir()
+	refPath := filepath.Join(refDir, "style-guide.md")
+	refContent := "Use active voice. Prefer simple present tense."
+	os.WriteFile(refPath, []byte(refContent), 0o600)
+	srcContent := "Source text for revision."
+	srcPath := writeTempFile(t, srcContent)
+	output := captureStdout(t, func() {
+		(&App{}).RunRevise(ReviseParams{
+			Paths:          []string{srcPath},
+			ReferencePaths: []string{refPath},
+			Kind:           "description",
+			Format:         "json",
+		})
+	})
+	if !reqCaptureDone {
+		t.Fatal("fake server did not receive a request")
+	}
+	if capturedReq.MaxTokens == nil {
+		t.Error("request JSON is missing max_tokens field")
+	} else if *capturedReq.MaxTokens != 1024 {
+		t.Errorf("max_tokens = %d, want 1024", *capturedReq.MaxTokens)
+	}
+	var userContent string
+	for _, msg := range capturedReq.Messages {
+		if msg.Role == "user" {
+			userContent = msg.Content
+			break
+		}
+	}
+	if !strings.Contains(userContent, "<reference") {
+		t.Error("request body missing <reference> tags")
+	}
+	if !strings.Contains(userContent, refContent) {
+		t.Error("request body missing reference content")
+	}
+	if !strings.Contains(userContent, "<revise-text>") {
+		t.Error("request body missing <revise-text> tags")
+	}
+	if !strings.Contains(userContent, srcContent) {
+		t.Error("request body missing source content")
+	}
+	var response report.ReviseResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatalf("invalid revise JSON: %v", err)
+	}
+	if response.Status != "ok" {
+		t.Fatalf("expected status ok, got %q", response.Status)
+	}
+	rc := response.ReferenceContext
+	if rc == nil {
+		t.Fatal("expected ReferenceContext to be populated")
+	}
+	if rc.InputBytes != len(refContent) {
+		t.Errorf("InputBytes = %d, want %d", rc.InputBytes, len(refContent))
+	}
+	if !rc.Complete {
+		t.Error("Complete should be true")
+	}
+	for _, rev := range response.Revisions {
+		if strings.Contains(rev.SourceText, refContent) {
+			t.Errorf("revision source_text contains reference content: %q", rev.SourceText)
+		}
+	}
+	if len(response.Revisions) > 0 {
+		if !strings.Contains(response.Revisions[0].SourceText, srcContent) {
+			t.Errorf("revision source_text should contain source content, got %q", response.Revisions[0].SourceText)
+		}
+	}
+}
+
+func TestRunReviseE2ENoRefPreservesLegacy(t *testing.T) {
+	var capturedReq struct {
+		Messages []struct {
+			Role    string `json:"role"`
+			Content string `json:"content"`
+		} `json:"messages"`
+	}
+	srcContent := "Short source text for legacy revision."
+	modelResponse, _ := json.Marshal(map[string]any{
+		"findings": []map[string]any{
+			{
+				"kind":          "clarification",
+				"source_text":   srcContent,
+				"source_range":  map[string]int{"start": 0, "end": len(srcContent)},
+				"principle_ids": []string{"CORE.EXPLICIT_RELATIONSHIPS"},
+				"reason":        "The passage needs more context.",
+				"question":      "What relationship should this passage state?",
+				"confidence":    0.72,
+			},
+		},
+	})
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&capturedReq)
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]any{"role": "assistant", "content": string(modelResponse)}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	srcPath := writeTempFile(t, srcContent)
+	output := captureStdout(t, func() {
+		(&App{}).RunRevise(ReviseParams{
+			Paths:  []string{srcPath},
+			Kind:   "description",
+			Format: "json",
+		})
+	})
+	var response report.ReviseResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatalf("invalid revise JSON: %v", err)
+	}
+	if response.Status != "ok" {
+		t.Fatalf("expected status ok, got %q", response.Status)
+	}
+	if response.ReferenceContext != nil {
+		t.Error("ReferenceContext should be nil for legacy path without references")
+	}
+	var userContent string
+	for _, msg := range capturedReq.Messages {
+		if msg.Role == "user" {
+			userContent = msg.Content
+			break
+		}
+	}
+	if strings.Contains(userContent, "<reference") {
+		t.Error("legacy request body should not contain <reference> tags")
+	}
+	if !strings.Contains(userContent, "<revise-text>") {
+		t.Error("request body missing <revise-text> tags")
+	}
+	if len(response.Revisions) != 1 {
+		t.Fatalf("expected 1 revision, got %d", len(response.Revisions))
+	}
+	rev := response.Revisions[0]
+	if rev.SourceText != srcContent {
+		t.Errorf("revision source_text = %q, want %q", rev.SourceText, srcContent)
+	}
+	if rev.Range.StartByte != 0 || rev.Range.EndByte != len(srcContent) {
+		t.Errorf("revision range = [%d, %d), want [0, %d)", rev.Range.StartByte, rev.Range.EndByte, len(srcContent))
+	}
+	if rev.Kind != "clarification" {
+		t.Errorf("revision kind = %q, want clarification", rev.Kind)
+	}
+	if rev.Question == nil || *rev.Question == "" {
+		t.Error("clarification revision should have a question")
+	}
+	if len(response.Analysis) != 1 {
+		t.Fatalf("expected 1 analysis entry, got %d", len(response.Analysis))
+	}
+	if !response.Analysis[0].Complete {
+		t.Error("analysis should report complete coverage")
+	}
+	if response.Analysis[0].AnalyzedBytes != len(srcContent) {
+		t.Errorf("analyzed bytes = %d, want %d", response.Analysis[0].AnalyzedBytes, len(srcContent))
 	}
 }

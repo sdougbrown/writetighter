@@ -672,6 +672,11 @@ CONFIGURATION
   If config is missing and stdin is a terminal, interactive setup is offered
   automatically; otherwise the command exits with a hint.
 
+  Reference revision additionally requires context_window_tokens and
+  max_output_tokens in the LLM configuration. Run:
+    writetighter config --context TOKENS --output-tokens TOKENS
+  to set them after initial configuration.
+
 EXAMPLES
   writetighter revise --text "Short text." --kind procedure
   writetighter revise --stdin < README.md

@@ -145,7 +145,7 @@ func (nounStackChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 						Enforcement:    "candidate",
 						Severity:       "info",
 						Path:           &path,
-						Range:         rng,
+						Range:          rng,
 						Evidence:       fmt.Sprintf("noun stack (%d content words): %q", runLen, stack),
 						Message:        "Long noun stack. Consider unpacking into subject-verb-object.",
 						Confidence:     1,

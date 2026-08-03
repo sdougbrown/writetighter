@@ -75,7 +75,7 @@ func (gerundOpenerChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 				Enforcement:    "candidate",
 				Severity:       "info",
 				Path:           &path,
-				Range:         rng,
+				Range:          rng,
 				Evidence:       fmt.Sprintf("sentence opens with gerund %q", tokens[0]),
 				Message:        "Sentence opens with a gerund. Use an imperative for instructions or a declarative subject for descriptions.",
 				Confidence:     1,

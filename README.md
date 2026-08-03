@@ -183,6 +183,37 @@ printf '%s\n' "Restart the service after changing the file." |
   --kind code-comment
 ```
 
+### Reference context
+
+`revise` can include optional reference files and directories that provide
+broader factual context for revision decisions. Reference material is read-only:
+it is never linted, returned as a rewrite range, or included in the output.
+
+```sh
+./writetighter revise docs/ --reference style-guide.md
+./writetighter revise README.md --reference docs/ --reference glossary.json
+```
+
+Reference paths are invocation-specific and must exist at the time of the call.
+Directories are recursively scanned; only recognized text and code file types
+are included. Files starting with `.env`, secret-key files, symlinks, binary
+data, and hidden directories are excluded. Files or directories whose canonical
+path matches a source file being revised are automatically excluded.
+
+Reference content is sent to the configured endpoint. The response reports
+reference metadata (files, bytes, completeness) in the `reference_context` field
+without exposing the reference content itself.
+
+**Requirements:**
+- Reference revision requires `context_window_tokens` and `max_output_tokens`
+  in the LLM configuration. Run `writetighter config --context TOKENS --output-tokens TOKENS`
+  to set them.
+- If the configured context window is too small for the combined system prompt,
+  references, and editable source, `revise` reports an error before making any
+  model call.
+
+---
+
 Configure the model before using `revise --stdin`. Standard input carries the document, so that invocation cannot also run the interactive configuration workflow. Use `--text` for short, non-sensitive text when you want stdin to remain available for interactive setup.
 
 ## Basic Linting
@@ -291,6 +322,13 @@ Project configuration cannot contain LLM settings or credentials.
 
 Model configuration is always read from the user config file. Run `writetighter config` for guided endpoint discovery, model selection, and preflight. Never pass API keys on the command line.
 
+Set capacity without editing TOML:
+
+```sh
+writetighter config --context 8192 --output-tokens 4096
+writetighter config --model gemma4
+```
+
 Put machine-specific LLM settings in `~/.config/writetighter/config.toml` (or the matching XDG config path):
 
 ```toml
@@ -300,6 +338,10 @@ base_url = "http://sparky:4000/v1"
 model = "gemma4"
 response_mode = "json_schema"
 max_requests = 32
+# Model context capacity (required for reference revision)
+context_window_tokens = 8192
+max_output_tokens = 4096
+context_window_model = "gemma4"
 ```
 
 `response_mode` controls how the model is asked to produce structured output. `json_schema` sends a full JSON Schema (see `schemas/revise-response-v1.schema.json`). It is preferred for smaller models that benefit from grammar-constrained generation. `json_object` sends a lighter `{"type":"json_object"}` hint. `prompt_json` relies on prompt instructions only and is the universal fallback. The setup wizard discovers the best supported mode automatically.
@@ -341,6 +383,23 @@ HTML revisions declare `source_format: "html"` and `range_basis: "visible_text"`
 
 ### Security: Secret Handling
 Never pass API keys as command-line arguments. The setup workflow can save a key in the user-only `config.toml` (`0600`) or store only an environment-variable name. Use environment-variable mode for credentials whose persistence policy forbids local config storage.
+
+### Context capacity and budgeting
+
+When `context_window_tokens` and `max_output_tokens` are configured, `revise`
+reserves output tokens, accounts for the system prompt, response format,
+reference content, and a safety margin before allocating tokens to editable
+source text. Token estimates use a 4-bytes-per-token heuristic. A hard byte
+ceiling (`MaxInputChars`) provides compatibility with endpoints that enforce
+byte limits.
+
+If the budget cannot accommodate every source chunk, `revise` reports an
+actionable error before making model calls. It never silently truncates source
+or reference content.
+
+The setup wizard suggests context capacity from the model's `/v1/models` metadata
+when available. The suggestion is always presented for confirmation; it is never
+adopted automatically.
 
 ## Practical Workflows
 
