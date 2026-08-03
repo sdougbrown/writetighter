@@ -45,13 +45,14 @@ type LintParams struct {
 
 // ReviseParams holds parameters for the `writetighter revise` command.
 type ReviseParams struct {
-	Paths      []string
-	Stdin      bool
-	Text       *string
-	Kind       string
-	Profile    string
-	ConfigPath string
-	Format     string
+	Paths          []string
+	Stdin          bool
+	Text           *string
+	Kind           string
+	Profile        string
+	ConfigPath     string
+	Format         string
+	ReferencePaths []string
 }
 
 // PromptParams selects exported revision guidance without model access.

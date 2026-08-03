@@ -6,20 +6,32 @@ import (
 	"strings"
 )
 
+// ReferenceContext reports metadata about reference material sent with the request.
+type ReferenceContext struct {
+	Paths               []string `json:"paths"`
+	Files               []string `json:"files"`
+	InputBytes          int      `json:"input_bytes"`
+	IncludedBytes       int      `json:"included_bytes"`
+	Complete            bool     `json:"complete"`
+	ContextWindowTokens int      `json:"context_window_tokens"`
+	MaxOutputTokens     int      `json:"max_output_tokens"`
+}
+
 // ReviseResponse is the top-level structured JSON response for `writetighter revise`.
 type ReviseResponse struct {
-	SchemaVersion     int              `json:"schema_version"`
-	ToolVersion       string           `json:"tool_version"`
-	Status            string           `json:"status"`
-	ProfileID         string           `json:"profile_id"`
-	ProfileVersion    string           `json:"profile_version"`
-	LLMModel          string           `json:"llm_model"`
-	LLMProvider       string           `json:"llm_provider"`
-	Sources           []string         `json:"sources"`
-	Analysis          []SourceAnalysis `json:"analysis"`
-	DiscardedRewrites int              `json:"discarded_rewrites"`
-	Errors            []RevisionError  `json:"errors,omitempty"`
-	Revisions         []RevisionItem   `json:"revisions"`
+	SchemaVersion     int               `json:"schema_version"`
+	ToolVersion       string            `json:"tool_version"`
+	Status            string            `json:"status"`
+	ProfileID         string            `json:"profile_id"`
+	ProfileVersion    string            `json:"profile_version"`
+	LLMModel          string            `json:"llm_model"`
+	LLMProvider       string            `json:"llm_provider"`
+	Sources           []string          `json:"sources"`
+	Analysis          []SourceAnalysis  `json:"analysis"`
+	DiscardedRewrites int               `json:"discarded_rewrites"`
+	Errors            []RevisionError   `json:"errors,omitempty"`
+	Revisions         []RevisionItem    `json:"revisions"`
+	ReferenceContext  *ReferenceContext `json:"reference_context,omitempty"`
 }
 
 // SourceAnalysis reports revision coverage for one input document.
@@ -95,6 +107,11 @@ func RenderReviseHuman(r *ReviseResponse) (string, error) {
 	}
 	for _, item := range r.Analysis {
 		fmt.Fprintf(&b, "analysis: %s chunks=%d requests=%d bytes=%d/%d complete=%t\n", item.SourcePath, item.Chunks, item.ModelRequests, item.AnalyzedBytes, item.InputBytes, item.Complete)
+	}
+	if r.ReferenceContext != nil {
+		fmt.Fprintf(&b, "reference context: %d files, %d/%d bytes, complete=%t\n",
+			len(r.ReferenceContext.Files), r.ReferenceContext.IncludedBytes,
+			r.ReferenceContext.InputBytes, r.ReferenceContext.Complete)
 	}
 	if r.DiscardedRewrites > 0 {
 		fmt.Fprintf(&b, "discarded unsafe rewrites: %d\n", r.DiscardedRewrites)

@@ -22,6 +22,14 @@ func main() { os.Exit(run(os.Args[1:])) }
 // embedded profile loader to simulate a no-profile state.
 var loadEmbedded = profile.LoadEmbedded
 
+type pathsFlag []string
+
+func (f *pathsFlag) String() string { return strings.Join(*f, ",") }
+func (f *pathsFlag) Set(value string) error {
+	*f = append(*f, value)
+	return nil
+}
+
 type optionalStringFlag struct {
 	value string
 	set   bool
@@ -148,11 +156,13 @@ func runRevise(args []string) int {
 	profile := fs.String("profile", "", "")
 	configPath := fs.String("config", "", "")
 	format := fs.String("format", "json", "")
+	var referencePaths pathsFlag
+	fs.Var(&referencePaths, "reference", "")
 	fs.Usage = func() { printHelp("revise") }
 	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
 		return 2
 	}
-	params := app.ReviseParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format}
+	params := app.ReviseParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, ReferencePaths: []string(referencePaths)}
 	if text.set {
 		params.Text = &text.value
 	}
@@ -224,6 +234,9 @@ func runConfig(args []string) int {
 	fs.Usage = func() { printHelp("config") }
 	wizard := fs.Bool("wizard", false, "Run the interactive configuration wizard")
 	fs.BoolVar(wizard, "w", false, "Run the interactive configuration wizard (short for --wizard)")
+	contextTokens := fs.Int("context", 0, "Set model context window tokens")
+	outputTokens := fs.Int("output-tokens", 0, "Set model max output tokens")
+	model := fs.String("model", "", "Set model ID")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -231,6 +244,62 @@ func runConfig(args []string) int {
 		fmt.Fprintln(os.Stderr, "config does not accept positional arguments")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter config --help` for usage.")
 		return 2
+	}
+
+	hasTargetedFlags := *contextTokens > 0 || *outputTokens > 0 || *model != ""
+
+	// Targeted flags and --wizard are mutually exclusive.
+	if hasTargetedFlags && *wizard {
+		fmt.Fprintln(os.Stderr, "--context, --output-tokens, and --model cannot be combined with --wizard")
+		fmt.Fprintln(os.Stderr, "  Run `writetighter config --help` for usage.")
+		return 2
+	}
+
+	// Targeted update path (Stage 1 placeholder).
+	if hasTargetedFlags {
+		// Validate flag values.
+		if *contextTokens > 0 && *outputTokens > 0 && *outputTokens >= *contextTokens {
+			fmt.Fprintf(os.Stderr, "--output-tokens (%d) must be less than --context (%d)\n", *outputTokens, *contextTokens)
+			return 2
+		}
+
+		// Load existing config or create an empty one.
+		existing, err := config.LoadUserConfig()
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			usageErr("failed to load config: " + err.Error())
+			return 2
+		}
+		if errors.Is(err, os.ErrNotExist) {
+			existing = &config.UserConfig{}
+		}
+
+		// Apply flags.
+		if *contextTokens > 0 {
+			existing.LLM.ContextWindowTokens = *contextTokens
+		}
+		if *outputTokens > 0 {
+			existing.LLM.MaxOutputTokens = *outputTokens
+		}
+		if *model != "" {
+			existing.LLM.Model = *model
+		}
+
+		// Save back.
+		path, err := config.WriteUserConfig(existing)
+		if err != nil {
+			usageErr("failed to save config: " + err.Error())
+			return 2
+		}
+
+		// Show sanitized result.
+		tomlStr, err := existing.SanitizedTOML()
+		if err != nil {
+			usageErr("failed to render config: " + err.Error())
+			return 2
+		}
+		fmt.Print(tomlStr)
+		fmt.Fprintf(os.Stderr, "\nWrote %s\n", path)
+		return 0
 	}
 
 	// If not explicitly requesting the wizard, check whether a model is configured.
@@ -278,7 +347,7 @@ func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 // The documented CLI permits paths before flags. flag.FlagSet stops at the first
 // positional argument, so normalize the small lint/revise grammar before parsing.
 func normalizeInterspersedFlags(args []string) []string {
-	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true, "--text": true}
+	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true, "--text": true, "--reference": true}
 	var flags, paths []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -505,6 +574,9 @@ FLAGS
   --profile <spec>    Profile id@version (default: discovered or user config)
   --config <path>     Path to .writetighter.toml (default: auto-discovered)
   --format <format>   Output format: json, human (default: json)
+  --reference <path>  Path to reference file or directory (repeatable)
+                      Reference content provides broader context for revision
+                      decisions. May be combined with paths, --stdin, or --text.
 
 INPUT
   Provide input via file paths, --stdin, or --text (mutually exclusive).
@@ -518,6 +590,7 @@ EXAMPLES
   writetighter revise --text "Short text." --kind procedure
   writetighter revise --stdin < README.md
   writetighter revise docs/*.md --format human
+  writetighter revise docs/*.md --reference style-guide.md
 `
 
 const promptHelp = `writetighter prompt — export revision guidance
@@ -548,14 +621,25 @@ redacted. To reconfigure interactively, pass --wizard.
 If no configuration exists yet, the interactive wizard runs automatically.
 
 USAGE
-  writetighter config [--wizard]
+  writetighter config [flags]
 
 FLAGS
-  --wizard, -w    Run the interactive configuration wizard
+  --context <tokens>          Set model context window tokens
+  --output-tokens <tokens>    Set model max output tokens
+  --model <model>             Set model ID (re-preflights if possible)
+  --wizard, -w                Run the interactive configuration wizard
+
+NOTE
+  --context, --output-tokens, and --model are mutually exclusive with --wizard.
+  When any of these flags are given, the config file is updated directly without
+  the interactive wizard.
 
 EXAMPLES
-  writetighter config              # show sanitized config (or run wizard if unconfigured)
-  writetighter config --wizard     # force the wizard even if already configured
+  writetighter config                         # show sanitized config (or run wizard if unconfigured)
+  writetighter config --wizard                # force the wizard even if already configured
+  writetighter config --context 8192           # set context window to 8192 tokens
+  writetighter config --output-tokens 4096     # set max output tokens to 4096
+  writetighter config --model gemma4           # set context window model
 `
 
 const explainHelp = `writetighter explain — explain a lint rule

@@ -11,6 +11,12 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
+const (
+	DefaultMaxOutputTokens  = 2048
+	BudgetSafetyTokens      = 512
+	MinEditableSourceTokens = 512
+)
+
 type ProjectConfig struct {
 	Profile ProfileConfig `toml:"profile"`
 	Terms   []TermEntry   `toml:"terms"`
@@ -35,14 +41,17 @@ type UserConfig struct {
 }
 
 type LLMConfig struct {
-	Provider     string `toml:"provider"`
-	BaseURL      string `toml:"base_url"`
-	Model        string `toml:"model"`
-	APIKey       string `toml:"api_key,omitempty"`
-	APIKeyEnv    string `toml:"api_key_env,omitempty"`
-	Timeout      string `toml:"timeout"`
-	ResponseMode string `toml:"response_mode"`
-	MaxRequests  int    `toml:"max_requests,omitempty"`
+	Provider            string `toml:"provider"`
+	BaseURL             string `toml:"base_url"`
+	Model               string `toml:"model"`
+	APIKey              string `toml:"api_key,omitempty"`
+	APIKeyEnv           string `toml:"api_key_env,omitempty"`
+	Timeout             string `toml:"timeout"`
+	ResponseMode        string `toml:"response_mode"`
+	MaxRequests         int    `toml:"max_requests,omitempty"`
+	ContextWindowTokens int    `toml:"context_window_tokens,omitzero"`
+	MaxOutputTokens     int    `toml:"max_output_tokens,omitzero"`
+	ContextWindowModel  string `toml:"context_window_model,omitempty"`
 }
 
 type MergedConfig struct {
@@ -195,6 +204,18 @@ func loadUserConfigFile(path string) (*UserConfig, error) {
 	}
 	if cfg.LLM.APIKey != "" && cfg.LLM.APIKeyEnv != "" {
 		return nil, fmt.Errorf("config %s: llm.api_key and llm.api_key_env are mutually exclusive", path)
+	}
+	if md.IsDefined("llm", "context_window_tokens") && cfg.LLM.ContextWindowTokens <= 0 {
+		return nil, fmt.Errorf("config %s: llm.context_window_tokens must be > 0", path)
+	}
+	if md.IsDefined("llm", "max_output_tokens") && cfg.LLM.MaxOutputTokens <= 0 {
+		return nil, fmt.Errorf("config %s: llm.max_output_tokens must be > 0", path)
+	}
+	if cfg.LLM.ContextWindowTokens > 0 && cfg.LLM.MaxOutputTokens > 0 && cfg.LLM.MaxOutputTokens >= cfg.LLM.ContextWindowTokens {
+		return nil, fmt.Errorf("config %s: llm.max_output_tokens (%d) must be less than llm.context_window_tokens (%d)", path, cfg.LLM.MaxOutputTokens, cfg.LLM.ContextWindowTokens)
+	}
+	if md.IsDefined("llm", "context_window_model") && cfg.LLM.ContextWindowModel == "" {
+		return nil, fmt.Errorf("config %s: llm.context_window_model must be non-empty if set", path)
 	}
 	return &cfg, nil
 }
