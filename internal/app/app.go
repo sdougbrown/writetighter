@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/sdougbrown/writetighter/internal/check"
 	"github.com/sdougbrown/writetighter/internal/config"
@@ -486,9 +487,15 @@ func (a *App) RunRevise(params ReviseParams) error {
 		}
 	}
 
-	// Require context_window_tokens and max_output_tokens when references are provided.
-	if refPack != nil && (uc.ContextWindowTokens == 0 || uc.MaxOutputTokens == 0) {
-		return fmt.Errorf("%w: reference revision requires llm.context_window_tokens and llm.max_output_tokens to be configured. Use `writetighter config --context TOKENS --output-tokens TOKENS` to set capacity for model %q", ErrLLMConfigRequired, llmModel)
+	// Require confirmed context_window_tokens when references are provided, and
+	// never reuse a capacity that was confirmed for a different model.
+	if refPack != nil {
+		if uc.ContextWindowTokens == 0 {
+			return fmt.Errorf("%w: reference revision requires llm.context_window_tokens to be configured. Use `writetighter config --context TOKENS` to set capacity for model %q", ErrLLMConfigRequired, llmModel)
+		}
+		if uc.ContextWindowModel != "" && uc.ContextWindowModel != llmModel {
+			return fmt.Errorf("%w: context_window_tokens=%d was last confirmed for model %q, not the current model %q; reference revision is unavailable until context is configured for the current model. Use `writetighter config --context TOKENS` to set capacity for %q", ErrLLMConfigRequired, uc.ContextWindowTokens, uc.ContextWindowModel, llmModel, llmModel)
+		}
 	}
 
 	type revisionPlan struct {
@@ -639,9 +646,17 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 		return chunks, refPack, nil
 	}
 
-	// 2a. Compute base overhead using BuildBudgetedPrompt with a minimal excerpt
-	// (1 byte) to compute the serialized overhead of system prompt, reference
-	// pack, and response format.
+	content := doc.AnalysisContent()
+	if len(content) == 0 {
+		// Empty documents produce no chunks (ChunkRanges parity), so no model
+		// call is made for them.
+		return []document.ChunkRange{}, refPack, nil
+	}
+
+	// 2a. Compute base overhead by building the prompt for a minimal (1 byte)
+	// excerpt. This validates that the system/reference/schema overhead alone
+	// leaves at least minEditableSourceTokens; BuildBudgetedPrompt returns the
+	// actionable configuration error otherwise.
 	minChunkBytes := llm.MinEditableSourceTokens * llm.EstimatedBytesPerToken
 	oneByteExcerpt := llm.NewChunkExcerpt(doc, 0, 1)
 	sysPrompt, userContent, _, err := llm.BuildBudgetedPrompt(doc, res, findings, terms, oneByteExcerpt, refPack, cfg)
@@ -649,18 +664,14 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 		return nil, nil, fmt.Errorf("reference overhead exceeds context window: %w", err)
 	}
 
-	baseRequest := llm.Request{
-		Model: cfg.Model,
-		Messages: []llm.Message{
-			{Role: "system", Content: sysPrompt},
-			{Role: "user", Content: userContent},
-		},
-	}
-	serializedBody, marshalErr := json.Marshal(baseRequest)
+	// Serialize the base request (with the response format/schema included) so
+	// the initial chunk size derives from the same request shape that
+	// BuildBudgetedPrompt measures.
+	baseSerializedBytes, marshalErr := llm.SerializeRequestBytes(cfg, sysPrompt, userContent)
 	if marshalErr != nil {
 		return nil, nil, fmt.Errorf("budget calculation: %w", marshalErr)
 	}
-	basePromptTokens := int(math.Ceil(float64(len(serializedBody)) / float64(llm.EstimatedBytesPerToken)))
+	basePromptTokens := int(math.Ceil(float64(baseSerializedBytes) / float64(llm.EstimatedBytesPerToken)))
 
 	maxOutputTokens := cfg.MaxOutputTokens
 	if maxOutputTokens <= 0 {
@@ -669,15 +680,11 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 
 	availableSourceBudget := cfg.ContextWindowTokens - basePromptTokens - maxOutputTokens - llm.BudgetSafetyTokens
 	if availableSourceBudget < llm.MinEditableSourceTokens {
-		neededTotal := basePromptTokens + llm.MinEditableSourceTokens + maxOutputTokens + llm.BudgetSafetyTokens
 		return nil, nil, fmt.Errorf(
-			"context window too small after accounting for reference overhead: "+
-				"context_window_tokens=%d, estimated_overhead=%d, max_output_tokens=%d, "+
-				"safety=%d, available_for_source=%d, minimum_required_source=%d. "+
-				"Consider increasing context_window_tokens to at least %d, "+
-				"reducing max_output_tokens, or using a model with a larger context window.",
-			cfg.ContextWindowTokens, basePromptTokens, maxOutputTokens, llm.BudgetSafetyTokens,
-			availableSourceBudget, llm.MinEditableSourceTokens, neededTotal)
+			"revision context requires %d estimated input tokens for system/reference material and output reservation, "+
+				"leaving %d estimated tokens for editable source; "+
+				"configure a larger context_window_tokens or use a smaller reference set",
+			basePromptTokens+maxOutputTokens, availableSourceBudget)
 	}
 
 	// 2b. Convert available budget to bytes.
@@ -692,36 +699,41 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 		chunkSize = minChunkBytes
 	}
 
-	content := doc.AnalysisContent()
 	var chunks []document.ChunkRange
 	currentPos := 0
 
 	// Iteratively build chunks: each chunk starts where the previous ended.
+	// Every candidate is validated with the complete prompt for that exact
+	// chunk (lint findings, dictionary guidance, glossary matches, and HTML
+	// projection can change overhead). When a candidate does not fit, its end
+	// is moved backward to the previous UTF-8-safe block boundary and the
+	// candidate is rebuilt until it fits. A final fragment smaller than
+	// minEditableSourceTokens is still taken whole (never silently dropped).
 	for currentPos < len(content) {
 		chunkStart := currentPos
-		remaining := len(content) - chunkStart
-
-		// If the remaining content fits within the target chunk size, use it as-is
-		// even if it is smaller than minChunkBytes.
-		if remaining <= chunkSize {
-			chunks = append(chunks, document.ChunkRange{StartByte: chunkStart, EndByte: len(content)})
-			break
-		}
-
 		chunkEnd := chunkStart + chunkSize
 		if chunkEnd > len(content) {
 			chunkEnd = len(content)
 		}
 
-		// Validate the chunk and shrink if needed.
-		for chunkEnd > chunkStart+minChunkBytes {
+		fitted := false
+		var lastBudgetErr error
+		for {
 			chunkExcerpt := llm.NewChunkExcerpt(doc, chunkStart, chunkEnd)
 			_, _, _, budgetErr := llm.BuildBudgetedPrompt(doc, res, findings, terms, chunkExcerpt, refPack, cfg)
 			if budgetErr == nil {
+				fitted = true
+				break
+			}
+			lastBudgetErr = budgetErr
+			// A fragment below the minimum editable-source size cannot shrink
+			// (that would drop coverage); validate it once and surface its error.
+			if chunkEnd < chunkStart+minChunkBytes {
 				break
 			}
 
-			// Shrink: move end back to the previous double-newline or newline boundary.
+			// Shrink: move the end back to the previous double-newline or
+			// newline boundary (a UTF-8-safe position, since '\n' is ASCII).
 			window := content[chunkStart:chunkEnd]
 			newEnd := chunkEnd
 			if idx := strings.LastIndex(window, "\n\n"); idx >= 0 {
@@ -729,22 +741,33 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 			} else if idx := strings.LastIndexByte(window, '\n'); idx >= 0 {
 				newEnd = chunkStart + idx + 1
 			} else {
-				// No block boundary found; halve the size.
-				newEnd = chunkStart + (chunkEnd-chunkStart)/2
+				// No block boundary found; fall back to a UTF-8-safe midpoint
+				// rather than halving into the middle of a rune.
+				mid := chunkStart + (chunkEnd-chunkStart)/2
+				for mid > chunkStart && !utf8.RuneStart(content[mid]) {
+					mid--
+				}
+				if mid <= chunkStart {
+					mid = chunkStart + 1
+				}
+				newEnd = mid
 			}
 
-			if newEnd <= chunkStart+minChunkBytes || newEnd >= chunkEnd {
-				return nil, nil, fmt.Errorf(
-					"cannot fit any chunk of at least %d bytes for document %q "+
-						"within the available context window budget. "+
-						"Consider increasing context_window_tokens or reducing reference content.",
-					minChunkBytes, doc.Source)
+			if newEnd < chunkStart+minChunkBytes || newEnd >= chunkEnd {
+				break
 			}
 			chunkEnd = newEnd
 		}
 
-		chunkBytes := chunkEnd - chunkStart
-		if chunkBytes < minChunkBytes {
+		if !fitted {
+			if chunkEnd < chunkStart+minChunkBytes {
+				// The final fragment cannot fit even though it is below the minimum
+				// editable-source size; fail before any model call.
+				return nil, nil, fmt.Errorf(
+					"cannot fit final fragment of %d bytes for document %q within the available context window budget: %v. "+
+						"Consider increasing context_window_tokens or reducing reference content.",
+					chunkEnd-chunkStart, doc.Source, lastBudgetErr)
+			}
 			return nil, nil, fmt.Errorf(
 				"cannot fit any chunk of at least %d bytes for document %q "+
 					"within the available context window budget. "+

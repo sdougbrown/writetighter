@@ -959,8 +959,8 @@ max_requests=32
 	if cfg.LLM.ContextWindowTokens != 0 {
 		t.Fatalf("context_window_tokens = %d, want 0 (cleared)", cfg.LLM.ContextWindowTokens)
 	}
-	if cfg.LLM.ContextWindowModel != "gemma4" {
-		t.Fatalf("context_window_model = %q, want gemma4", cfg.LLM.ContextWindowModel)
+	if cfg.LLM.ContextWindowModel != "" {
+		t.Fatalf("context_window_model = %q, want cleared (no context confirmed for new model)", cfg.LLM.ContextWindowModel)
 	}
 	// Max output tokens should be preserved.
 	if cfg.LLM.MaxOutputTokens != 2048 {

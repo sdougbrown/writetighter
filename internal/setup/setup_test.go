@@ -286,17 +286,18 @@ func TestRunFallsBackFromJSONSchemaToJSONObject(t *testing.T) {
 		t.Fatalf("persisted response mode = %q, want json_object", cfg.LLM.ResponseMode)
 	}
 	// No context metadata; context should be 0, output should be default 2048.
+	// context_window_model records the model for which context_window_tokens was
+	// last confirmed; with no confirmed capacity it must stay unset.
 	if cfg.LLM.ContextWindowTokens != 0 {
 		t.Fatalf("context_window_tokens = %d, want 0", cfg.LLM.ContextWindowTokens)
 	}
 	if cfg.LLM.MaxOutputTokens != 2048 {
 		t.Fatalf("max_output_tokens = %d, want 2048", cfg.LLM.MaxOutputTokens)
 	}
-	if cfg.LLM.ContextWindowModel != "qwen" {
-		t.Fatalf("context_window_model = %q, want qwen", cfg.LLM.ContextWindowModel)
+	if cfg.LLM.ContextWindowModel != "" {
+		t.Fatalf("context_window_model = %q, want unset (no confirmed context)", cfg.LLM.ContextWindowModel)
 	}
 }
-
 func setupServer(t *testing.T, requiredKey string, rejectResponseFormat bool) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

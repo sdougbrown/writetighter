@@ -326,6 +326,12 @@ func isSecretFile(name string) bool {
 		".p12", ".pfx", ".jks", ".keystore", ".kdb", ".ps1":
 		return true
 	}
+
+	// SSH private-key filenames have no extension.
+	switch lower {
+	case "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519", "id_xmss":
+		return true
+	}
 	return false
 }
 

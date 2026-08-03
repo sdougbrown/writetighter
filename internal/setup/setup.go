@@ -269,6 +269,13 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		confirmedMaxOutputTokens = n
 	}
 
+	confirmedModel := ""
+	if confirmedContextWindow > 0 {
+		// context_window_model records the model for which the context window
+		// was last confirmed. If capacity was not confirmed, leave it unset so
+		// downstream code never mistakes an unconfirmed window as valid.
+		confirmedModel = model
+	}
 	existing.LLM = config.LLMConfig{
 		Provider:            "openai-compatible",
 		BaseURL:             baseURL,
@@ -280,7 +287,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		MaxRequests:         defaultMaxRequests,
 		ContextWindowTokens: confirmedContextWindow,
 		MaxOutputTokens:     confirmedMaxOutputTokens,
-		ContextWindowModel:  model,
+		ContextWindowModel:  confirmedModel,
 	}
 	path, err := config.WriteUserConfig(existing)
 	if err != nil {

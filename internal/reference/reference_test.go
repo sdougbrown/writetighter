@@ -339,6 +339,25 @@ func TestCollectSecretFileError(t *testing.T) {
 	}
 }
 
+// TestCollectRejectsSSHPrivateKeyFilename verifies that common SSH private-key
+// filenames without extensions (id_rsa, id_dsa, id_ecdsa, id_ed25519) are
+// rejected as secret files even when explicitly provided as reference paths.
+func TestCollectRejectsSSHPrivateKeyFilename(t *testing.T) {
+	for _, name := range []string{"id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"} {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, name)
+			if err := os.WriteFile(path, []byte("PRIVATE KEY CONTENT"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := Collect([]string{path}, nil)
+			if err == nil || !strings.Contains(err.Error(), "secret/binary") {
+				t.Fatalf("expected secret/binary error for %s, got %v", name, err)
+			}
+		})
+	}
+}
+
 // TestCollectSkipsSecretDirEntry verifies that .env files in a directory are silently skipped.
 func TestCollectSkipsSecretDirEntry(t *testing.T) {
 	dir := t.TempDir()

@@ -685,86 +685,66 @@ func BuildBudgetedPrompt(doc *document.Document, res *profile.Resolution, findin
 	systemPrompt, excerpt = buildRevisePromptWithExcerpt(doc, res, findings, terms, excerpt, refPack)
 	editableText = excerpt.Text
 
-	// Build the user message content with wrapped sections.
-	var userBuf strings.Builder
-	if refPack != nil {
-		rendered := refPack.Render()
-		if rendered != "" {
-			userBuf.WriteString(rendered)
-			// Ensure a blank line separator between reference and revise-text.
-			if !strings.HasSuffix(rendered, "\n") {
-				userBuf.WriteString("\n")
-			}
-		}
-	}
-	userBuf.WriteString("<revise-text>\n")
-	userBuf.WriteString(excerpt.Text)
-	if !strings.HasSuffix(excerpt.Text, "\n") {
-		userBuf.WriteString("\n")
-	}
-	userBuf.WriteString("</revise-text>")
-	userContent = userBuf.String()
+	// Build the user message content with wrapped sections, keeping the
+	// editable excerpt text separate so range validation always operates on
+	// source bytes only.
+	userContent = buildUserContent(refPack, excerpt.Text)
 
 	// If ContextWindowTokens is configured, apply the token budget formula.
 	if cfg.ContextWindowTokens > 0 {
-		// Serialize the full request to estimate token usage.
-		// Serialize as JSON to account for schema overhead.
-		serializedBody, marshalErr := json.Marshal(Request{
-			Model: cfg.Model,
-			Messages: []Message{
-				{Role: "system", Content: systemPrompt},
-				{Role: "user", Content: userContent},
-			},
-		})
+		// basePromptTokens = ceil(serializedRequestBytes / EstimatedBytesPerToken)
+		// where serializedRequestBytes is the JSON request containing the system
+		// prompt, wrapper/reference content, and response format/schema with an
+		// EMPTY <revise-text> body. Source bytes are counted exactly once, in the
+		// candidate check below, never in the base overhead.
+		baseSerializedBytes, marshalErr := SerializeRequestBytes(cfg, systemPrompt, buildUserContent(refPack, ""))
 		if marshalErr != nil {
 			return "", "", "", fmt.Errorf("budget calculation: %w", marshalErr)
 		}
-		serializedRequestBytes := len(serializedBody)
-
-		// basePromptTokens = ceil(serializedRequestBytes / EstimatedBytesPerToken)
-		basePromptTokens := int(math.Ceil(float64(serializedRequestBytes) / float64(EstimatedBytesPerToken)))
+		basePromptTokens := int(math.Ceil(float64(baseSerializedBytes) / float64(EstimatedBytesPerToken)))
 
 		maxOutputTokens := cfg.MaxOutputTokens
 		if maxOutputTokens <= 0 {
 			maxOutputTokens = config.DefaultMaxOutputTokens
 		}
 
+		// availableSourceBudget = ContextWindowTokens - basePromptTokens -
+		// MaxOutputTokens - budgetSafetyTokens.
 		availableSourceBudget := cfg.ContextWindowTokens - basePromptTokens - maxOutputTokens - BudgetSafetyTokens
 
+		// The base calculation must leave at least minEditableSourceTokens for
+		// the editable source.
 		if availableSourceBudget < MinEditableSourceTokens {
-			// Budget too small — return error with guidance.
-			serializedBytesNoSource := serializedRequestBytes - len(editableText)
-			baseTokensNoSource := int(math.Ceil(float64(serializedBytesNoSource) / float64(EstimatedBytesPerToken)))
-			neededTotal := baseTokensNoSource + MinEditableSourceTokens + maxOutputTokens + BudgetSafetyTokens
 			return "", "", "", fmt.Errorf(
-				"context window too small after accounting for prompt overhead: context_window_tokens=%d, "+
-					"estimated overhead=%d, max_output_tokens=%d, safety=%d, available for source=%d, "+
-					"minimum required source=%d. Consider increasing context_window_tokens to at least %d, "+
-					"reducing max_output_tokens, or using a model with a larger context window.",
-				cfg.ContextWindowTokens, baseTokensNoSource, maxOutputTokens, BudgetSafetyTokens,
-				availableSourceBudget, MinEditableSourceTokens, neededTotal)
+				"revision context requires %d estimated input tokens for system/reference material and output reservation, "+
+					"leaving %d estimated tokens for editable source; "+
+					"configure a larger context_window_tokens or use a smaller reference set",
+				basePromptTokens+maxOutputTokens, availableSourceBudget)
 		}
 
-		// Check over-budget: if the serialized request (with actual excerpt) exceeds available space, reject.
-		// availableSourceBytes = availableSourceBudget * EstimatedBytesPerToken
-		// But this is an approximation — reject if the serialized request itself exceeds what we'd expect.
-		// The core check is that the editable text fits within availableSourceBudget tokens.
-		availableSourceBytes := availableSourceBudget * EstimatedBytesPerToken
-		if len(editableText) > availableSourceBytes {
+		// A final candidate fits only when its fully serialized request (with the
+		// real excerpt) satisfies
+		//   ceil(serializedRequestBytes/4) + MaxOutputTokens + budgetSafetyTokens <= ContextWindowTokens.
+		fullSerializedBytes, marshalErr := SerializeRequestBytes(cfg, systemPrompt, userContent)
+		if marshalErr != nil {
+			return "", "", "", fmt.Errorf("budget calculation: %w", marshalErr)
+		}
+		fullPromptTokens := int(math.Ceil(float64(fullSerializedBytes) / float64(EstimatedBytesPerToken)))
+		if fullPromptTokens+maxOutputTokens+BudgetSafetyTokens > cfg.ContextWindowTokens {
 			return "", "", "", fmt.Errorf(
-				"editable text too large for context window: %d bytes (est. %d tokens) exceeds "+
-					"available source budget of %d tokens (approx %d bytes). Consider narrowing the revision chunk "+
-					"or increasing context_window_tokens.",
-				len(editableText), int(math.Ceil(float64(len(editableText))/float64(EstimatedBytesPerToken))),
-				availableSourceBudget, availableSourceBytes)
+				"revision chunk requires %d estimated input tokens plus %d reserved output tokens and %d safety tokens, "+
+					"exceeding context_window_tokens=%d; "+
+					"narrow the revision chunk or reduce reference content",
+				fullPromptTokens, maxOutputTokens, BudgetSafetyTokens, cfg.ContextWindowTokens)
 		}
 
-		// Also enforce the hard MaxInputChars transport ceiling on the serialized body.
-		if serializedRequestBytes > MaxInputChars {
+		// Also enforce the hard MaxInputChars transport ceiling on total message
+		// content bytes (the same ceiling Client.Do enforces).
+		if len(systemPrompt)+len(userContent) > MaxInputChars {
 			return "", "", "", fmt.Errorf(
-				"serialized request too large: %d bytes exceeds hard ceiling of %d bytes. "+
+				"request message content too large: %d bytes exceeds hard ceiling of %d bytes. "+
 					"Consider narrowing the revision chunk or reducing reference content.",
-				serializedRequestBytes, MaxInputChars)
+				len(systemPrompt)+len(userContent), MaxInputChars)
 		}
 
 		return systemPrompt, userContent, editableText, nil
@@ -780,6 +760,52 @@ func BuildBudgetedPrompt(doc *document.Document, res *profile.Resolution, findin
 	}
 
 	return systemPrompt, userContent, editableText, nil
+}
+
+// buildUserContent wraps the reference pack and the given editable excerpt text
+// into the single user message body used by the one-message prompt contract.
+// Passing an empty excerptText produces the empty <revise-text> body used for
+// base-overhead budget calculation.
+func buildUserContent(refPack *reference.Pack, excerptText string) string {
+	var userBuf strings.Builder
+	if refPack != nil {
+		rendered := refPack.Render()
+		if rendered != "" {
+			userBuf.WriteString(rendered)
+			// Ensure a blank line separator between reference and revise-text.
+			if !strings.HasSuffix(rendered, "\n") {
+				userBuf.WriteString("\n")
+			}
+		}
+	}
+	userBuf.WriteString("<revise-text>\n")
+	userBuf.WriteString(excerptText)
+	if !strings.HasSuffix(excerptText, "\n") {
+		userBuf.WriteString("\n")
+	}
+	userBuf.WriteString("</revise-text>")
+	return userBuf.String()
+}
+
+// SerializeRequestBytes returns the JSON byte size of the request that would be
+// sent for the given system and user content, including the configured response
+// format/schema overhead. It is used by the token-budget estimator so that both
+// the llm package and the app-level chunk planner measure the same request
+// shape (system prompt, wrapper/reference content, and response format).
+func SerializeRequestBytes(cfg Config, systemPrompt, userContent string) (int, error) {
+	rf, err := buildReviseResponseFormat(cfg.ResponseMode)
+	if err != nil {
+		return 0, err
+	}
+	body, err := json.Marshal(Request{
+		Model:          cfg.Model,
+		Messages:       []Message{{Role: "system", Content: systemPrompt}, {Role: "user", Content: userContent}},
+		ResponseFormat: rf,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return len(body), nil
 }
 
 // BuildReviseWritingGuidelines returns only reviewed dictionary entries that

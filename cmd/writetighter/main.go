@@ -291,25 +291,27 @@ func runConfig(args []string) int {
 			client := &http.Client{Timeout: 45 * time.Second}
 
 			models, discErr := setup.ListModels(ctx, client, existing.LLM.BaseURL, apiKey)
-			if discErr != nil || len(models) == 0 {
-				msg := "model discovery failed"
-				if discErr != nil {
-					msg += ": " + discErr.Error()
-				}
-				usageErr(msg + "; cannot verify model ID")
-				return 2
-			}
-
 			var found *setup.ModelInfo
-			for i := range models {
-				if models[i].ID == *model {
-					found = &models[i]
-					break
+			if discErr != nil || len(models) == 0 {
+				// Discovery unavailable or empty: permit the explicitly entered model
+				// ID and rely on chat preflight below. No capacity suggestion is
+				// available in this case.
+				if discErr != nil {
+					fmt.Fprintf(os.Stderr, "Warning: model discovery unavailable: %v; proceeding with explicit model %q (no capacity suggestion).\n", discErr, *model)
+				} else {
+					fmt.Fprintf(os.Stderr, "Warning: model discovery returned no models; proceeding with explicit model %q (no capacity suggestion).\n", *model)
 				}
-			}
-			if found == nil {
-				usageErr(fmt.Sprintf("model %q was not reported by the endpoint", *model))
-				return 2
+			} else {
+				for i := range models {
+					if models[i].ID == *model {
+						found = &models[i]
+						break
+					}
+				}
+				if found == nil {
+					usageErr(fmt.Sprintf("model %q was not reported by the endpoint", *model))
+					return 2
+				}
 			}
 
 			// If the model is actually changing, clear context window unless --context is also set.
@@ -321,7 +323,11 @@ func runConfig(args []string) int {
 			}
 
 			existing.LLM.Model = *model
-			existing.LLM.ContextWindowModel = *model
+			// context_window_model records the model for which context_window_tokens
+			// was last confirmed; only set it when a confirmed value exists.
+			if existing.LLM.ContextWindowTokens > 0 || *contextTokens > 0 {
+				existing.LLM.ContextWindowModel = *model
+			}
 
 			// Refresh response mode.
 			newMode, probeErr := setup.ProbeResponseMode(ctx, client, existing.LLM.BaseURL, *model, apiKey)
@@ -333,7 +339,7 @@ func runConfig(args []string) int {
 			}
 
 			// If metadata has a suggestion and no --context was given, show it.
-			if found.SuggestedContextWindow() > 0 && *contextTokens == 0 && existing.LLM.ContextWindowTokens == 0 {
+			if found != nil && found.SuggestedContextWindow() > 0 && *contextTokens == 0 && existing.LLM.ContextWindowTokens == 0 {
 				fmt.Fprintf(os.Stderr, "Model %q suggests a context window of %d tokens.\n", *model, found.SuggestedContextWindow())
 				fmt.Fprintf(os.Stderr, "  Run 'writetighter config --context %d' to set it.\n", found.SuggestedContextWindow())
 			}

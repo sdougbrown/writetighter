@@ -1295,6 +1295,71 @@ func TestRunReviseReferenceIsSourceFile(t *testing.T) {
 	}
 }
 
+// TestRunReviseStaleContextWindowModel verifies that reference revision is
+// rejected when context_window_model does not match the current model, even
+// when context_window_tokens is set. Capacity confirmed for one model must
+// never be silently reused for a different model.
+func TestRunReviseStaleContextWindowModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf("[llm]\nprovider = \"openai-compatible\"\nbase_url = %q\nmodel = \"current-model\"\nresponse_mode = \"json_object\"\ncontext_window_tokens = 8192\nmax_output_tokens = 2048\ncontext_window_model = \"old-model\"\n", server.URL)
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	refPath := filepath.Join(t.TempDir(), "ref.md")
+	if err := os.WriteFile(refPath, []byte("reference content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:          []string{writeTempFile(t, "source text.")},
+		ReferencePaths: []string{refPath},
+		Kind:           "description",
+		Format:         "json",
+	})
+	if err == nil {
+		t.Fatal("expected error for stale context_window_model")
+	}
+	if !strings.Contains(err.Error(), "old-model") || !strings.Contains(err.Error(), "current-model") {
+		t.Fatalf("expected model mismatch error mentioning both models, got: %v", err)
+	}
+}
+
+// TestRunReviseEmptySourceWithReferences verifies that an empty source document
+// with references does not panic and produces no model calls (ChunkRanges
+// parity).
+func TestRunReviseEmptySourceWithReferences(t *testing.T) {
+	server := fakeReviseServerWithCapture(t, nil)
+	defer server.Close()
+	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+	refPath := filepath.Join(t.TempDir(), "ref.md")
+	if err := os.WriteFile(refPath, []byte("reference content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:          []string{writeTempFile(t, "")},
+		ReferencePaths: []string{refPath},
+		Kind:           "description",
+		Format:         "json",
+	})
+	if err != nil {
+		t.Fatalf("empty source with references should succeed, got: %v", err)
+	}
+}
+
 func TestRunReviseReferenceContextInReport(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
