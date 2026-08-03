@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1030,5 +1031,308 @@ func TestRunReviseHTMLReportsVisibleTextAnalysis(t *testing.T) {
 	}
 	if len(response.Analysis) != 1 || response.Analysis[0].SourceFormat != "html" || response.Analysis[0].RangeBasis != "visible_text" || !response.Analysis[0].Complete {
 		t.Fatalf("analysis = %#v", response.Analysis)
+	}
+}
+
+// writeReviseUserConfigWithTokens writes a user config with context_window_tokens
+// and max_output_tokens set, for budget-aware tests.
+func writeReviseUserConfigWithTokens(t *testing.T, baseURL string, ctxTokens, outTokens int) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := fmt.Sprintf("[llm]\nprovider = \"openai-compatible\"\nbase_url = %q\nmodel = \"test-model\"\nresponse_mode = \"json_object\"\ncontext_window_tokens = %d\nmax_output_tokens = %d\n", baseURL, ctxTokens, outTokens)
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// fakeReviseServerWithCapture creates a fake server that captures the request body
+// for inspection. It returns a valid empty revise response.
+func fakeReviseServerWithCapture(t *testing.T, capture func(body []byte)) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if capture != nil {
+			capture(body)
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": `{"findings":[]}`}}},
+		})
+	}))
+}
+
+// --- RunRevise reference integration tests ---
+
+func TestRunReviseWithReferences(t *testing.T) {
+	var capturedBody []byte
+	server := fakeReviseServerWithCapture(t, func(body []byte) {
+		capturedBody = body
+	})
+	defer server.Close()
+
+	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+
+	srcPath := writeTempFile(t, "This is the source document to revise.")
+
+	refPath := filepath.Join(t.TempDir(), "reference.md")
+	if err := os.WriteFile(refPath, []byte("This is reference content for context."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:          []string{srcPath},
+			ReferencePaths: []string{refPath},
+			Kind:           "description",
+			Format:         "json",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// Verify the response is valid JSON.
+	var response report.ReviseResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatalf("invalid revise JSON: %v\n%s", err, output.String())
+	}
+	if response.Status != "ok" {
+		t.Fatalf("expected status ok, got %q: errors=%v", response.Status, response.Errors)
+	}
+
+	// Verify the request body contains reference tags and revise-text tags.
+	// The body is JSON-escaped, so check for escaped content.
+	if capturedBody != nil {
+		bodyStr := string(capturedBody)
+		// Check for the reference tag start (JSON-escaped quotes).
+		if !strings.Contains(bodyStr, `\u003creference`) && !strings.Contains(bodyStr, "<reference") {
+			t.Error("request body missing <reference> tags")
+		}
+		if !strings.Contains(bodyStr, "<revise-text>") && !strings.Contains(bodyStr, `\u003crevise-text`) {
+			t.Error("request body missing <revise-text> tags")
+		}
+		// Reference content should appear unescaped in the JSON value.
+		if !strings.Contains(bodyStr, "This is reference content for context.") {
+			t.Error("request body missing reference content")
+		}
+		if !strings.Contains(bodyStr, "This is the source document to revise.") {
+			t.Error("request body missing source content")
+		}
+	}
+}
+
+func TestRunReviseNoContextWindowWithReferences(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+
+	// Config with context_window_tokens=0 (unset) but references provided.
+	writeReviseUserConfig(t, server.URL, "")
+
+	refPath := filepath.Join(t.TempDir(), "ref.md")
+	if err := os.WriteFile(refPath, []byte("reference content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:          []string{writeTempFile(t, "source text.")},
+		ReferencePaths: []string{refPath},
+		Kind:           "description",
+		Format:         "json",
+	})
+	if err == nil {
+		t.Fatal("expected error when references provided without context_window_tokens")
+	}
+	if !strings.Contains(err.Error(), "reference revision requires llm.context_window_tokens") {
+		t.Fatalf("expected context_window_tokens error, got: %v", err)
+	}
+}
+
+func TestRunReviseOverBudgetReferences(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+
+	writeReviseUserConfigWithTokens(t, server.URL, 1024, 256) // Very small budget
+
+	// Create a large reference file that will exceed the budget.
+	refPath := filepath.Join(t.TempDir(), "large_ref.md")
+	largeRef := strings.Repeat("reference content that takes up a lot of space. ", 500)
+	if err := os.WriteFile(refPath, []byte(largeRef), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:          []string{writeTempFile(t, "short source.")},
+		ReferencePaths: []string{refPath},
+		Kind:           "description",
+		Format:         "json",
+	})
+	if err == nil {
+		t.Fatal("expected error for over-budget references")
+	}
+	if !strings.Contains(err.Error(), "context window") && !strings.Contains(err.Error(), "budget") && !strings.Contains(err.Error(), "overhead") {
+		t.Fatalf("expected budget-related error, got: %v", err)
+	}
+}
+
+func TestRunReviseReferenceMissingFile(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+
+	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:          []string{writeTempFile(t, "source.")},
+		ReferencePaths: []string{"/nonexistent/path/reference.md"},
+		Kind:           "description",
+		Format:         "json",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing reference file")
+	}
+	if !strings.Contains(err.Error(), "collecting references") {
+		t.Fatalf("expected collecting-references error, got: %v", err)
+	}
+}
+
+func TestRunReviseReferenceIsSourceFile(t *testing.T) {
+	var capturedBody []byte
+	server := fakeReviseServerWithCapture(t, func(body []byte) {
+		capturedBody = body
+	})
+	defer server.Close()
+
+	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+
+	// Use the same file as both source and reference.
+	srcContent := "This is the source document."
+	srcPath := writeTempFile(t, srcContent)
+
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:          []string{srcPath},
+			ReferencePaths: []string{srcPath}, // same file
+			Kind:           "description",
+			Format:         "json",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var response report.ReviseResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatalf("invalid revise JSON: %v\n%s", err, output.String())
+	}
+	if response.Status != "ok" {
+		t.Fatalf("expected status ok, got %q: errors=%v", response.Status, response.Errors)
+	}
+
+	// Verify ReferenceContext is populated but with empty Files slice
+	// (source file excluded from references).
+	if response.ReferenceContext == nil {
+		t.Fatal("expected ReferenceContext to be populated")
+	}
+	if len(response.ReferenceContext.Files) != 0 {
+		t.Errorf("expected empty Files, got %v", response.ReferenceContext.Files)
+	}
+	if len(response.ReferenceContext.Paths) != 1 {
+		t.Errorf("expected 1 Path, got %v", response.ReferenceContext.Paths)
+	}
+	if response.ReferenceContext.InputBytes != 0 {
+		t.Errorf("expected InputBytes=0, got %d", response.ReferenceContext.InputBytes)
+	}
+
+	// Also verify the request body does NOT contain reference tags for the source.
+	if capturedBody != nil {
+		bodyStr := string(capturedBody)
+		// Check for reference tags (JSON-escaped).
+		if strings.Contains(bodyStr, "<reference") && !strings.Contains(bodyStr, "<revise-text>") {
+			t.Error("request body should not contain <reference> tags when only source file is provided as reference")
+		}
+	}
+}
+
+func TestRunReviseReferenceContextInReport(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+
+	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+
+	srcPath := writeTempFile(t, "Source text.")
+
+	refDir := t.TempDir()
+	refPath := filepath.Join(refDir, "guide.md")
+	refContent := "Guide content."
+	if err := os.WriteFile(refPath, []byte(refContent), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:          []string{srcPath},
+			ReferencePaths: []string{refPath},
+			Kind:           "description",
+			Format:         "json",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var response report.ReviseResponse
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatalf("invalid revise JSON: %v\n%s", err, output.String())
+	}
+	if response.Status != "ok" {
+		t.Fatalf("expected status ok, got %q: errors=%v", response.Status, response.Errors)
+	}
+
+	// Verify ReferenceContext is populated.
+	rc := response.ReferenceContext
+	if rc == nil {
+		t.Fatal("expected ReferenceContext to be populated")
+	}
+	if len(rc.Paths) != 1 || rc.Paths[0] != refPath {
+		t.Errorf("unexpected Paths: %v", rc.Paths)
+	}
+	if len(rc.Files) != 1 || !strings.HasSuffix(rc.Files[0], "guide.md") {
+		t.Errorf("unexpected Files: %v", rc.Files)
+	}
+	if rc.InputBytes != len(refContent) {
+		t.Errorf("InputBytes = %d, want %d", rc.InputBytes, len(refContent))
+	}
+	if rc.IncludedBytes <= 0 {
+		t.Errorf("IncludedBytes should be > 0, got %d", rc.IncludedBytes)
+	}
+	if !rc.Complete {
+		t.Error("Complete should be true")
+	}
+	if rc.ContextWindowTokens != 8192 {
+		t.Errorf("ContextWindowTokens = %d, want 8192", rc.ContextWindowTokens)
+	}
+	if rc.MaxOutputTokens != 1024 {
+		t.Errorf("MaxOutputTokens = %d, want 1024", rc.MaxOutputTokens)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/sdougbrown/writetighter/internal/document"
 )
 
 // Excerpt represents a bounded portion of a document sent to the LLM.
@@ -112,6 +114,20 @@ func (e *Excerpt) OrigToExcerpt(origPos int) int {
 		}
 	}
 	return -1
+}
+
+// NewChunkExcerpt creates an Excerpt for a contiguous byte range of a document.
+// It is used externally (e.g., by app package) for budget validation during
+// chunk planning.
+func NewChunkExcerpt(doc *document.Document, start, end int) *Excerpt {
+	if doc.Format == document.FormatHTML {
+		return newVirtualExcerpt(doc.AnalysisContent()[start:end], start)
+	}
+	offsets := make([]int, end-start)
+	for i := range offsets {
+		offsets[i] = start + i
+	}
+	return newExcerpt(doc.Content[start:end], offsets)
 }
 
 func newExcerpt(text string, offsets []int) *Excerpt {

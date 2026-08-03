@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"sort"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/sdougbrown/writetighter/internal/guidance"
 	"github.com/sdougbrown/writetighter/internal/llm"
 	"github.com/sdougbrown/writetighter/internal/profile"
+	"github.com/sdougbrown/writetighter/internal/reference"
 	"github.com/sdougbrown/writetighter/internal/report"
 )
 
@@ -426,12 +428,14 @@ func (a *App) RunRevise(params ReviseParams) error {
 	}
 
 	llmCfg := llm.Config{
-		BaseURL:      llmBaseURL,
-		Model:        llmModel,
-		APIKey:       llmAPIKey,
-		APIKeyEnv:    llmAPIKeyEnv,
-		Timeout:      llmTimeout,
-		ResponseMode: llmResponseMode,
+		BaseURL:             llmBaseURL,
+		Model:               llmModel,
+		APIKey:              llmAPIKey,
+		APIKeyEnv:           llmAPIKeyEnv,
+		Timeout:             llmTimeout,
+		ResponseMode:        llmResponseMode,
+		MaxOutputTokens:     uc.MaxOutputTokens,
+		ContextWindowTokens: uc.ContextWindowTokens,
 	}
 
 	// Validate LLM config before reading input.
@@ -469,6 +473,24 @@ func (a *App) RunRevise(params ReviseParams) error {
 		}
 	}
 
+	// Collect reference material if paths provided.
+	var refPack *reference.Pack
+	if len(params.ReferencePaths) > 0 {
+		sourcePaths := make([]string, len(docs))
+		for i, doc := range docs {
+			sourcePaths[i] = doc.Source
+		}
+		refPack, err = reference.Collect(params.ReferencePaths, sourcePaths)
+		if err != nil {
+			return fmt.Errorf("collecting references: %w", err)
+		}
+	}
+
+	// Require context_window_tokens and max_output_tokens when references are provided.
+	if refPack != nil && (uc.ContextWindowTokens == 0 || uc.MaxOutputTokens == 0) {
+		return fmt.Errorf("%w: reference revision requires llm.context_window_tokens and llm.max_output_tokens to be configured. Use `writetighter config --context TOKENS --output-tokens TOKENS` to set capacity for model %q", ErrLLMConfigRequired, llmModel)
+	}
+
 	type revisionPlan struct {
 		doc    *document.Document
 		chunks []document.ChunkRange
@@ -476,7 +498,10 @@ func (a *App) RunRevise(params ReviseParams) error {
 	plans := make([]revisionPlan, 0, len(docs))
 	totalRequests := 0
 	for _, doc := range docs {
-		chunks := document.ChunkRanges(doc, defaultRevisionChunkBytes)
+		chunks, _, err := planBudgetedChunks(doc, refPack, llmCfg, maxRequests, res, findings, terms)
+		if err != nil {
+			return fmt.Errorf("planning chunks for %q: %w", doc.Source, err)
+		}
 		totalRequests += len(chunks)
 		plans = append(plans, revisionPlan{doc: doc, chunks: chunks})
 	}
@@ -509,13 +534,13 @@ func (a *App) RunRevise(params ReviseParams) error {
 			requestsMade++
 			remainingPrimaryRequests--
 			coverage.ModelRequests++
-			revResp, callErr := llm.ReviseChunk(context.Background(), llmCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte)
+			revResp, callErr := llm.ReviseChunk(context.Background(), llmCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte, refPack)
 			if callErr != nil && errors.Is(callErr, llm.ErrInvalidModelResponse) && (llmResponseMode == "json_object" || llmResponseMode == "json_schema") && requestsMade+remainingPrimaryRequests < maxRequests {
 				fallbackCfg := llmCfg
 				fallbackCfg.ResponseMode = "prompt_json"
 				requestsMade++
 				coverage.ModelRequests++
-				fallbackResp, fallbackErr := llm.ReviseChunk(context.Background(), fallbackCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte)
+				fallbackResp, fallbackErr := llm.ReviseChunk(context.Background(), fallbackCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte, refPack)
 				if fallbackErr == nil {
 					revResp, callErr = fallbackResp, nil
 				} else {
@@ -555,6 +580,21 @@ func (a *App) RunRevise(params ReviseParams) error {
 			status = "failed"
 		}
 	}
+	var referenceContext *report.ReferenceContext
+	if refPack != nil {
+		referenceContext = &report.ReferenceContext{
+			Paths:               params.ReferencePaths,
+			Files:               make([]string, len(refPack.Entries)),
+			InputBytes:          refPack.InputBytes,
+			IncludedBytes:       refPack.IncludedBytes,
+			Complete:            refPack.Complete,
+			ContextWindowTokens: uc.ContextWindowTokens,
+			MaxOutputTokens:     uc.MaxOutputTokens,
+		}
+		for i, e := range refPack.Entries {
+			referenceContext.Files[i] = e.SourcePath
+		}
+	}
 	reviseResponse := &report.ReviseResponse{
 		SchemaVersion:     1,
 		ToolVersion:       Version,
@@ -568,6 +608,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 		DiscardedRewrites: discardedRewrites,
 		Errors:            revisionErrors,
 		Revisions:         allRevisions,
+		ReferenceContext:  referenceContext,
 	}
 
 	var formatted string
@@ -584,6 +625,138 @@ func (a *App) RunRevise(params ReviseParams) error {
 		return fmt.Errorf("%w: %d document revision request(s) failed", ErrReviseFailed, len(revisionErrors))
 	}
 	return nil
+}
+
+// planBudgetedChunks plans chunks for a single document, taking into account
+// the reference pack overhead and token budget when configured.
+// Returns the chunk ranges and error.
+// When cfg.ContextWindowTokens is 0 or refPack is nil, falls back to legacy
+// byte-budget chunking.
+func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm.Config, maxRequests int, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry) ([]document.ChunkRange, *reference.Pack, error) {
+	// Legacy path: no context window or no references.
+	if cfg.ContextWindowTokens == 0 || refPack == nil {
+		chunks := document.ChunkRanges(doc, defaultRevisionChunkBytes)
+		return chunks, refPack, nil
+	}
+
+	// 2a. Compute base overhead using BuildBudgetedPrompt with a minimal excerpt
+	// (1 byte) to compute the serialized overhead of system prompt, reference
+	// pack, and response format.
+	minChunkBytes := llm.MinEditableSourceTokens * llm.EstimatedBytesPerToken
+	oneByteExcerpt := llm.NewChunkExcerpt(doc, 0, 1)
+	sysPrompt, userContent, _, err := llm.BuildBudgetedPrompt(doc, res, findings, terms, oneByteExcerpt, refPack, cfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("reference overhead exceeds context window: %w", err)
+	}
+
+	baseRequest := llm.Request{
+		Model: cfg.Model,
+		Messages: []llm.Message{
+			{Role: "system", Content: sysPrompt},
+			{Role: "user", Content: userContent},
+		},
+	}
+	serializedBody, marshalErr := json.Marshal(baseRequest)
+	if marshalErr != nil {
+		return nil, nil, fmt.Errorf("budget calculation: %w", marshalErr)
+	}
+	basePromptTokens := int(math.Ceil(float64(len(serializedBody)) / float64(llm.EstimatedBytesPerToken)))
+
+	maxOutputTokens := cfg.MaxOutputTokens
+	if maxOutputTokens <= 0 {
+		maxOutputTokens = config.DefaultMaxOutputTokens
+	}
+
+	availableSourceBudget := cfg.ContextWindowTokens - basePromptTokens - maxOutputTokens - llm.BudgetSafetyTokens
+	if availableSourceBudget < llm.MinEditableSourceTokens {
+		neededTotal := basePromptTokens + llm.MinEditableSourceTokens + maxOutputTokens + llm.BudgetSafetyTokens
+		return nil, nil, fmt.Errorf(
+			"context window too small after accounting for reference overhead: "+
+				"context_window_tokens=%d, estimated_overhead=%d, max_output_tokens=%d, "+
+				"safety=%d, available_for_source=%d, minimum_required_source=%d. "+
+				"Consider increasing context_window_tokens to at least %d, "+
+				"reducing max_output_tokens, or using a model with a larger context window.",
+			cfg.ContextWindowTokens, basePromptTokens, maxOutputTokens, llm.BudgetSafetyTokens,
+			availableSourceBudget, llm.MinEditableSourceTokens, neededTotal)
+	}
+
+	// 2b. Convert available budget to bytes.
+	availableSourceBytes := availableSourceBudget * llm.EstimatedBytesPerToken
+
+	// 2c. Use the smaller of availableSourceBytes and defaultRevisionChunkBytes.
+	chunkSize := availableSourceBytes
+	if chunkSize > defaultRevisionChunkBytes {
+		chunkSize = defaultRevisionChunkBytes
+	}
+	if chunkSize < minChunkBytes {
+		chunkSize = minChunkBytes
+	}
+
+	content := doc.AnalysisContent()
+	var chunks []document.ChunkRange
+	currentPos := 0
+
+	// Iteratively build chunks: each chunk starts where the previous ended.
+	for currentPos < len(content) {
+		chunkStart := currentPos
+		remaining := len(content) - chunkStart
+
+		// If the remaining content fits within the target chunk size, use it as-is
+		// even if it is smaller than minChunkBytes.
+		if remaining <= chunkSize {
+			chunks = append(chunks, document.ChunkRange{StartByte: chunkStart, EndByte: len(content)})
+			break
+		}
+
+		chunkEnd := chunkStart + chunkSize
+		if chunkEnd > len(content) {
+			chunkEnd = len(content)
+		}
+
+		// Validate the chunk and shrink if needed.
+		for chunkEnd > chunkStart+minChunkBytes {
+			chunkExcerpt := llm.NewChunkExcerpt(doc, chunkStart, chunkEnd)
+			_, _, _, budgetErr := llm.BuildBudgetedPrompt(doc, res, findings, terms, chunkExcerpt, refPack, cfg)
+			if budgetErr == nil {
+				break
+			}
+
+			// Shrink: move end back to the previous double-newline or newline boundary.
+			window := content[chunkStart:chunkEnd]
+			newEnd := chunkEnd
+			if idx := strings.LastIndex(window, "\n\n"); idx >= 0 {
+				newEnd = chunkStart + idx + 2
+			} else if idx := strings.LastIndexByte(window, '\n'); idx >= 0 {
+				newEnd = chunkStart + idx + 1
+			} else {
+				// No block boundary found; halve the size.
+				newEnd = chunkStart + (chunkEnd-chunkStart)/2
+			}
+
+			if newEnd <= chunkStart+minChunkBytes || newEnd >= chunkEnd {
+				return nil, nil, fmt.Errorf(
+					"cannot fit any chunk of at least %d bytes for document %q "+
+						"within the available context window budget. "+
+						"Consider increasing context_window_tokens or reducing reference content.",
+					minChunkBytes, doc.Source)
+			}
+			chunkEnd = newEnd
+		}
+
+		chunkBytes := chunkEnd - chunkStart
+		if chunkBytes < minChunkBytes {
+			return nil, nil, fmt.Errorf(
+				"cannot fit any chunk of at least %d bytes for document %q "+
+					"within the available context window budget. "+
+					"Consider increasing context_window_tokens or reducing reference content.",
+				minChunkBytes, doc.Source)
+		}
+
+		chunks = append(chunks, document.ChunkRange{StartByte: chunkStart, EndByte: chunkEnd})
+		currentPos = chunkEnd
+	}
+
+	return chunks, refPack, nil
 }
 
 func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {
