@@ -19,27 +19,33 @@ import (
 )
 
 const (
-	DefaultTimeout   = 45 * time.Second
-	MaxInputChars    = 32000
-	MaxSuggestions   = 20
-	MaxOutputChars   = 10000
-	MaxEnvelopeChars = 64 * 1024
-	chatPath         = "/chat/completions"
+	DefaultTimeout          = 45 * time.Second
+	MaxInputChars           = 32000
+	MaxSuggestions          = 20
+	MaxOutputChars          = 10000
+	MaxEnvelopeChars        = 64 * 1024
+	EstimatedBytesPerToken  = 4
+	BudgetSafetyTokens      = 512
+	MinEditableSourceTokens = 512
+	chatPath                = "/chat/completions"
 )
 
 type Config struct {
-	BaseURL      string
-	Model        string
-	APIKey       string
-	APIKeyEnv    string
-	Timeout      time.Duration
-	ResponseMode string
+	BaseURL             string
+	Model               string
+	APIKey              string
+	APIKeyEnv           string
+	Timeout             time.Duration
+	ResponseMode        string
+	MaxOutputTokens     int // max_tokens sent to the API; 0 = unset
+	ContextWindowTokens int // model context window; 0 = fall back to byte budget
 }
 
 type Request struct {
 	Model          string          `json:"model"`
 	Messages       []Message       `json:"messages"`
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
+	MaxTokens      *int            `json:"max_tokens,omitempty"`
 }
 
 type Message struct {
@@ -67,11 +73,12 @@ type Choice struct {
 }
 
 type Client struct {
-	httpClient *http.Client
-	endpoint   string
-	apiKey     string
-	apiKeyEnv  string
-	model      string
+	httpClient      *http.Client
+	endpoint        string
+	apiKey          string
+	apiKeyEnv       string
+	model           string
+	maxOutputTokens int
 }
 
 func NewClient(cfg Config) (*Client, error) {
@@ -88,10 +95,12 @@ func NewClient(cfg Config) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{httpClient: &http.Client{Timeout: cfg.Timeout}, endpoint: endpoint, apiKey: cfg.APIKey, apiKeyEnv: cfg.APIKeyEnv, model: cfg.Model}, nil
+	return &Client{httpClient: &http.Client{Timeout: cfg.Timeout}, endpoint: endpoint, apiKey: cfg.APIKey, apiKeyEnv: cfg.APIKeyEnv, model: cfg.Model, maxOutputTokens: cfg.MaxOutputTokens}, nil
 }
 
 func (c *Client) Endpoint() string { return c.endpoint }
+
+func (c *Client) MaxOutputTokens() int { return c.maxOutputTokens }
 
 func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	if len(req.Messages) == 0 {
@@ -103,6 +112,10 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	}
 	if totalInput > MaxInputChars {
 		return nil, fmt.Errorf("llm input too large")
+	}
+	if c.MaxOutputTokens() > 0 {
+		tok := c.MaxOutputTokens()
+		req.MaxTokens = &tok
 	}
 	req.Model = c.model
 	body, err := json.Marshal(req)
