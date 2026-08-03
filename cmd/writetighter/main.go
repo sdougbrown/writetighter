@@ -6,8 +6,10 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sdougbrown/writetighter/internal/app"
 	"github.com/sdougbrown/writetighter/internal/config"
@@ -255,33 +257,107 @@ func runConfig(args []string) int {
 		return 2
 	}
 
-	// Targeted update path (Stage 1 placeholder).
+	// Targeted update path.
 	if hasTargetedFlags {
-		// Validate flag values.
+		// Validate basic token relationship.
 		if *contextTokens > 0 && *outputTokens > 0 && *outputTokens >= *contextTokens {
 			fmt.Fprintf(os.Stderr, "--output-tokens (%d) must be less than --context (%d)\n", *outputTokens, *contextTokens)
 			return 2
 		}
 
-		// Load existing config or create an empty one.
+		// Load existing config. Targeted flags require a valid existing config.
 		existing, err := config.LoadUserConfig()
-		if err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				usageErr("no existing config; run 'writetighter config --wizard' first")
+				return 2
+			}
 			usageErr("failed to load config: " + err.Error())
 			return 2
 		}
-		if errors.Is(err, os.ErrNotExist) {
-			existing = &config.UserConfig{}
+		if existing.LLM.BaseURL == "" {
+			usageErr("config is missing base_url; run 'writetighter config --wizard' first")
+			return 2
 		}
 
-		// Apply flags.
+		// Save previous model for context-clearing logic.
+		prevModel := existing.LLM.Model
+
+		// If --model is specified, preflight it against the endpoint.
+		if *model != "" {
+			apiKey := resolveAPIKey(existing)
+			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+			defer cancel()
+			client := &http.Client{Timeout: 45 * time.Second}
+
+			models, discErr := setup.ListModels(ctx, client, existing.LLM.BaseURL, apiKey)
+			if discErr != nil || len(models) == 0 {
+				msg := "model discovery failed"
+				if discErr != nil {
+					msg += ": " + discErr.Error()
+				}
+				usageErr(msg + "; cannot verify model ID")
+				return 2
+			}
+
+			var found *setup.ModelInfo
+			for i := range models {
+				if models[i].ID == *model {
+					found = &models[i]
+					break
+				}
+			}
+			if found == nil {
+				usageErr(fmt.Sprintf("model %q was not reported by the endpoint", *model))
+				return 2
+			}
+
+			// If the model is actually changing, clear context window unless --context is also set.
+			if *model != prevModel && *contextTokens == 0 {
+				existing.LLM.ContextWindowTokens = 0
+				existing.LLM.ContextWindowModel = ""
+				fmt.Fprintf(os.Stderr, "Warning: model changed from %q to %q; context_window_tokens cleared.\n", prevModel, *model)
+				fmt.Fprintf(os.Stderr, "  Run 'writetighter config --context N' to set the context window for the new model.\n")
+			}
+
+			existing.LLM.Model = *model
+			existing.LLM.ContextWindowModel = *model
+
+			// Refresh response mode.
+			newMode, probeErr := setup.ProbeResponseMode(ctx, client, existing.LLM.BaseURL, *model, apiKey)
+			if probeErr != nil {
+				fmt.Fprintf(os.Stderr, "Warning: response mode preflight failed for %q: %v\n", *model, probeErr)
+			} else {
+				existing.LLM.ResponseMode = newMode
+				fmt.Fprintf(os.Stderr, "Response mode refreshed to %q for model %q.\n", newMode, *model)
+			}
+
+			// If metadata has a suggestion and no --context was given, show it.
+			if found.SuggestedContextWindow() > 0 && *contextTokens == 0 && existing.LLM.ContextWindowTokens == 0 {
+				fmt.Fprintf(os.Stderr, "Model %q suggests a context window of %d tokens.\n", *model, found.SuggestedContextWindow())
+				fmt.Fprintf(os.Stderr, "  Run 'writetighter config --context %d' to set it.\n", found.SuggestedContextWindow())
+			}
+		}
+
+		// Apply --context (associate with current model).
 		if *contextTokens > 0 {
 			existing.LLM.ContextWindowTokens = *contextTokens
+			if existing.LLM.Model != "" {
+				existing.LLM.ContextWindowModel = existing.LLM.Model
+			}
 		}
+
+		// Apply --output-tokens.
 		if *outputTokens > 0 {
 			existing.LLM.MaxOutputTokens = *outputTokens
 		}
-		if *model != "" {
-			existing.LLM.Model = *model
+
+		// Final validation: if both are set, ensure output < context.
+		if existing.LLM.ContextWindowTokens > 0 && existing.LLM.MaxOutputTokens > 0 &&
+			existing.LLM.MaxOutputTokens >= existing.LLM.ContextWindowTokens {
+			usageErr(fmt.Sprintf("max_output_tokens (%d) must be less than context_window_tokens (%d); not saved",
+				existing.LLM.MaxOutputTokens, existing.LLM.ContextWindowTokens))
+			return 2
 		}
 
 		// Save back.
@@ -340,6 +416,16 @@ func runConfig(args []string) int {
 		return 2
 	}
 	return 0
+}
+
+func resolveAPIKey(cfg *config.UserConfig) string {
+	if cfg.LLM.APIKey != "" {
+		return cfg.LLM.APIKey
+	}
+	if cfg.LLM.APIKeyEnv != "" {
+		return os.Getenv(cfg.LLM.APIKeyEnv)
+	}
+	return ""
 }
 
 func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
