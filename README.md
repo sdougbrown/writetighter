@@ -202,7 +202,9 @@ path matches a source file being revised are automatically excluded.
 
 Reference content is sent to the configured endpoint. The response reports
 reference metadata (files, bytes, completeness) in the `reference_context` field
-without exposing the reference content itself.
+without exposing the reference content itself. Files skipped during collection
+(for example, symlinks encountered inside a reference directory) are listed
+under `reference_context.warnings` so nothing is dropped silently.
 
 **Requirements:**
 - Reference revision requires `context_window_tokens` and `max_output_tokens`

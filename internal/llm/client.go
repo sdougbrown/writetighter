@@ -19,15 +19,13 @@ import (
 )
 
 const (
-	DefaultTimeout          = 45 * time.Second
-	MaxInputChars           = 32000
-	MaxSuggestions          = 20
-	MaxOutputChars          = 10000
-	MaxEnvelopeChars        = 64 * 1024
-	EstimatedBytesPerToken  = 4
-	BudgetSafetyTokens      = 512
-	MinEditableSourceTokens = 512
-	chatPath                = "/chat/completions"
+	DefaultTimeout         = 45 * time.Second
+	MaxInputChars          = 32000
+	MaxSuggestions         = 20
+	MaxOutputChars         = 10000
+	MaxEnvelopeChars       = 64 * 1024
+	EstimatedBytesPerToken = 4
+	chatPath               = "/chat/completions"
 )
 
 type Config struct {

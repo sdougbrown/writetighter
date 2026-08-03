@@ -152,6 +152,7 @@ func TestReviseResponseWithReferenceContext(t *testing.T) {
 		InputBytes:          50000,
 		IncludedBytes:       12000,
 		Complete:            false,
+		Warnings:            []string{"skipping symlink: refs/skip.txt"},
 		ContextWindowTokens: 8192,
 		MaxOutputTokens:     4096,
 	}
@@ -177,6 +178,9 @@ func TestReviseResponseWithReferenceContext(t *testing.T) {
 		if !strings.Contains(got, `"context_window_tokens": 8192`) {
 			t.Fatalf("expected context_window_tokens in JSON: %s", got)
 		}
+		if !strings.Contains(got, `"warnings"`) || !strings.Contains(got, "skipping symlink: refs/skip.txt") {
+			t.Fatalf("expected warnings in JSON: %s", got)
+		}
 		if !strings.Contains(got, `"max_output_tokens": 4096`) {
 			t.Fatalf("expected max_output_tokens in JSON: %s", got)
 		}
@@ -192,6 +196,9 @@ func TestReviseResponseWithReferenceContext(t *testing.T) {
 		}
 		if !strings.Contains(got, "1 files, 12000/50000 bytes, complete=false") {
 			t.Fatalf("expected reference context details in human output: %s", got)
+		}
+		if !strings.Contains(got, "reference warning: skipping symlink: refs/skip.txt") {
+			t.Fatalf("expected symlink warning in human output: %s", got)
 		}
 	})
 

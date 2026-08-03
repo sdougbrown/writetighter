@@ -30,6 +30,15 @@ type Pack struct {
 	InputBytes    int  // Total input bytes across all entries
 	IncludedBytes int  // Total included bytes after processing (rendered size)
 	Complete      bool // True if all paths were fully included
+	// Warnings are non-fatal collection notices (e.g., skipped symlinks). The
+	// json tag guards against accidental empty-list serialization if Pack is
+	// ever marshaled directly.
+	Warnings []string `json:"warnings,omitempty"`
+
+	// rendered caches the output of Render; Entries are immutable after
+	// construction, so the cached value is always valid.
+	rendered      string
+	renderedReady bool
 }
 
 // ErrNoFit is returned when reference pack cannot fit in the available budget.
@@ -59,6 +68,7 @@ func Collect(paths []string, sourcePaths []string) (*Pack, error) {
 
 	var entries []Entry
 	seenCanon := make(map[string]bool) // canonical path dedup
+	var warnings []string
 	totalInput := 0
 
 	for _, path := range paths {
@@ -67,13 +77,14 @@ func Collect(paths []string, sourcePaths []string) (*Pack, error) {
 			return nil, fmt.Errorf("accessing %q: %w", path, err)
 		}
 
-		// Reject symlinks at top level.
+		// Reject symlinks at top level: explicitly-passed symlinks are a hard
+		// error so the user notices immediately.
 		if info.Mode()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("cannot follow symlink: %s", path)
 		}
 
 		if info.IsDir() {
-			dirEntries, err := collectDirectory(path, sourceSet, seenCanon, &totalInput)
+			dirEntries, err := collectDirectory(path, sourceSet, seenCanon, &totalInput, &warnings)
 			if err != nil {
 				return nil, err
 			}
@@ -99,17 +110,19 @@ func Collect(paths []string, sourcePaths []string) (*Pack, error) {
 		Entries:    entries,
 		InputBytes: totalInput,
 		Complete:   true,
+		Warnings:   warnings,
 	}
 
-	// Compute total rendered size.
-	rendered := pack.Render()
-	pack.IncludedBytes = len(rendered)
+	// Compute total rendered size (cached on the pack by Render).
+	pack.IncludedBytes = len(pack.Render())
 
 	return pack, nil
 }
 
 // collectDirectory walks a directory recursively and collects matching reference files.
-func collectDirectory(root string, sourceSet map[string]bool, seenCanon map[string]bool, totalInput *int) ([]Entry, error) {
+// Symlinks inside the tree are skipped (never followed) and reported via
+// warnings so that silently dropping user content is surfaced to the caller.
+func collectDirectory(root string, sourceSet map[string]bool, seenCanon map[string]bool, totalInput *int, warnings *[]string) ([]Entry, error) {
 	var files []string
 	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -125,8 +138,18 @@ func collectDirectory(root string, sourceSet map[string]bool, seenCanon map[stri
 			return nil
 		}
 
-		// Reject symlinks at any depth.
+		// Skip symlinks at any depth: a directory may legitimately contain
+		// unrelated symlinks, so we exclude it (matching the documented
+		// "symlinks are excluded" semantics) but record a warning so the
+		// exclusion is not silent. The warning names the path relative to the
+		// reference root (like DisplayPath) to avoid exposing absolute
+		// filesystem layout.
 		if d.Type()&os.ModeSymlink != 0 {
+			rel, relErr := filepath.Rel(root, path)
+			if relErr != nil {
+				rel = path
+			}
+			*warnings = append(*warnings, fmt.Sprintf("skipping symlink: %s", rel))
 			return nil
 		}
 
@@ -254,7 +277,13 @@ func collectFile(path, displayPath string, sourceSet map[string]bool, seenCanon 
 //	<reference file="display/path.md">
 //	content here
 //	</reference>
+//
+// The result is cached on the Pack so repeated calls (budget estimation, chunk
+// planning, message building) do not rebuild the string from scratch.
 func (p *Pack) Render() string {
+	if p.renderedReady {
+		return p.rendered
+	}
 	var b strings.Builder
 	for i, entry := range p.Entries {
 		if i > 0 {
@@ -267,7 +296,9 @@ func (p *Pack) Render() string {
 		}
 		b.WriteString("</reference>\n")
 	}
-	return b.String()
+	p.rendered = b.String()
+	p.renderedReady = true
+	return p.rendered
 }
 
 // canonicalPath resolves a path to its canonical form (absolute, symlink-evaluated).
@@ -352,8 +383,25 @@ func isAllowedExtension(name string) bool {
 }
 
 // htmlToVisibleText strips HTML tags from content and decodes common entities.
-// This is a simplified version compared to the full provenance-preserving
-// projection in internal/document; it is suitable for read-only reference context.
+//
+// This is a deliberately simplified, read-only projection — it is not a
+// spec-compliant HTML parser and is suitable only for reference context, never
+// for source ranges or provenance. Intentional limitations:
+//
+//   - Tag boundaries are found by scanning for the next '>', so a raw '>' inside
+//     a CDATA section or attribute value mis-splits the markup (e.g.
+//     <![CDATA[a>b]]> ends at the first '>' and the remainder is emitted as
+//     text).
+//   - Only entities terminated by ';' within a short scan window are decoded;
+//     semicolonless entities are emitted verbatim.
+//   - Comments are skipped only while their '!--' prefix is present and are
+//     assumed to terminate at the first '--'.
+//   - Script/style/head/template content is suppressed via a tag-stack
+//     approximation; malformed or mis-nested markup degrades to best-effort
+//     visible text.
+//
+// For fidelity-sensitive cases, use the provenance-preserving HTML projection in
+// internal/document instead.
 func htmlToVisibleText(content string) string {
 	var b strings.Builder
 

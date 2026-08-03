@@ -595,6 +595,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 			InputBytes:          refPack.InputBytes,
 			IncludedBytes:       refPack.IncludedBytes,
 			Complete:            refPack.Complete,
+			Warnings:            refPack.Warnings,
 			ContextWindowTokens: uc.ContextWindowTokens,
 			MaxOutputTokens:     uc.MaxOutputTokens,
 		}
@@ -657,7 +658,7 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 	// excerpt. This validates that the system/reference/schema overhead alone
 	// leaves at least minEditableSourceTokens; BuildBudgetedPrompt returns the
 	// actionable configuration error otherwise.
-	minChunkBytes := llm.MinEditableSourceTokens * llm.EstimatedBytesPerToken
+	minChunkBytes := config.MinEditableSourceTokens * llm.EstimatedBytesPerToken
 	oneByteExcerpt := llm.NewChunkExcerpt(doc, 0, 1)
 	sysPrompt, userContent, _, err := llm.BuildBudgetedPrompt(doc, res, findings, terms, oneByteExcerpt, refPack, cfg)
 	if err != nil {
@@ -678,8 +679,8 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 		maxOutputTokens = config.DefaultMaxOutputTokens
 	}
 
-	availableSourceBudget := cfg.ContextWindowTokens - basePromptTokens - maxOutputTokens - llm.BudgetSafetyTokens
-	if availableSourceBudget < llm.MinEditableSourceTokens {
+	availableSourceBudget := cfg.ContextWindowTokens - basePromptTokens - maxOutputTokens - config.BudgetSafetyTokens
+	if availableSourceBudget < config.MinEditableSourceTokens {
 		return nil, nil, fmt.Errorf(
 			"revision context requires %d estimated input tokens for system/reference material and output reservation, "+
 				"leaving %d estimated tokens for editable source; "+

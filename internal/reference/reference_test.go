@@ -145,8 +145,8 @@ func TestCollectDeduplicatesPaths(t *testing.T) {
 	}
 }
 
-// TestCollectRejectsSymlinks verifies that symlinks are rejected at top level
-// and silently skipped in directory traversal.
+// TestCollectRejectsSymlinks verifies that explicitly-passed symlinks are
+// rejected at top level.
 func TestCollectRejectsSymlinks(t *testing.T) {
 	dir := t.TempDir()
 
@@ -166,9 +166,9 @@ func TestCollectRejectsSymlinks(t *testing.T) {
 	}
 }
 
-// TestCollectRejectsSymlinksInDir verifies symlinks inside directories are
-// silently skipped.
-func TestCollectRejectsSymlinksInDir(t *testing.T) {
+// TestCollectWarnsOnSymlinksInDir verifies symlinks inside directories are
+// skipped but reported via pack.Warnings so the exclusion is not silent.
+func TestCollectWarnsOnSymlinksInDir(t *testing.T) {
 	dir := t.TempDir()
 
 	realFile := filepath.Join(dir, "real.txt")
@@ -188,6 +188,13 @@ func TestCollectRejectsSymlinksInDir(t *testing.T) {
 	// Only real.txt should be included.
 	if len(pack.Entries) != 1 {
 		t.Fatalf("expected 1 entry (symlink skipped), got %d", len(pack.Entries))
+	}
+	// The skipped symlink must be surfaced as a warning.
+	if len(pack.Warnings) != 1 {
+		t.Fatalf("expected 1 warning for skipped symlink, got %d: %v", len(pack.Warnings), pack.Warnings)
+	}
+	if !strings.Contains(pack.Warnings[0], "link.txt") {
+		t.Fatalf("warning %q should name the skipped symlink", pack.Warnings[0])
 	}
 }
 
@@ -477,6 +484,55 @@ func TestPackRender(t *testing.T) {
 	// Check display path appears in file= attribute.
 	if !strings.Contains(rendered, "guide.md") {
 		t.Error("rendered output missing display path")
+	}
+}
+
+// TestPackRenderCachesResult verifies repeated Render calls reuse the cached
+// rendering (avoiding redundant strings.Builder allocations in budget planning).
+func TestPackRenderCachesResult(t *testing.T) {
+	// Build the pack directly (bypassing Collect, which pre-warms the cache while
+	// computing IncludedBytes) so the uncached first call is actually exercised.
+	pack := &Pack{Entries: []Entry{
+		{DisplayPath: "guide.md", Content: "Guide content"},
+		{DisplayPath: "refs/glossary.json", Content: "glossary body"},
+	}}
+	if pack.renderedReady {
+		t.Fatal("freshly constructed pack should not have a cached render")
+	}
+
+	first := pack.Render()
+	if first == "" {
+		t.Fatal("Render on a fresh pack should build output")
+	}
+	if !pack.renderedReady {
+		t.Fatal("Render should mark the cache as ready after the first call")
+	}
+	if !strings.Contains(first, "<reference file=\"guide.md\">") ||
+		!strings.Contains(first, "<reference file=\"refs/glossary.json\">") ||
+		!strings.Contains(first, "</reference>") {
+		t.Fatal("rendered output missing reference wrappers")
+	}
+
+	second := pack.Render()
+	if first != second {
+		t.Fatal("Render returned different output across calls")
+	}
+}
+
+// TestCollectSetsIncludedBytes verifies Collect computes IncludedBytes from the
+// rendered size and that the value is stable across repeated Render calls.
+func TestCollectSetsIncludedBytes(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guide.md")
+	if err := os.WriteFile(path, []byte("Guide content"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	pack, err := Collect([]string{path}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pack.IncludedBytes != len(pack.Render()) {
+		t.Fatalf("IncludedBytes=%d does not match rendered length %d", pack.IncludedBytes, len(pack.Render()))
 	}
 }
 

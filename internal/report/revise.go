@@ -13,6 +13,7 @@ type ReferenceContext struct {
 	InputBytes          int      `json:"input_bytes"`
 	IncludedBytes       int      `json:"included_bytes"`
 	Complete            bool     `json:"complete"`
+	Warnings            []string `json:"warnings,omitempty"`
 	ContextWindowTokens int      `json:"context_window_tokens"`
 	MaxOutputTokens     int      `json:"max_output_tokens"`
 }
@@ -112,6 +113,9 @@ func RenderReviseHuman(r *ReviseResponse) (string, error) {
 		fmt.Fprintf(&b, "reference context: %d files, %d/%d bytes, complete=%t\n",
 			len(r.ReferenceContext.Files), r.ReferenceContext.IncludedBytes,
 			r.ReferenceContext.InputBytes, r.ReferenceContext.Complete)
+		for _, w := range r.ReferenceContext.Warnings {
+			fmt.Fprintf(&b, "reference warning: %s\n", w)
+		}
 	}
 	if r.DiscardedRewrites > 0 {
 		fmt.Fprintf(&b, "discarded unsafe rewrites: %d\n", r.DiscardedRewrites)
