@@ -1,0 +1,22 @@
+driver: wt-coderev
+prompt: prompts/baseline.json
+working_dir:
+  - seed: ./seed/
+expected: ./seed/
+evaluator: gist
+score_schema: schemas/code-comments.yaml
+notes: >-
+  Compare production WriteTighter code-comment revision against a whole-file,
+  code-aware prompt on the same multilingual corpus and gemma4 model.
+wt-coderev:
+  writetighter_repo: ../../..
+  corpus_dir: _corpus
+  base_url: http://localhost:4000/v1
+  model: gemma4
+  timeout: 300
+judge:
+  backend: local
+  base_url: http://localhost:4000/v1
+  model: nemotron-ultra
+  timeout: 300
+  max_tokens: 8192

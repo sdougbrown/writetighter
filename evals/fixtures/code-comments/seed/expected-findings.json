@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "scope": "Exhaustive reviewed comment-revision opportunities for this corpus snapshot. Use this fixed set as the recall denominator.",
+  "findings": [
+    {
+      "id": "avenor-cache-collision-precedence",
+      "file": "py/longe/src/longe/runner.py",
+      "source_text": "# Snapshot after. Driver-returned artefacts are kept and win on\n# collision — drivers that run outside work_dir (e.g. prism in a\n# cached worktree) have no other channel for their outputs.",
+      "issue": "The compressed phrase 'win on collision' obscures that driver-returned artefacts overwrite work-directory artefacts with the same relative path. State that precedence and its reason directly."
+    },
+    {
+      "id": "vllm-stale-linter-history",
+      "file": "py/vllm-python/vllm/entrypoints/utils.py",
+      "source_text": "# If load tracking is enabled *and* the counter exists, decrement\n# it. Combines the previous nested checks into a single condition\n# to satisfy the linter rule.",
+      "issue": "The comment contains stale edit history and narrates a previous refactor. Keep only the current condition and effect."
+    },
+    {
+      "id": "umpire-prefix-equivalence-compression",
+      "file": "ts/umpire/packages/core/src/graph.ts",
+      "source_text": "// Stryker disable next-line ArrayDeclaration: equivalent mutant — any prefix entry is before cycleStart and is excluded by path.slice(cycleStart)",
+      "issue": "The mutation-suppression rationale compresses the path prefix, cycleStart, and slice relationship into one dense clause. Rewrite it as a direct equivalence explanation."
+    },
+    {
+      "id": "umpire-dfs-equivalence-density",
+      "file": "ts/umpire/packages/core/src/graph.ts",
+      "source_text": "// Stryker disable next-line ConditionalExpression,BlockStatement: equivalent mutant — re-walking an already-visited root only causes redundant DFS; active is always empty between outer iterations so no false cycle is produced",
+      "issue": "The comment packs two causal claims into one long sentence. Split the redundant-DFS effect from the reason it cannot produce a false cycle."
+    }
+  ]
+}

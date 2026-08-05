@@ -1,0 +1,56 @@
+# Real multilingual source files for the whole-file code-comment evaluation.
+# Paths resolve from the WriteTighter repository root (`repo_root: ../..`).
+# The snapshot and lockfile are generated locally; source copies are gitignored.
+
+repo_root: ../..
+output: evals/fixtures/code-comments/seed/_corpus
+lockfile: evals/fixtures/code-comments/corpus.lock.json
+
+repos:
+  - id: writetighter
+    path: .
+    language: go
+    files:
+      - internal/guidance/guidance.go
+
+  - id: avenor
+    path: ../avenor
+    language: go
+    files:
+      - internal/digest/accumulate.go
+
+  - id: umpire
+    path: ../umpire
+    language: ts
+    files:
+      - packages/core/src/graph.ts
+
+  - id: daywatch-cal-ts
+    path: ../daywatch-cal
+    language: ts
+    files:
+      - packages/core/src/scoring.ts
+
+  - id: daywatch-cal-rust
+    path: ../daywatch-cal
+    language: rust
+    files:
+      - crates/daywatch-cal/src/scoring.rs
+
+  - id: vllm-rust
+    path: ../vllm-dspark
+    language: rust
+    files:
+      - rust/src/text/src/lower.rs
+
+  - id: longe
+    path: ../longe
+    language: py
+    files:
+      - src/longe/runner.py
+
+  - id: vllm-python
+    path: ../vllm-dspark
+    language: py
+    files:
+      - vllm/entrypoints/utils.py
