@@ -1,5 +1,7 @@
 # Real multilingual source files for the whole-file code-comment evaluation.
 # Paths resolve from the WriteTighter repository root (`repo_root: ../..`).
+# URL and revision identify a public checkout that contains the locked source;
+# local paths remain configurable by editing a manifest copy passed via --manifest.
 # The snapshot and lockfile are generated locally; source copies are gitignored.
 
 repo_root: ../..
@@ -9,48 +11,64 @@ lockfile: evals/fixtures/code-comments/corpus.lock.json
 repos:
   - id: writetighter
     path: .
+    url: https://github.com/sdougbrown/writetighter.git
+    revision: 23485397ef12400dc07422e1f38dfaeeb435d437
     language: go
     files:
       - internal/guidance/guidance.go
 
   - id: avenor
     path: ../avenor
+    url: https://github.com/sdougbrown/avenor.git
+    revision: 37ccb100be5fbe33ce4fbdfe8047aeac72a63ac1
     language: go
     files:
       - internal/digest/accumulate.go
 
   - id: umpire
     path: ../umpire
+    url: https://github.com/umpire-tools/umpire.git
+    revision: aa7a76f2a5b1d8962357e8469506c6d8c2a9c129
     language: ts
     files:
       - packages/core/src/graph.ts
 
   - id: daywatch-cal-ts
     path: ../daywatch-cal
+    url: https://github.com/sdougbrown/daywatch-cal.git
+    revision: 497599f673df2f064b17dbd48db05a39c2d55882
     language: ts
     files:
       - packages/core/src/scoring.ts
 
   - id: daywatch-cal-rust
     path: ../daywatch-cal
+    url: https://github.com/sdougbrown/daywatch-cal.git
+    revision: 497599f673df2f064b17dbd48db05a39c2d55882
     language: rust
     files:
       - crates/daywatch-cal/src/scoring.rs
 
   - id: vllm-rust
     path: ../vllm-dspark
+    url: https://github.com/rafaelcaricio/vllm.git
+    revision: 3519c3b885623c41818142859f17fa82e3ed4f02
     language: rust
     files:
       - rust/src/text/src/lower.rs
 
   - id: longe
     path: ../longe
+    url: https://github.com/sdougbrown/longe.git
+    revision: 69774dcfb61017ed0577d242a663e3ebdd30bebd
     language: py
     files:
       - src/longe/runner.py
 
   - id: vllm-python
     path: ../vllm-dspark
+    url: https://github.com/rafaelcaricio/vllm.git
+    revision: 3519c3b885623c41818142859f17fa82e3ed4f02
     language: py
     files:
       - vllm/entrypoints/utils.py

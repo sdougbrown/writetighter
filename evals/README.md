@@ -15,26 +15,57 @@ safety, and overall quality.
 
 ## Setup
 
-From the WriteTighter repository:
+### Reproduce the source checkouts
+
+`evals/scripts/corpus_manifest.yaml` records a public clone URL and full commit
+for every selected repository. Print the canonical sources and the local paths
+expected by the default manifest:
+
+```sh
+python3 evals/scripts/snapshot_corpus.py --sources
+```
+
+The default paths place the external repositories beside the WriteTighter
+checkout. In a fresh workspace, clone and pin them with:
+
+```sh
+git clone https://github.com/sdougbrown/avenor.git ../avenor
+git -C ../avenor checkout 37ccb100be5fbe33ce4fbdfe8047aeac72a63ac1
+
+git clone https://github.com/umpire-tools/umpire.git ../umpire
+git -C ../umpire checkout aa7a76f2a5b1d8962357e8469506c6d8c2a9c129
+
+git clone https://github.com/sdougbrown/daywatch-cal.git ../daywatch-cal
+git -C ../daywatch-cal checkout 497599f673df2f064b17dbd48db05a39c2d55882
+
+git clone https://github.com/rafaelcaricio/vllm.git ../vllm-dspark
+git -C ../vllm-dspark checkout 3519c3b885623c41818142859f17fa82e3ed4f02
+
+git clone https://github.com/sdougbrown/longe.git ../longe
+git -C ../longe checkout 69774dcfb61017ed0577d242a663e3ebdd30bebd
+```
+
+To use another checkout layout, copy the manifest, change only its `path`
+values, and pass that file with `--manifest`. Keep each `url` and `revision`
+unchanged so the committed hashes remain reproducible.
+
+From the WriteTighter repository, materialize the gitignored corpus and verify
+its committed lockfile:
 
 ```sh
 python3 evals/scripts/snapshot_corpus.py --force
-```
-
-The script copies pinned files from WriteTighter, Avenor, Umpire, Daywatch,
-Longe, and vLLM sibling repositories into a gitignored fixture seed and writes
-`evals/fixtures/code-comments/corpus.lock.json`. Verify drift later with:
-
-```sh
 python3 evals/scripts/snapshot_corpus.py --check
 ```
 
-Install the consumer driver into Longe's environment:
+Install the consumer driver into Longe's environment without assuming a home
+folder layout:
 
 ```sh
-cd ~/Code/longe
+WT_REPO=$(git rev-parse --show-toplevel)
+LONGE_REPO=$(cd ../longe && pwd)
+cd "$LONGE_REPO"
 uv sync
-uv pip install -e ~/Code/writetighter/evals
+uv pip install -e "$WT_REPO/evals"
 uv run longe drivers list
 ```
 
@@ -43,14 +74,15 @@ uv run longe drivers list
 ## Run and compare
 
 ```sh
-cd ~/Code/longe
+cd "$LONGE_REPO"
+FIXTURE="$WT_REPO/evals/fixtures/code-comments"
 
-uv run longe run ~/Code/writetighter/evals/fixtures/code-comments \
-  --prompt ~/Code/writetighter/evals/fixtures/code-comments/prompts/baseline.json \
+uv run longe run "$FIXTURE" \
+  --prompt "$FIXTURE/prompts/baseline.json" \
   --no-cache
 
-uv run longe run ~/Code/writetighter/evals/fixtures/code-comments \
-  --prompt ~/Code/writetighter/evals/fixtures/code-comments/prompts/code-aware-conservative.json \
+uv run longe run "$FIXTURE" \
+  --prompt "$FIXTURE/prompts/code-aware-conservative.json" \
   --no-cache
 
 uv run longe line

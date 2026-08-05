@@ -1,9 +1,9 @@
-"""Snapshot the eval corpus from sibling repos (deterministic, sha256-locked).
+"""Snapshot the eval corpus from public repo checkouts (sha256-locked).
 
 This script materialises the *generated* corpus (copies of real source files
-from sibling repositories) into evals/fixtures/wt-corpus/ and writes a hash
-lockfile. The corpus is gitignored; the manifest and lockfile drift detection
-keep the eval reproducible without committing other people's source.
+from repositories identified by public URL and commit in the manifest) into the
+gitignored fixture seed and writes a hash lockfile. Local checkout paths remain
+manifest-configurable.
 
 Usage:
     python evals/scripts/snapshot_corpus.py                # copy + write lockfile
@@ -20,6 +20,8 @@ import argparse
 import sys
 from pathlib import Path
 
+import yaml
+
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO_ROOT / "evals" / "src"))
 
@@ -28,7 +30,7 @@ from wt_evals import corpus as corpus_mod
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Snapshot the eval corpus from sibling repos"
+        description="Snapshot the eval corpus from pinned public repo checkouts"
     )
     parser.add_argument(
         "--manifest", default=str(_REPO_ROOT / "evals/scripts/corpus_manifest.yaml")
@@ -42,7 +44,28 @@ def main() -> int:
     parser.add_argument(
         "--dry-run", action="store_true", help="print plan, don't write files"
     )
+    parser.add_argument(
+        "--sources",
+        action="store_true",
+        help="list canonical repository URLs, revisions, and expected local paths",
+    )
     args = parser.parse_args()
+
+    if args.sources:
+        manifest_path = Path(args.manifest).resolve()
+        data = yaml.safe_load(manifest_path.read_text()) or {}
+        repo_root = (manifest_path.parent / data.get("repo_root", ".")).resolve()
+        seen = set()
+        for repo in data.get("repos", []):
+            source = (repo["url"], repo["revision"], repo["path"])
+            if source in seen:
+                continue
+            seen.add(source)
+            print(
+                f"{repo['url']} @ {repo['revision']} -> "
+                f"{(repo_root / repo['path']).resolve()}"
+            )
+        return 0
 
     c = corpus_mod.Corpus.load(args.manifest)
 

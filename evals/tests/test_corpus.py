@@ -1,4 +1,6 @@
 import json
+import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -14,6 +16,27 @@ def test_manifest_selects_multilingual_existing_files() -> None:
     assert languages == {"go", "ts", "rust", "py"}
     assert len(corpus.entries) == 8
     assert corpus.output == REPO_ROOT / "evals/fixtures/code-comments/seed/_corpus"
+
+
+def test_manifest_identifies_public_pinned_repositories() -> None:
+    manifest = yaml.safe_load(MANIFEST.read_text())
+    for repo in manifest["repos"]:
+        assert repo["url"].startswith("https://github.com/")
+        assert repo["url"].endswith(".git")
+        assert len(repo["revision"]) == 40
+        int(repo["revision"], 16)
+
+
+def test_snapshot_script_lists_public_sources() -> None:
+    proc = subprocess.run(
+        [sys.executable, str(REPO_ROOT / "evals/scripts/snapshot_corpus.py"), "--sources"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    assert "https://github.com/sdougbrown/avenor.git" in proc.stdout
+    assert "37ccb100be5fbe33ce4fbdfe8047aeac72a63ac1" in proc.stdout
+    assert str(REPO_ROOT.parent / "avenor") in proc.stdout
 
 
 def test_snapshot_matches_lockfile() -> None:
@@ -35,6 +58,8 @@ def test_snapshot_rebuild_removes_stale_files(tmp_path: Path) -> None:
         "repos:\n"
         "  - id: sample\n"
         "    path: repo\n"
+        "    url: https://github.com/example/sample.git\n"
+        "    revision: 0123456789abcdef0123456789abcdef01234567\n"
         "    language: go\n"
         "    files: [source.go]\n"
     )

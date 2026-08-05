@@ -1,8 +1,8 @@
 """Deterministic corpus snapshot flow.
 
 The eval corpus is *not* committed: it is copied (and sha256-hashed) from
-sibling repositories at setup time by ``evals/scripts/snapshot_corpus.py`` and
-gitignored. This module holds the selection/copy/check logic so it is unit
+public repository checkouts at setup time by ``evals/scripts/snapshot_corpus.py``
+and gitignored. This module holds the selection/copy/check logic so it is unit
 testable and reusable.
 
 Manifest schema (see ``evals/scripts/corpus_manifest.yaml``):
@@ -13,13 +13,15 @@ Manifest schema (see ``evals/scripts/corpus_manifest.yaml``):
     repos:
       - id: <str>
         path: <str>     # repo dir relative to repo_root
+        url: <str>      # canonical public clone URL
+        revision: <str> # full commit containing the locked source
         language: <str> # go | ts | rust | py
         files: [<rel path>, ...]
         exclude_prefixes: [<rel dir or filename>]  # defensive; pinned files are explicit
 
 Selection is pinned (explicit file lists) so the eval is reproducible even as
-sibling repos drift; the lockfile records the exact sha256 of each ingested
-file and ``--check`` fails when a sibling file has changed under the eval's feet.
+source checkouts drift; the lockfile records the exact sha256 of each ingested
+file and ``--check`` fails when a source file has changed under the eval's feet.
 """
 
 from __future__ import annotations
@@ -95,6 +97,7 @@ class Corpus:
         )
         entries: list[ManifestEntry] = []
         for repo in data.get("repos", []):
+            _validate_repository_source(repo)
             lang = repo["language"]
             repo_dir = (repo_root / repo["path"]).resolve()
             excludes = _exclude_prefixes(repo)
@@ -103,7 +106,9 @@ class Corpus:
                     continue
                 if not (repo_dir / rel).is_file():
                     raise FileNotFoundError(
-                        f"corpus source missing: {repo_dir / rel} (add it or drop the pin)"
+                        f"corpus source missing: {repo_dir / rel}. "
+                        f"Clone {repo['url']} into {repo_dir} and check out "
+                        f"revision {repo['revision']}, or override path in a manifest copy."
                     )
                 entries.append(
                     ManifestEntry(repo_id=repo["id"], language=lang, rel_path=rel)
@@ -120,6 +125,20 @@ class Corpus:
 
     def dest_for(self, entry: ManifestEntry) -> Path:
         return self.output / entry.language / entry.repo_id / entry.rel_path
+
+
+def _validate_repository_source(repo: dict) -> None:
+    repo_id = repo.get("id", "<unknown>")
+    url = repo.get("url")
+    revision = repo.get("revision")
+    if not isinstance(url, str) or not url.startswith("https://github.com/"):
+        raise ValueError(f"corpus repository {repo_id!r} needs a public GitHub url")
+    if (
+        not isinstance(revision, str)
+        or len(revision) != 40
+        or any(char not in "0123456789abcdef" for char in revision.lower())
+    ):
+        raise ValueError(f"corpus repository {repo_id!r} needs a full commit revision")
 
 
 def _exclude_prefixes(repo: dict) -> set[str]:
@@ -213,7 +232,7 @@ def _lock_matches(corpus: Corpus, lock: dict) -> bool:
 
 
 def check(corpus: Corpus) -> tuple[list[dict], list[dict]]:
-    """Compare current sibling files to the committed lockfile.
+    """Compare current source checkouts to the committed lockfile.
 
     Returns (drifted, missing). Drifted entries have a changed sha256; missing
     entries are pinned in the manifest but have no lock record or no copy.
