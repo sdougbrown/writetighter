@@ -24,10 +24,41 @@ def test_python_docstring_is_not_a_comment() -> None:
     assert [comment.text for comment in comments] == ["# actual comment"]
 
 
-def test_block_comment_is_one_span() -> None:
-    source = "fn main() { /* first\nsecond */ let x = 1; }\n"
+def test_rust_nested_block_comment_is_one_outer_span() -> None:
+    source = "fn main() { /* first\n/* nested */\nsecond */ let x = 1; }\n"
     comments = extract_comments(source, "rust")
     assert len(comments) == 1
-    assert comments[0].text == "/* first\nsecond */"
+    assert comments[0].text == "/* first\n/* nested */\nsecond */"
     assert comments[0].start_line == 1
-    assert comments[0].end_line == 2
+    assert comments[0].end_line == 3
+
+
+def test_rust_ignores_comment_markers_in_raw_and_byte_raw_strings() -> None:
+    source = (
+        'let plain = r"// not\n/* not */";\n'
+        'let hashes = r###"quote " // not /* not */ "## still raw"###;\n'
+        'let byte = br##"quote " // not /* not */ "# still raw"##;\n'
+        'let c = cr##"// not /* not */"##;\n'
+        "// actual comment\n"
+    )
+    comments = extract_comments(source, "rust")
+    assert [comment.text for comment in comments] == ["// actual comment"]
+
+
+def test_rust_lifetimes_labels_and_character_literals_resume_scanning() -> None:
+    source = (
+        "fn f<'a>(value: &'static str) {\n"
+        "    'retry: loop {\n"
+        "        let slash = '/';\n"
+        "        let quote = '\\'';\n"
+        "        break 'retry;\n"
+        "    }\n"
+        "    /* block comment */\n"
+        "    // line comment\n"
+        "}\n"
+    )
+    comments = extract_comments(source, "rust")
+    assert [comment.text for comment in comments] == [
+        "/* block comment */",
+        "// line comment",
+    ]

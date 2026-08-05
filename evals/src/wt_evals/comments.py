@@ -97,8 +97,11 @@ def extract_comments(text: str, language: str) -> list[Comment]:
 
         if mode == "block":
             assert block is not None
-            close = text.find(block[1], i)
-            close = n if close == -1 else close + len(block[1])
+            if language == "rust":
+                close = _rust_block_comment_end(text, mode_start)
+            else:
+                close = text.find(block[1], i)
+                close = n if close == -1 else close + len(block[1])
             comments.append(_mk_comment(text, mode_start, close, line_starts))
             mode = None
             i = close
@@ -146,6 +149,14 @@ def extract_comments(text: str, language: str) -> list[Comment]:
                 continue
 
         # Literal detection.
+        if language == "rust":
+            raw_end = _rust_raw_end(text, i)
+            if raw_end is not None:
+                i = raw_end
+                continue
+            if c == "'" and _rust_lifetime_at(text, i):
+                i += 1
+                continue
         if language == "py" and _triple_at(text, i) is not None:
             mode, mode_start, mode_open = "triple", i, _triple_at(text, i)
             i += len(mode_open)
@@ -171,6 +182,57 @@ def extract_comments(text: str, language: str) -> list[Comment]:
 # --------------------------------------------------------------------------
 # helpers
 # --------------------------------------------------------------------------
+
+
+def _rust_block_comment_end(text: str, start: int) -> int:
+    """Return the end of a Rust block comment, accounting for nesting."""
+    depth = 1
+    i = start + 2
+    while i + 1 < len(text):
+        if text.startswith("*/", i):
+            depth -= 1
+            i += 2
+            if depth == 0:
+                return i
+        elif text.startswith("/*", i):
+            depth += 1
+            i += 2
+        else:
+            i += 1
+    return len(text)
+
+
+def _rust_raw_end(text: str, start: int) -> int | None:
+    """Return the end of a Rust raw string, or None when none starts here."""
+    i = start
+    if text[i] == "b":
+        i += 1
+        if i == len(text):
+            return None
+    if text[i] != "r":
+        return None
+    i += 1
+    hashes_start = i
+    while i < len(text) and text[i] == "#":
+        i += 1
+    if i == len(text) or text[i] != '"':
+        return None
+
+    closer = '"' + "#" * (i - hashes_start)
+    close = text.find(closer, i + 1)
+    return len(text) if close == -1 else close + len(closer)
+
+
+def _rust_lifetime_at(text: str, quote: int) -> bool:
+    """Whether the apostrophe at *quote* begins a Rust lifetime or label."""
+    if quote + 1 >= len(text) or not _is_rust_identifier_char(text[quote + 1]):
+        return False
+    # 'a' is a character literal; 'a and 'label are lifetimes or labels.
+    return quote + 2 >= len(text) or text[quote + 2] != "'"
+
+
+def _is_rust_identifier_char(char: str) -> bool:
+    return char == "_" or char == "$" or char.isascii() and char.isalpha()
 
 
 def _triple_at(text: str, i: int) -> str | None:
