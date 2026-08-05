@@ -52,12 +52,12 @@ Binaries for all platforms on [GitHub Releases](https://github.com/sdougbrown/wr
 ## Try it in <del class="wt-cut">one</del> <ins class="wt-keep">two</ins> line<ins class="wt-keep">s</ins>
 
 ```bash
-echo "The unprompted inclusion of the StoreProvider jest auto-mock was necessary because the context-reading hook required a real StoreContext export to ensure referential stability under tests, specifically to prevent the no-provider fallback from triggering during the array-map execution."
+echo "The unprompted inclusion of the StoreProvider jest auto-mock was necessary because the context-reading hook required a real StoreContext export to ensure referential stability under tests, specifically to prevent the no-provider fallback from triggering during the array-map execution." |
   writetighter lint --stdin --kind description
 ```
 
 ```bash
-echo "The unprompted inclusion of the StoreProvider jest auto-mock was necessary because the context-reading hook required a real StoreContext export to ensure referential stability under tests, specifically to prevent the no-provider fallback from triggering during the array-map execution." 
+echo "The unprompted inclusion of the StoreProvider jest auto-mock was necessary because the context-reading hook required a real StoreContext export to ensure referential stability under tests, specifically to prevent the no-provider fallback from triggering during the array-map execution." |
   writetighter revise --stdin --kind description
 ```
 
