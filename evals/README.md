@@ -120,8 +120,8 @@ All three trials had zero target-resolution errors, zero non-comment targets,
 and zero driver errors. Replacement safety was `100`, `100`, and `85`. The
 material-defect prompt consistently finds the Longe cache-precedence issue and
 both Umpire mutation rationales while missing the vLLM stale-history reference
-finding. It clears recall and target-safety requirements, but one trial misses
-the precision, invalid-finding, safety, and overall-quality targets.
+finding. It clears recall, target-safety, and replacement-safety requirements,
+but one trial misses the precision, invalid-finding, and overall-quality targets.
 
 The same auditable rubric classifies every reported finding in review order.
 Rescoring `qwen-moe-instruct` shows that it did identify some genuine additional
