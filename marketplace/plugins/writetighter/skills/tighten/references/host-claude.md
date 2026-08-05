@@ -15,7 +15,7 @@ The subagent must return JSON matching the `revise` output shape: an array of
 
 ## Steps
 
-1. Get the rubric the configured `revise` would have used:
+1. Get the rubric the configured `revise` uses:
 
    ```sh
    writetighter prompt --kind "$KIND" --format json

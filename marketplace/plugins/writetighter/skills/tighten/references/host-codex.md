@@ -2,7 +2,7 @@
 
 Use this path when `writetighter revise` is unconfigured (exits with code 3) or
 no model endpoint is available. Codex does not expose a nested subagent with a
-separate model the way Claude Code's Agent tool does, so delegation here means
+separate model the way Claude Code's Agent tool does. Delegation here means
 **you produce the structured revisions yourself**, using the `writetighter
 prompt` rubric, and hand the result to the core loop.
 
@@ -16,7 +16,7 @@ verification step — do not hand back prose.
 
 ## Steps
 
-1. Get the rubric the configured `revise` would have used:
+1. Get the rubric the configured `revise` uses:
 
    ```sh
    writetighter prompt --kind "$KIND" --format json
@@ -29,7 +29,7 @@ verification step — do not hand back prose.
    produce the contextual rewrites and clarifications the rubric asks for. Follow
    the same hard rules `revise` enforces:
    - A `replacement` must preserve every command, path, identifier, and number in
-     `source_text`. Drop any rewrite that would lose protected content.
+     `source_text`. Drop any rewrite that loses protected content.
    - A `clarification` is a concrete question about a missing fact — never a
      guessed rewrite.
    - Prefer fewer, high-confidence revisions over many speculative ones.
@@ -45,7 +45,7 @@ verification step — do not hand back prose.
 - The user has a configured endpoint — use `revise` directly. Running
   `writetighter config` once lets `revise` call a dedicated model natively, which
   is preferable to self-revising. Delegation is the fallback, not the default.
-- The prose is a single short snippet — `lint` plus a direct edit may suffice;
+- The prose is a single short snippet — `lint` plus a direct edit is enough;
   don't run the full rubric for a one-line comment.
 - Never pass API keys on the CLI. Setup happens interactively via
   `writetighter config`; do not block the tighten workflow waiting for it.

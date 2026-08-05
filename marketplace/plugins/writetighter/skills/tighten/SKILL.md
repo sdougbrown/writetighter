@@ -17,7 +17,7 @@ writetighter never edits files. **You** do the revising.
 
 ## Resolve the input
 
-Arguments arrive as one flat string; `--kind <value>` may appear anywhere.
+Arguments arrive as one flat string; `--kind <value>` can appear anywhere.
 
 1. Set `$KIND` to the explicit `--kind` value when present. Otherwise choose the
    matching kind from the table below based on the requested artifact; use
