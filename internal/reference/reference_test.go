@@ -765,6 +765,32 @@ func TestCollectRejectsBinaryFile(t *testing.T) {
 	}
 }
 
+func TestCollectDirectorySkipsNonTextFilesWithWarnings(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "readme.txt"), []byte("text"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "binary.txt"), []byte("text\x00binary"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "invalid.txt"), []byte{0xff, 0xfe}, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pack, err := Collect([]string{dir}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pack.Entries) != 1 || !strings.HasSuffix(pack.Entries[0].SourcePath, "readme.txt") {
+		t.Fatalf("expected only readme.txt, got %#v", pack.Entries)
+	}
+	if len(pack.Warnings) != 2 ||
+		!strings.Contains(strings.Join(pack.Warnings, "\n"), "binary.txt") ||
+		!strings.Contains(strings.Join(pack.Warnings, "\n"), "invalid.txt") {
+		t.Fatalf("expected warnings for both non-text files, got %v", pack.Warnings)
+	}
+}
+
 // TestCollectDirectoryNested verifies nested directory traversal with sorting.
 func TestCollectDirectoryNested(t *testing.T) {
 	dir := t.TempDir()

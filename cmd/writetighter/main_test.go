@@ -959,7 +959,8 @@ max_requests=32
 	if cfg.LLM.ContextWindowModel != "" {
 		t.Fatalf("context_window_model = %q, want cleared (no context confirmed for new model)", cfg.LLM.ContextWindowModel)
 	}
-	// Max output tokens should be preserved.
+	// Max output tokens is an output-generation preference, not a confirmed
+	// model capacity, so it should be preserved when the model changes.
 	if cfg.LLM.MaxOutputTokens != 2048 {
 		t.Fatalf("max_output_tokens = %d, want 2048", cfg.LLM.MaxOutputTokens)
 	}

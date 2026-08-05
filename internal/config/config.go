@@ -223,5 +223,3 @@ func loadUserConfigFile(path string) (*UserConfig, error) {
 func normalizeTerm(term string) string {
 	return strings.ToLower(strings.TrimSpace(term))
 }
-
-func configError(msg string) error { return fmt.Errorf("config error: %s", msg) }

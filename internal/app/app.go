@@ -505,7 +505,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 	plans := make([]revisionPlan, 0, len(docs))
 	totalRequests := 0
 	for _, doc := range docs {
-		chunks, _, err := planBudgetedChunks(doc, refPack, llmCfg, maxRequests, res, findings, terms)
+		chunks, err := planBudgetedChunks(doc, refPack, llmCfg, maxRequests, res, findings, terms)
 		if err != nil {
 			return fmt.Errorf("planning chunks for %q: %w", doc.Source, err)
 		}
@@ -640,18 +640,18 @@ func (a *App) RunRevise(params ReviseParams) error {
 // Returns the chunk ranges and error.
 // When cfg.ContextWindowTokens is 0 or refPack is nil, falls back to legacy
 // byte-budget chunking.
-func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm.Config, maxRequests int, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry) ([]document.ChunkRange, *reference.Pack, error) {
+func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm.Config, maxRequests int, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry) ([]document.ChunkRange, error) {
 	// Legacy path: no context window or no references.
 	if cfg.ContextWindowTokens == 0 || refPack == nil {
 		chunks := document.ChunkRanges(doc, defaultRevisionChunkBytes)
-		return chunks, refPack, nil
+		return chunks, nil
 	}
 
 	content := doc.AnalysisContent()
 	if len(content) == 0 {
 		// Empty documents produce no chunks (ChunkRanges parity), so no model
 		// call is made for them.
-		return []document.ChunkRange{}, refPack, nil
+		return []document.ChunkRange{}, nil
 	}
 
 	// 2a. Compute base overhead by building the prompt for a minimal (1 byte)
@@ -662,7 +662,7 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 	oneByteExcerpt := llm.NewChunkExcerpt(doc, 0, 1)
 	sysPrompt, userContent, _, err := llm.BuildBudgetedPrompt(doc, res, findings, terms, oneByteExcerpt, refPack, cfg)
 	if err != nil {
-		return nil, nil, fmt.Errorf("reference overhead exceeds context window: %w", err)
+		return nil, fmt.Errorf("reference overhead exceeds context window: %w", err)
 	}
 
 	// Serialize the base request (with the response format/schema included) so
@@ -670,7 +670,7 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 	// BuildBudgetedPrompt measures.
 	baseSerializedBytes, marshalErr := llm.SerializeRequestBytes(cfg, sysPrompt, userContent)
 	if marshalErr != nil {
-		return nil, nil, fmt.Errorf("budget calculation: %w", marshalErr)
+		return nil, fmt.Errorf("budget calculation: %w", marshalErr)
 	}
 	basePromptTokens := int(math.Ceil(float64(baseSerializedBytes) / float64(llm.EstimatedBytesPerToken)))
 
@@ -681,7 +681,7 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 
 	availableSourceBudget := cfg.ContextWindowTokens - basePromptTokens - maxOutputTokens - config.BudgetSafetyTokens
 	if availableSourceBudget < config.MinEditableSourceTokens {
-		return nil, nil, fmt.Errorf(
+		return nil, fmt.Errorf(
 			"revision context requires %d estimated input tokens for system/reference material and output reservation, "+
 				"leaving %d estimated tokens for editable source; "+
 				"configure a larger context_window_tokens or use a smaller reference set",
@@ -764,12 +764,12 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 			if chunkEnd < chunkStart+minChunkBytes {
 				// The final fragment cannot fit even though it is below the minimum
 				// editable-source size; fail before any model call.
-				return nil, nil, fmt.Errorf(
+				return nil, fmt.Errorf(
 					"cannot fit final fragment of %d bytes for document %q within the available context window budget: %v. "+
 						"Consider increasing context_window_tokens or reducing reference content.",
 					chunkEnd-chunkStart, doc.Source, lastBudgetErr)
 			}
-			return nil, nil, fmt.Errorf(
+			return nil, fmt.Errorf(
 				"cannot fit any chunk of at least %d bytes for document %q "+
 					"within the available context window budget. "+
 					"Consider increasing context_window_tokens or reducing reference content.",
@@ -780,7 +780,7 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 		currentPos = chunkEnd
 	}
 
-	return chunks, refPack, nil
+	return chunks, nil
 }
 
 func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {

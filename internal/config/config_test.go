@@ -246,6 +246,19 @@ func TestLLMConfigContextValidation(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects negative context_window_tokens", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\ncontext_window_tokens=-100\n"))
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		_, err := LoadUserConfig()
+		if err == nil {
+			t.Fatal("expected error for negative context_window_tokens")
+		}
+		if !strings.Contains(err.Error(), "context_window_tokens must be > 0") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
 	t.Run("rejects max_output_tokens >= context_window_tokens", func(t *testing.T) {
 		dir := t.TempDir()
 		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\ncontext_window_tokens=4096\nmax_output_tokens=4096\n"))

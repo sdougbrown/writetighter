@@ -1281,23 +1281,24 @@ func TestRunReviseReferenceIsSourceFile(t *testing.T) {
 		t.Fatal("expected ReferenceContext to be populated")
 	}
 	if len(response.ReferenceContext.Files) != 0 {
-		t.Errorf("expected empty Files, got %v", response.ReferenceContext.Files)
+		t.Fatalf("expected empty Files, got %v", response.ReferenceContext.Files)
 	}
 	if len(response.ReferenceContext.Paths) != 1 {
-		t.Errorf("expected 1 Path, got %v", response.ReferenceContext.Paths)
+		t.Fatalf("expected 1 Path, got %v", response.ReferenceContext.Paths)
 	}
 	if response.ReferenceContext.InputBytes != 0 {
-		t.Errorf("expected InputBytes=0, got %d", response.ReferenceContext.InputBytes)
+		t.Fatalf("expected InputBytes=0, got %d", response.ReferenceContext.InputBytes)
 	}
 
 	// Also verify the request body does NOT contain reference tags for the
 	// source. buildUserContent always writes <revise-text>, so the previous
 	// compound guard (AND NOT contains <revise-text>) was a permanent no-op;
 	// assert directly that no <reference> tag appears.
-	if capturedBody != nil {
-		if strings.Contains(string(capturedBody), "<reference") {
-			t.Error("request body should not contain <reference> tags when only source file is provided as reference")
-		}
+	if capturedBody == nil {
+		t.Fatal("expected a request body to be captured")
+	}
+	if strings.Contains(string(capturedBody), "<reference") {
+		t.Fatal("request body should not contain <reference> tags when only source file is provided as reference")
 	}
 }
 
@@ -1389,7 +1390,7 @@ func TestPlanBudgetedChunksCannotFit(t *testing.T) {
 			ContextWindowTokens: base + maxOutput + config.BudgetSafetyTokens + config.MinEditableSourceTokens, // availableSourceBudget == 512 exactly
 			MaxOutputTokens:     maxOutput,
 		}
-		_, _, err := planBudgetedChunks(doc, pack, cfg, 8, res, nil, nil)
+		_, err := planBudgetedChunks(doc, pack, cfg, 8, res, nil, nil)
 		// A base-overhead failure would surface as "reference overhead exceeds
 		// context window" instead; seeing that message means the budget formula
 		// drifted, not the chunk loop.
@@ -1412,7 +1413,7 @@ func TestPlanBudgetedChunksCannotFit(t *testing.T) {
 			ContextWindowTokens: base + maxOutput + config.BudgetSafetyTokens + 600, // A=600, base still passes
 			MaxOutputTokens:     maxOutput,
 		}
-		_, _, err := planBudgetedChunks(doc, pack, cfg, 8, res, nil, nil)
+		_, err := planBudgetedChunks(doc, pack, cfg, 8, res, nil, nil)
 		t.Logf("cannot-fit-final-fragment error: %v", err)
 		if err == nil || !strings.Contains(err.Error(), "cannot fit final fragment") {
 			t.Fatalf("expected 'cannot fit final fragment', got: %v", err)

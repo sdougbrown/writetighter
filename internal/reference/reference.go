@@ -247,14 +247,23 @@ func collectFile(path, displayPath string, sourceSet map[string]bool, seenCanon 
 		return nil, err
 	}
 
-	// Reject binary files (null bytes).
+	// Reject binary files (null bytes). Directory collection skips files that
+	// cannot safely be sent as text, while explicitly passed files fail loudly.
 	if bytes.IndexByte(data, 0) >= 0 {
-		return nil, fmt.Errorf("reference file %q contains binary data (null bytes)", path)
+		if explicit {
+			return nil, fmt.Errorf("reference file %q contains binary data (null bytes)", path)
+		}
+		*warnings = append(*warnings, fmt.Sprintf("skipping binary file: %s", displayPath))
+		return nil, nil
 	}
 
-	// Validate UTF-8.
+	// Validate UTF-8 with the same explicit-versus-directory behavior.
 	if !utf8.Valid(data) {
-		return nil, fmt.Errorf("reference file %q contains invalid UTF-8", path)
+		if explicit {
+			return nil, fmt.Errorf("reference file %q contains invalid UTF-8", path)
+		}
+		*warnings = append(*warnings, fmt.Sprintf("skipping invalid UTF-8 file: %s", displayPath))
+		return nil, nil
 	}
 
 	content := string(data)
