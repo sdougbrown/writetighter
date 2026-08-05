@@ -151,6 +151,8 @@ For Claude Code and Codex, a packaged plugin wraps this workflow as an installab
 
 `revise` runs independently of `lint` findings because concise text can still omit the subject, transformation, or effect while satisfying deterministic thresholds.
 
+For `revise --kind code-comment`, explicit Go, TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`), Rust, Python, and `.pyi` files use lexer-owned comment IDs. The complete file is read-only model context; only cataloged comments can become findings, and source text and ranges in the report always come from that catalog. The path sends one whole-file request and rejects unsafe, low-confidence suggestions. `--stdin`, `--text`, and unsupported extensions retain the prose-style code-comment path. Code-aware file review currently rejects `--reference` rather than silently omitting that context.
+
 **Output:** A structured JSON response containing revision suggestions, each with:
 - top-level `sources`: every document selected, including documents with no suggestions
 - top-level `analysis`: input bytes, analyzed bytes, chunk count, model-request count, and complete-coverage status for each source
@@ -164,6 +166,7 @@ For Claude Code and Codex, a packaged plugin wraps this workflow as an installab
 - `question` (clarification only): Concrete question instead of fabricated rewrite
 - `confidence`: Float between 0 and 1
 - `discarded_rewrites`: Count of model rewrites suppressed because they lost protected technical content
+- `discarded_findings`: Count of code-comment findings rejected for unknown targets, malformed payloads, low confidence, or unsafe replacements
 - `errors`: Per-document model or response failures; their presence also produces exit code 3
 
 **Requirements:**
@@ -181,6 +184,9 @@ printf '%s\n' "Restart the service after changing the file." |
 
 ./writetighter revise --text "Which transformation changes these values?"
 
+./writetighter revise internal/app/app.go --kind code-comment
+
+# --text remains the prose-style code-comment fallback.
 ./writetighter revise --text "Wait for the marker before reading configuration." \
   --kind code-comment
 ```

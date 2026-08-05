@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 )
 
-// Language identifies a source language supported by this experimental catalog.
+// Language identifies a source language supported by the comment catalog.
 type Language string
 
 const (
@@ -69,6 +69,38 @@ func DetectLanguage(filename string) (Language, bool) {
 	default:
 		return "", false
 	}
+}
+
+// ReplacementIsSafe reports whether replacement reconstructs as exactly one
+// complete comment unit of the same form as original. The source indentation is
+// restored before lexing so multiline line-comment units retain their original
+// continuation indentation. It fails closed for malformed source or candidates.
+func ReplacementIsSafe(language Language, source []byte, original Comment, replacement string) bool {
+	start := original.Span.StartByte
+	if start < 0 || start > len(source) {
+		return false
+	}
+	lineStart := start
+	for lineStart > 0 && source[lineStart-1] != '\n' && source[lineStart-1] != '\r' {
+		lineStart--
+	}
+	prefix := source[lineStart:start]
+	for _, b := range prefix {
+		if b != ' ' && b != '\t' {
+			// Inline comments have code before their delimiter. The replacement is
+			// still checked as a standalone comment, which is the only safe
+			// reconstruction available without copying executable source.
+			prefix = nil
+			break
+		}
+	}
+	candidate := append(append([]byte(nil), prefix...), replacement...)
+	catalog, err := Extract(original.ID, language, candidate)
+	if err != nil || len(catalog.Comments) != 1 {
+		return false
+	}
+	comment := catalog.Comments[0]
+	return comment.Form == original.Form && comment.Text == replacement
 }
 
 // ParseLanguage validates an explicit language argument.

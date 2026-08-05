@@ -43,7 +43,10 @@ class WTCommentDriver:
         try:
             binary = _build_writetighter(repo, work_dir)
             rubric = _load_rubric(binary)
-            if mode == "baseline":
+            if mode in {"baseline", "code-aware-ids"}:
+                # code-aware-ids is now the production WT path. Keep the
+                # baseline mode for historical comparison of older checkouts;
+                # both invoke the binary rather than a Python-side prompt.
                 review, stderr = _run_baseline(
                     binary=binary,
                     files=files,
@@ -52,11 +55,6 @@ class WTCommentDriver:
                 )
                 usage = None
             else:
-                catalog_binary = (
-                    _build_comment_catalog(repo, work_dir)
-                    if mode == "code-aware-ids"
-                    else None
-                )
                 review, stderr, usage = _run_code_aware(
                     files=files,
                     corpus_dir=corpus_dir,
@@ -66,7 +64,6 @@ class WTCommentDriver:
                     model=generation_model,
                     timeout=float(config.get("timeout", 300)),
                     chat_template_kwargs=config.get("chat_template_kwargs"),
-                    catalog_binary=catalog_binary,
                 )
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
             return _failure(str(exc), duration=time.monotonic() - started)
@@ -251,21 +248,7 @@ def _run_code_aware(
     model: str,
     timeout: float,
     chat_template_kwargs: dict[str, Any] | None = None,
-    catalog_binary: Path | None = None,
 ) -> tuple[dict[str, Any], list[str], dict[str, int] | None]:
-    if catalog_binary is not None:
-        return _run_code_aware_ids(
-            files=files,
-            corpus_dir=corpus_dir,
-            rubric=rubric,
-            variant=variant,
-            base_url=base_url,
-            model=model,
-            timeout=timeout,
-            chat_template_kwargs=chat_template_kwargs,
-            catalog_binary=catalog_binary,
-        )
-
     review = _empty_review()
     stderr: list[str] = []
     aggregate_usage: dict[str, int] = {}

@@ -45,7 +45,7 @@ writetighter lint (PATH... | --stdin | --text STRING) [flags]
 
 ## writetighter revise
 
-Provides contextual rewrites and clarifications.
+Provides contextual rewrites and clarifications. For `--kind code-comment`, explicit supported source files (`.go`, TypeScript/JavaScript variants, `.rs`, `.py`, and `.pyi`) use a whole-file, lexer-owned comment catalog: only cataloged comments can be findings, and reported source text/ranges are catalog-owned. `--stdin`, `--text`, and unsupported extensions keep the legacy prose-style code-comment path. Code-aware file review rejects `--reference` until bounded cross-file context is supported. Review remains advisory and never applies edits.
 
 ```
 writetighter revise (PATH... | --stdin | --text STRING) --kind KIND

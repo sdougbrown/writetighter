@@ -14,3 +14,9 @@ import _ "embed"
 //
 //go:embed revise-response-v1.schema.json
 var ReviseResponseSchemaV1 string
+
+// CodeCommentResponseSchemaV1 is the strict, catalog-ID response schema for
+// code-aware revision. Its principle placeholder is populated at runtime.
+//
+//go:embed code-comment-response-v1.schema.json
+var CodeCommentResponseSchemaV1 string
