@@ -44,14 +44,14 @@ Passage-matching profile policy and project glossary definitions provide termino
 ### Quick install (curl)
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/sdougbrown/writetighter/main/install.sh | bash
+curl -fsSL https://writetighter.douggo.com/install.sh | bash
 ```
 
 This downloads the latest release binary for your platform to `~/.local/bin`.
 Set `BINDIR` to choose a different location:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/sdougbrown/writetighter/main/install.sh | BINDIR=/usr/local/bin bash
+curl -fsSL https://writetighter.douggo.com/install.sh | BINDIR=/usr/local/bin bash
 ```
 
 Pre-release versions are marked as pre-releases on GitHub and are excluded

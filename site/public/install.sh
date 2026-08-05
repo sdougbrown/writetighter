@@ -2,7 +2,7 @@
 # install.sh — bootstrapping installer for WriteTighter
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/sdougbrown/writetighter/main/install.sh | bash
+#   curl -fsSL https://writetighter.douggo.com/install.sh | bash
 #
 # Downloads the latest release binary for your platform from GitHub Releases
 # and installs it to ~/.local/bin (or a directory of your choice via BINDIR).

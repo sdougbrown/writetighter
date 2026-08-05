@@ -42,7 +42,7 @@ features:
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/sdougbrown/writetighter/main/install.sh | bash
+curl -fsSL https://writetighter.douggo.com/install.sh | bash
 ```
 
 Or with Go: `go install github.com/sdougbrown/writetighter/cmd/writetighter@latest`
