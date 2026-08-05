@@ -89,11 +89,12 @@ A single exploratory `qwen-moe` pass used
 exhausted the 4,096-token response budget on half the corpus. Qwen reached
 recall `1.0`, but emitted 35 findings, of which the judge marked 31 as false
 positives, for overall quality `35`. The gateway's thinking-off
-`qwen-moe-instruct` alias also reached recall `1.0`, but emitted 28 findings
-with 24 false positives and overall quality `30`. Neither is a better candidate
-than Gemma under this prompt. The driver's optional `chat_template_kwargs`
-setting exists for model-specific chat-template controls and is not enabled in
-the committed Gemma fixture.
+`qwen-moe-instruct` alias scored production WT at recall `0.25` with five false
+positives and the whole-file candidate at recall `1.0` with 24 false positives;
+both received overall quality `30`. The candidate emitted 28 findings. Neither
+Qwen route is a better candidate than Gemma under this prompt. The driver's
+optional `chat_template_kwargs` setting exists for model-specific chat-template
+controls and is not enabled in the committed Gemma fixture.
 
 ## Scope and caveats
 
