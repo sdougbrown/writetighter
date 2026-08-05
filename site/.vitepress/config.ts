@@ -12,6 +12,7 @@ export default defineConfig({
       { text: 'Before / After', link: '/before-after' },
       { text: 'CLI Reference', link: '/cli' },
       { text: 'Agent Integration', link: '/agent-integration' },
+      { text: 'Plugins', link: '/claude-plugin' },
       { text: 'GitHub', link: 'https://github.com/sdougbrown/writetighter' },
     ],
     sidebar: [
@@ -27,6 +28,20 @@ export default defineConfig({
         items: [
           { text: 'CLI Reference', link: '/cli' },
           { text: 'Agent Integration', link: '/agent-integration' },
+        ],
+      },
+      {
+        text: 'Plugins',
+        items: [
+          { text: 'Claude Code', link: '/claude-plugin' },
+          { text: 'Codex', link: '/codex-plugin' },
+        ],
+      },
+      {
+        text: 'Examples',
+        items: [
+          { text: 'Project config', link: 'https://github.com/sdougbrown/writetighter/blob/main/examples/writetighter.toml' },
+          { text: 'User config', link: 'https://github.com/sdougbrown/writetighter/blob/main/examples/user-config.toml' },
         ],
       },
     ],
