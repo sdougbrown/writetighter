@@ -54,9 +54,35 @@ def test_recall_ground_truth_is_fixed() -> None:
             REPO_ROOT / "evals/fixtures/code-comments/seed/expected-findings.json"
         ).read_text()
     )
-    assert expected["schema_version"] == 1
+    assert expected["schema_version"] == 2
+    assert "not exhaustive" in expected["scope"]
     assert len(expected["findings"]) == 4
     assert len({item["id"] for item in expected["findings"]}) == 4
+
+
+def test_score_schema_separates_additional_and_context_dependent_findings() -> None:
+    schema = yaml.safe_load(
+        (
+            REPO_ROOT / "evals/fixtures/code-comments/schemas/code-comments.yaml"
+        ).read_text()
+    )
+    assert {
+        "matched_expected_findings",
+        "valid_additional_findings",
+        "context_dependent_findings",
+        "invalid_findings",
+        "finding_classifications",
+        "missed_expected_findings",
+        "estimated_precision",
+    } <= schema["fields"].keys()
+    assert "false_positives" not in schema["fields"]
+    assert schema["fields"]["finding_classifications"]["classes"] == [
+        "matched_expected",
+        "valid_additional",
+        "context_dependent",
+        "invalid",
+        "non_comment",
+    ]
 
 
 def test_fixture_uses_same_model_for_generation_paths() -> None:

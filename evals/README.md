@@ -68,8 +68,10 @@ model for a direct Qwen-Instruct comparison.
 
 ### Initial result
 
-The fixture includes a reviewed four-finding ground truth, so every run uses the
-same recall denominator. After configuring WT with Gemma's deployed 80k-token
+The fixture includes a reviewed four-finding reference set, so every run uses
+the same recall denominator while additional findings are adjudicated
+independently. The historical whole-file scores below used the original rubric,
+which treated that set as exhaustive. After configuring WT with Gemma's deployed 80k-token
 context window, two `gemma4` generation passes scored by local
 `nemotron-ultra` produced:
 
@@ -101,29 +103,42 @@ controls and is not enabled in the committed Gemma fixture.
 
 ### Comment-ID prompt spike
 
-The first ID-based prompt eliminated false positives and unsafe targets but
-scored recall `0.50`, `0.00`, and `0.50`. Moving material-defect directions
-after the exported rubric, adding catalog line numbers, and validating multiline
-replacements in their original indentation improved Gemma across three frozen
-trials:
+The first ID-based prompt achieved exact target safety but scored recall `0.50`,
+`0.00`, and `0.50`. Moving material-defect directions after the exported rubric,
+adding catalog line numbers, and validating multiline replacements in their
+original indentation improved Gemma. The same three frozen review artifacts
+were rescored after changing the judge from an exhaustive oracle to a fixed
+recall reference set with independent additional-finding adjudication:
 
-| Trial | Recall | False positives | Overall quality |
-|---|---:|---:|---:|
-| 1 | `0.75` | `2` | `72` |
-| 2 | `0.75` | `4` | `55` |
-| 3 | `0.75` | `3` | `65` |
+| Trial | Recall | Verified precision | Valid additional | Context-dependent | Invalid | Overall quality |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 | `0.75` | `0.75` | `0` | `1` | `1` | `75` |
+| 2 | `0.75` | `0.50` | `0` | `1` | `3` | `55` |
+| 3 | `0.75` | `0.75` | `0` | `2` | `1` | `75` |
 
 All three trials had zero target-resolution errors, zero non-comment targets,
-zero driver errors, and replacement safety `100`. The prompt clears the recall
-and safety gates but misses the mean-false-positive target of at most two. It
-consistently finds the Longe cache-precedence issue and both Umpire mutation
-rationales, while missing the vLLM stale-history comment.
+and zero driver errors. Replacement safety was `100`, `100`, and `85`. The
+material-defect prompt consistently finds the Longe cache-precedence issue and
+both Umpire mutation rationales while missing the vLLM stale-history reference
+finding. It clears recall and target-safety requirements, but one trial misses
+the precision, invalid-finding, safety, and overall-quality targets.
 
-With the same material-defect directions, `qwen-moe-instruct` scored recall
-`1.00`, `0.75`, and `1.00`, but produced `12`, `16`, and `14` false positives.
-A Qwen-proposer/Gemma-verifier experiment and a rewrite-only Gemma experiment
-both increased noise, so those mechanisms were discarded rather than retained
-in the driver.
+The same auditable rubric classifies every reported finding in review order.
+Rescoring `qwen-moe-instruct` shows that it did identify some genuine additional
+issues, but most of its volume was invalid optional polish:
+
+| Trial | Recall | Verified precision | Valid additional | Context-dependent | Invalid | Overall quality |
+|---|---:|---:|---:|---:|---:|---:|
+| 1 | `1.00` | `0.47` | `3` | `1` | `8` | `55` |
+| 2 | `0.75` | `0.33` | `2` | `4` | `10` | `55` |
+| 3 | `0.75` | `0.21` | `0` | `3` | `11` | `45` |
+
+Qwen's valid additions included the unclear guidance-parameter mapping, a dense
+Longe judge-cache comment, and a temporal Rust placeholder comment. Its invalid
+findings were dominated by expansions of accurate API comments, bare section
+labels, test arithmetic, and already-clear invariants. A Qwen-proposer/Gemma-
+verifier experiment and a rewrite-only Gemma experiment both increased noise,
+so those mechanisms were discarded rather than retained in the driver.
 
 ## Scope and caveats
 

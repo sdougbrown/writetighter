@@ -1,11 +1,17 @@
 name: writetighter-code-comments
 judge_prompt: judges/code-comments.md
 fields:
-  valid_findings:       { type: count }
-  false_positives:      { type: count, target: { lte: 2 } }
-  missed_findings:      { type: count }
-  non_comment_targets:  { type: count, target: { eq: 0 } }
-  actionable_findings:  { type: count }
-  estimated_recall:     { type: score, range: [0, 1], target: { gte: 0.6 } }
-  replacement_safety:   { type: score, range: [0, 100], target: { gte: 85 } }
-  overall_quality:      { type: score, range: [0, 100], target: { gte: 70 } }
+  matched_expected_findings: { type: count }
+  valid_additional_findings: { type: count }
+  context_dependent_findings: { type: count }
+  invalid_findings:          { type: count, target: { lte: 2 } }
+  finding_classifications:
+    type: classification_set
+    classes: [matched_expected, valid_additional, context_dependent, invalid, non_comment]
+  non_comment_targets:       { type: count, target: { eq: 0 } }
+  missed_expected_findings:  { type: count }
+  actionable_findings:       { type: count }
+  estimated_recall:          { type: score, range: [0, 1], target: { gte: 0.6 } }
+  estimated_precision:       { type: score, range: [0, 1], target: { gte: 0.6 } }
+  replacement_safety:        { type: score, range: [0, 100], target: { gte: 85 } }
+  overall_quality:           { type: score, range: [0, 100], target: { gte: 70 } }

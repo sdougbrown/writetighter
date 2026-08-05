@@ -1,6 +1,6 @@
 {
-  "schema_version": 1,
-  "scope": "Exhaustive reviewed comment-revision opportunities for this corpus snapshot. Use this fixed set as the recall denominator.",
+  "schema_version": 2,
+  "scope": "Reviewed reference findings for this corpus snapshot. Use this fixed set as the recall denominator, but independently adjudicate additional findings because the set is not exhaustive.",
   "findings": [
     {
       "id": "avenor-cache-collision-precedence",
