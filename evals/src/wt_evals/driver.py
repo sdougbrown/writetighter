@@ -54,6 +54,7 @@ class WTCommentDriver:
                     base_url=str(config.get("base_url", "http://localhost:4000/v1")),
                     model=str(config.get("model", "gemma4")),
                     timeout=float(config.get("timeout", 300)),
+                    chat_template_kwargs=config.get("chat_template_kwargs"),
                 )
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
             return _failure(str(exc), duration=time.monotonic() - started)
@@ -211,6 +212,7 @@ def _run_code_aware(
     base_url: str,
     model: str,
     timeout: float,
+    chat_template_kwargs: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[str], dict[str, int] | None]:
     review = _empty_review()
     stderr: list[str] = []
@@ -227,6 +229,7 @@ def _run_code_aware(
                 system=system,
                 user=f'<source-code file="{rel}" language="{language}">\n{source}\n</source-code>',
                 timeout=timeout,
+                chat_template_kwargs=chat_template_kwargs,
             )
         except (OSError, RuntimeError, ValueError) as exc:
             review["errors"].append({"file": rel, "error": str(exc)})
@@ -297,7 +300,13 @@ WriteTighter code-comment rubric:
 
 
 def _chat(
-    *, base_url: str, model: str, system: str, user: str, timeout: float
+    *,
+    base_url: str,
+    model: str,
+    system: str,
+    user: str,
+    timeout: float,
+    chat_template_kwargs: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, int] | None]:
     payload = {
         "model": model,
@@ -309,6 +318,8 @@ def _chat(
         "temperature": 0,
         "max_tokens": 4096,
     }
+    if chat_template_kwargs:
+        payload["chat_template_kwargs"] = chat_template_kwargs
     request = urllib.request.Request(
         base_url.rstrip("/") + "/chat/completions",
         data=json.dumps(payload).encode("utf-8"),

@@ -84,6 +84,15 @@ candidate is not ready to ship because precision remains poor despite
 repeated-trial precision gates are required. The aggressive prompt remains
 available for comparison but is not the recommended candidate.
 
+A single exploratory `qwen-moe` pass used
+`chat_template_kwargs.enable_thinking: false`; otherwise hidden reasoning
+exhausted the 4,096-token response budget on half the corpus. Qwen reached
+recall `1.0`, but emitted 35 findings, of which the judge marked 31 as false
+positives, for overall quality `35`. It is therefore not a better candidate
+under this prompt. The driver's optional `chat_template_kwargs` setting exists
+for model-specific chat-template controls and is not enabled in the committed
+Gemma fixture.
+
 ## Scope and caveats
 
 - Corpus languages: Go, TypeScript, Rust, and Python.
