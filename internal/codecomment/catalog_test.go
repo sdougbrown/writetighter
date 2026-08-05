@@ -125,7 +125,7 @@ func TestExtractSkipsCommentDelimitersInsideSupportedLiteralForms(t *testing.T) 
 }
 
 func TestExtractRustHandlesNestedCommentsAndRawByteAndCharacterStrings(t *testing.T) {
-	source := []byte("let raw = br###\"/* not */ // not\"###;\nlet ch = 'x'; let byte = b'\\\\'; let lifetime: &'a str;\n/* outer /* inner */ outer */\n// real\n")
+	source := []byte("let raw = br###\"/* not */ // not\"###;\nlet plain = r#\"/* not */ // not, trailing #\"#;\nlet ch = 'x'; let byte = b'\\\\'; let lifetime: &'a str;\n/* outer /* inner */ outer */\n// real\n")
 	catalog, err := Extract("sample.rs", Rust, source)
 	if err != nil {
 		t.Fatal(err)
@@ -138,6 +138,32 @@ func TestExtractRustHandlesNestedCommentsAndRawByteAndCharacterStrings(t *testin
 	}
 	if _, err := Extract("bad.rs", Rust, []byte("let ch = '\\x\n// not partial")); err == nil {
 		t.Fatal("unterminated Rust character literal was accepted")
+	}
+	if _, err := Extract("bad.rs", Rust, []byte("let raw = r##\"unterminated")); err == nil {
+		t.Fatal("unterminated Rust raw string was accepted")
+	}
+}
+
+func TestReplacementIsSafePreservesCommentBoundariesAndForm(t *testing.T) {
+	source := []byte("package p\n// full line\nfunc f() {} // inline\n")
+	catalog, err := Extract("sample.go", Go, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(catalog.Comments) != 2 {
+		t.Fatalf("comments = %#v", catalog.Comments)
+	}
+	if !ReplacementIsSafe(Go, source, catalog.Comments[0], "// clearer full line") {
+		t.Fatal("safe line-comment replacement was rejected")
+	}
+	if ReplacementIsSafe(Go, source, catalog.Comments[0], "/* changed form */") {
+		t.Fatal("replacement with a different comment form was accepted")
+	}
+	if !ReplacementIsSafe(Go, source, catalog.Comments[1], "// clearer inline comment") {
+		t.Fatal("safe inline-comment replacement was rejected")
+	}
+	if ReplacementIsSafe(Go, source, catalog.Comments[1], "// comment\nexecutable()") {
+		t.Fatal("replacement containing executable code was accepted")
 	}
 }
 
