@@ -61,7 +61,10 @@ The driver builds WriteTighter from the current checkout. Production behavior
 is not modified by this evaluation package. `code-aware.json` keeps the more
 aggressive initial prompt for recall/precision comparisons;
 `code-aware-conservative.json` adds the precision-oriented directions used by
-the recommended candidate run.
+the original candidate run. `code-aware-ids-material.json` uses the lexer-owned
+comment-ID protocol and the current material-defect prompt. The matching
+`code-aware-ids-material-qwen.json` overrides only the candidate generation
+model for a direct Qwen-Instruct comparison.
 
 ### Initial result
 
@@ -95,6 +98,32 @@ both received overall quality `30`. The candidate emitted 28 findings. Neither
 Qwen route is a better candidate than Gemma under this prompt. The driver's
 optional `chat_template_kwargs` setting exists for model-specific chat-template
 controls and is not enabled in the committed Gemma fixture.
+
+### Comment-ID prompt spike
+
+The first ID-based prompt eliminated false positives and unsafe targets but
+scored recall `0.50`, `0.00`, and `0.50`. Moving material-defect directions
+after the exported rubric, adding catalog line numbers, and validating multiline
+replacements in their original indentation improved Gemma across three frozen
+trials:
+
+| Trial | Recall | False positives | Overall quality |
+|---|---:|---:|---:|
+| 1 | `0.75` | `2` | `72` |
+| 2 | `0.75` | `4` | `55` |
+| 3 | `0.75` | `3` | `65` |
+
+All three trials had zero target-resolution errors, zero non-comment targets,
+zero driver errors, and replacement safety `100`. The prompt clears the recall
+and safety gates but misses the mean-false-positive target of at most two. It
+consistently finds the Longe cache-precedence issue and both Umpire mutation
+rationales, while missing the vLLM stale-history comment.
+
+With the same material-defect directions, `qwen-moe-instruct` scored recall
+`1.00`, `0.75`, and `1.00`, but produced `12`, `16`, and `14` false positives.
+A Qwen-proposer/Gemma-verifier experiment and a rewrite-only Gemma experiment
+both increased noise, so those mechanisms were discarded rather than retained
+in the driver.
 
 ## Scope and caveats
 

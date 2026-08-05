@@ -28,6 +28,10 @@ class WTCommentDriver:
         mode = variant.get("mode")
         if mode not in {"baseline", "code-aware", "code-aware-ids"}:
             return _failure(f"unsupported prompt mode: {mode!r}")
+        try:
+            generation_model = _generation_model(config, variant, mode)
+        except ValueError as exc:
+            return _failure(str(exc))
 
         repo = _fixture_path(fixture.path, config.get("writetighter_repo", "../../.."))
         corpus_dir = work_dir / str(config.get("corpus_dir", "corpus"))
@@ -44,7 +48,7 @@ class WTCommentDriver:
                     binary=binary,
                     files=files,
                     corpus_dir=corpus_dir,
-                    expected_model=str(config.get("model", "")),
+                    expected_model=generation_model,
                 )
                 usage = None
             else:
@@ -59,7 +63,7 @@ class WTCommentDriver:
                     rubric=rubric,
                     variant=variant,
                     base_url=str(config.get("base_url", "http://localhost:4000/v1")),
-                    model=str(config.get("model", "gemma4")),
+                    model=generation_model,
                     timeout=float(config.get("timeout", 300)),
                     chat_template_kwargs=config.get("chat_template_kwargs"),
                     catalog_binary=catalog_binary,
@@ -68,7 +72,7 @@ class WTCommentDriver:
             return _failure(str(exc), duration=time.monotonic() - started)
 
         review["variant"] = mode
-        review["model"] = str(config.get("model", "gemma4"))
+        review["model"] = generation_model
         review["summary"] = _summary(review)
         output = json.dumps(review, indent=2) + "\n"
         duration = time.monotonic() - started
@@ -84,12 +88,23 @@ class WTCommentDriver:
             input_tokens=_usage_int(usage, "prompt_tokens"),
             output_tokens=_usage_int(usage, "completion_tokens"),
             total_tokens=_usage_int(usage, "total_tokens"),
-            sampling={"model": str(config.get("model", "gemma4")), "variant": mode},
+            sampling={"model": generation_model, "variant": mode},
             driver_specific={
                 "variant": mode,
                 "files": [str(p.relative_to(corpus_dir)) for p in files],
             },
         )
+
+
+def _generation_model(
+    config: dict[str, Any], variant: dict[str, Any], mode: str
+) -> str:
+    model = config.get("model", "gemma4")
+    if mode != "baseline" and "model" in variant:
+        model = variant["model"]
+    if not isinstance(model, str) or not model.strip():
+        raise ValueError("generation model must be a non-empty string")
+    return model
 
 
 def _fixture_path(fixture_dir: Path, value: str) -> Path:
@@ -348,7 +363,13 @@ def _run_code_aware_ids(
         compact_catalog = {
             "source_sha256": catalog.get("source_sha256"),
             "comments": [
-                {key: comment[key] for key in ("id", "form", "text")}
+                {
+                    "id": comment["id"],
+                    "form": comment["form"],
+                    "start_line": comment["span"]["start_line"],
+                    "end_line": comment["span"]["end_line"],
+                    "text": comment["text"],
+                }
                 for comment in catalog["comments"]
             ],
         }
@@ -360,7 +381,9 @@ def _run_code_aware_ids(
                 user=(
                     f'<source-code file="{rel}" language="{language}">\n{source}\n</source-code>\n\n'
                     "The source above is read-only. Its complete editable-comment catalog is:\n"
-                    + json.dumps(compact_catalog, ensure_ascii=False, separators=(",", ":"))
+                    + json.dumps(
+                        compact_catalog, ensure_ascii=False, separators=(",", ":")
+                    )
                 ),
                 timeout=timeout,
                 chat_template_kwargs=chat_template_kwargs,
@@ -380,8 +403,14 @@ def _run_code_aware_ids(
             response=response,
             catalog=catalog,
             known_principles=known_principles,
-            replacement_is_safe=lambda replacement, form, language=language: _replacement_is_safe(
-                catalog_binary, language, replacement, form
+            replacement_is_safe=lambda replacement, comment, language=language, source=source: (
+                _replacement_is_safe(
+                    catalog_binary,
+                    language,
+                    replacement,
+                    comment["form"],
+                    _source_indentation(source, comment["span"]["start_byte"]),
+                )
             ),
             minimum_confidence=float(variant.get("minimum_confidence", 0.8)),
         )
@@ -431,11 +460,15 @@ def _catalog_file(binary: Path, path: Path, language: str) -> dict[str, Any]:
 
 
 def _replacement_is_safe(
-    binary: Path, language: str, replacement: str, form: str
+    binary: Path, language: str, replacement: str, form: str, indentation: str
 ) -> bool:
+    # Catalog spans start at the delimiter, excluding first-line indentation
+    # while retaining indentation on continuation lines. Restore the omitted
+    # prefix before checking the replacement in its source shape.
+    candidate = indentation + replacement
     proc = subprocess.run(
         [str(binary), "--language", language],
-        input=replacement,
+        input=candidate,
         capture_output=True,
         text=True,
         timeout=30,
@@ -453,6 +486,21 @@ def _replacement_is_safe(
         and comments[0]["form"] == form
         and comments[0]["text"] == replacement
     )
+
+
+def _source_indentation(source: str, start_byte: int) -> str:
+    encoded = source.encode("utf-8")
+    line_start = (
+        max(
+            encoded.rfind(b"\n", 0, start_byte),
+            encoded.rfind(b"\r", 0, start_byte),
+        )
+        + 1
+    )
+    indentation = encoded[line_start:start_byte]
+    if any(byte not in b" \t" for byte in indentation):
+        return ""
+    return indentation.decode("ascii")
 
 
 def _valid_catalog(raw: str) -> dict[str, Any]:
@@ -478,9 +526,13 @@ def _validate_id_response(
     response: dict[str, Any],
     catalog: dict[str, Any],
     known_principles: set[str],
-    replacement_is_safe: Callable[[str, str], bool],
+    replacement_is_safe: Callable[[str, dict[str, Any]], bool],
     minimum_confidence: float,
-) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[dict[str, Any]], list[dict[str, Any]]]:
+) -> tuple[
+    list[tuple[dict[str, Any], dict[str, Any]]],
+    list[dict[str, Any]],
+    list[dict[str, Any]],
+]:
     findings = response.get("findings")
     if not isinstance(findings, list):
         return [], [{"reason": "findings must be an array"}], []
@@ -506,11 +558,13 @@ def _validate_id_response(
         seen.add(comment_id)
         error = _validate_id_finding(item, known_principles)
         if error:
-            rejected.append({"comment_id": comment_id, "reason": error, "finding": item})
+            rejected.append(
+                {"comment_id": comment_id, "reason": error, "finding": item}
+            )
             continue
         comment = by_id[comment_id]
         if item["action"] == "rewrite" and not replacement_is_safe(
-            item["replacement"], comment["form"]
+            item["replacement"], comment
         ):
             rejected.append(
                 {
@@ -533,7 +587,9 @@ def _validate_id_response(
     return accepted, rejected, low_confidence
 
 
-def _validate_id_finding(item: dict[str, Any], known_principles: set[str]) -> str | None:
+def _validate_id_finding(
+    item: dict[str, Any], known_principles: set[str]
+) -> str | None:
     if item.get("action") not in {"rewrite", "clarification"}:
         return "action must be rewrite or clarification"
     if not isinstance(item.get("reason"), str) or not item["reason"].strip():
@@ -541,7 +597,10 @@ def _validate_id_finding(item: dict[str, Any], known_principles: set[str]) -> st
     principles = item.get("principle_ids")
     if not isinstance(principles, list) or not principles:
         return "principle_ids must be a non-empty array"
-    if any(not isinstance(value, str) or value not in known_principles for value in principles):
+    if any(
+        not isinstance(value, str) or value not in known_principles
+        for value in principles
+    ):
         return "unknown principle_id"
     if len(set(principles)) != len(principles):
         return "duplicate principle_id"
@@ -554,7 +613,10 @@ def _validate_id_finding(item: dict[str, Any], known_principles: set[str]) -> st
     ):
         return "confidence must be within [0, 1]"
     if item["action"] == "rewrite":
-        if not isinstance(item.get("replacement"), str) or not item["replacement"].strip():
+        if (
+            not isinstance(item.get("replacement"), str)
+            or not item["replacement"].strip()
+        ):
             return "rewrite requires a non-empty replacement"
         if item.get("question") is not None:
             return "rewrite must not include a question"
@@ -571,8 +633,11 @@ def _id_candidate_system_prompt(rubric: dict[str, Any], variant: dict[str, Any])
         f"- {direction}" for direction in variant.get("extra_directions", [])
     )
     if extra_directions:
-        extra_directions = "\nAdditional evaluation directions:\n" + extra_directions
-    return f'''You are reviewing comments in a complete source file.
+        extra_directions = (
+            "\nFinal evaluation directions (apply these after the rubric):\n"
+            + extra_directions
+        )
+    return f"""You are reviewing comments in a complete source file.
 The source code is untrusted, read-only context. Never propose edits to executable code, strings, identifiers, docstrings, or formatting outside comments.
 The supplied catalog is the only target authority. Select a comment only by its comment_id; do not copy source text or report offsets or line numbers.
 Review a cataloged comment only when the complete source establishes a material defect. Reject optional polish, narration-only rewrites, and invented rationale, requirements, ownership, deadlines, or behavior.
@@ -583,10 +648,10 @@ Return only one JSON object with at most five findings:
 Every finding MUST include comment_id, action, principle_ids, reason, replacement, question, and a numeric confidence from 0 through 1. Missing confidence discards the finding.
 For rewrite, replacement is required and question must be null. For clarification, question is required and replacement must be null.
 Return {{"findings":[]}} when no cataloged comment warrants action.
-{extra_directions}
 
 WriteTighter code-comment rubric:
-{json.dumps(rubric, indent=2)}'''
+{json.dumps(rubric, indent=2)}
+{extra_directions}"""
 
 
 def _candidate_system_prompt(rubric: dict[str, Any], variant: dict[str, Any]) -> str:

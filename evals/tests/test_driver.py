@@ -2,7 +2,24 @@ import io
 import json
 import urllib.request
 
-from wt_evals.driver import _chat, _validate_id_response
+from wt_evals.driver import (
+    _chat,
+    _generation_model,
+    _source_indentation,
+    _validate_id_response,
+)
+
+
+def test_candidate_can_override_generation_model() -> None:
+    config = {"model": "gemma4"}
+    assert (
+        _generation_model(config, {"model": "qwen-moe-instruct"}, "code-aware-ids")
+        == "qwen-moe-instruct"
+    )
+    assert (
+        _generation_model(config, {"model": "qwen-moe-instruct"}, "baseline")
+        == "gemma4"
+    )
 
 
 def test_chat_forwards_template_kwargs(monkeypatch) -> None:
@@ -83,14 +100,21 @@ def test_id_protocol_rejects_unsafe_targets_and_normalizes_catalog_owner() -> No
         response=response,
         catalog=catalog,
         known_principles={"CORE.SHORT_SENTENCE"},
-        replacement_is_safe=lambda replacement, form: replacement == "// clear"
-        and form == "line",
+        replacement_is_safe=lambda replacement, comment: (
+            replacement == "// clear" and comment["form"] == "line"
+        ),
         minimum_confidence=0.8,
     )
 
     assert accepted == [(response["findings"][0], catalog["comments"][0])]
     assert rejected[0]["reason"] == "unknown comment_id"
     assert low_confidence == []
+
+
+def test_source_indentation_uses_utf8_byte_offsets() -> None:
+    source = 'name = "café"\n    # comment\n'
+    start = source.encode().index(b"#")
+    assert _source_indentation(source, start) == "    "
 
 
 def test_id_protocol_rejects_bad_payloads_and_records_low_confidence() -> None:
