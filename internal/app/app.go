@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/sdougbrown/writetighter/internal/check"
+	"github.com/sdougbrown/writetighter/internal/codecomment"
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/guidance"
@@ -162,14 +163,16 @@ func (a *App) RunLint(params LintParams) error {
 		if params.Kind != "" {
 			doc.Kind = params.Kind
 		}
-		ctx := &check.RunContext{Document: doc, Profile: r, Terms: terms}
-		for _, c := range enabled {
-			more, err := c.Run(ctx)
-			if err != nil {
-				return err
-			}
-			findings = append(findings, more...)
+		var more []report.Finding
+		if usesCodeCommentCatalog(params.Kind, params.Stdin, params.Text, doc) {
+			more, err = lintCodeCommentCatalog(doc, r, terms, enabled)
+		} else {
+			more, err = runDeterministicChecks(doc, r, terms, enabled)
 		}
+		if err != nil {
+			return err
+		}
+		findings = append(findings, more...)
 	}
 	var sourcePath *string
 	if params.Text != nil {
@@ -225,6 +228,123 @@ func (a *App) RunLint(params LintParams) error {
 		return ErrFailThreshold
 	}
 	return nil
+}
+
+func runDeterministicChecks(doc *document.Document, res *profile.Resolution, terms []config.TermEntry, enabled []check.Checker) ([]report.Finding, error) {
+	ctx := &check.RunContext{Document: doc, Profile: res, Terms: terms}
+	var findings []report.Finding
+	for _, checker := range enabled {
+		more, err := checker.Run(ctx)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, more...)
+	}
+	return findings, nil
+}
+
+type commentLintProjection struct {
+	startByte int
+	endByte   int
+	comment   codecomment.Comment
+}
+
+func lintCodeCommentCatalog(doc *document.Document, res *profile.Resolution, terms []config.TermEntry, enabled []check.Checker) ([]report.Finding, error) {
+	language, ok := codecomment.DetectLanguage(doc.Source)
+	if !ok {
+		return nil, fmt.Errorf("code-comment lint does not support %q", doc.Source)
+	}
+	catalog, err := codecomment.Extract(doc.Source, language, []byte(doc.Content))
+	if err != nil {
+		return nil, fmt.Errorf("cataloging comments in %q: %w", doc.Source, err)
+	}
+	var analysis strings.Builder
+	projections := make([]commentLintProjection, 0, len(catalog.Comments))
+	for i, comment := range catalog.Comments {
+		if i > 0 {
+			analysis.WriteString("\n\n")
+		}
+		start := analysis.Len()
+		analysis.WriteString(comment.Text)
+		projections = append(projections, commentLintProjection{startByte: start, endByte: analysis.Len(), comment: comment})
+	}
+	commentDoc, err := document.FromPlainText(analysis.String(), doc.Source, doc.Kind)
+	if err != nil {
+		return nil, err
+	}
+	findings, err := runDeterministicChecks(commentDoc, res, terms, enabled)
+	if err != nil {
+		return nil, err
+	}
+	for i := range findings {
+		findings[i], err = mapProjectedCommentFinding(findings[i], projections, doc.Content, doc.Source)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return findings, nil
+}
+
+func mapProjectedCommentFinding(finding report.Finding, projections []commentLintProjection, source, sourcePath string) (report.Finding, error) {
+	finding.Path = &sourcePath
+	if finding.Range == nil {
+		return finding, nil
+	}
+	for _, projection := range projections {
+		if finding.Range.StartByte < projection.startByte || finding.Range.EndByte > projection.endByte {
+			continue
+		}
+		finding.Range.StartByte -= projection.startByte
+		finding.Range.EndByte -= projection.startByte
+		return mapCommentFinding(finding, projection.comment, source, sourcePath)
+	}
+	return report.Finding{}, fmt.Errorf("checker %s returned range [%d,%d) outside catalog comments", finding.Checker, finding.Range.StartByte, finding.Range.EndByte)
+}
+
+func mapCommentFinding(finding report.Finding, comment codecomment.Comment, source, sourcePath string) (report.Finding, error) {
+	finding.Path = &sourcePath
+	if finding.Range == nil {
+		return finding, nil
+	}
+	start := finding.Range.StartByte
+	end := finding.Range.EndByte
+	if start < 0 || end < start || end > len(comment.Text) {
+		return report.Finding{}, fmt.Errorf("checker %s returned range [%d,%d) outside comment %s", finding.Checker, start, end, comment.ID)
+	}
+	start += comment.Span.StartByte
+	end += comment.Span.StartByte
+	startLine, startColumn := sourceLineColumn(source, start)
+	endLine, endColumn := sourceLineColumn(source, end)
+	finding.Range = &report.FindingRange{
+		StartByte:   start,
+		EndByte:     end,
+		StartLine:   startLine,
+		StartColumn: startColumn,
+		EndLine:     endLine,
+		EndColumn:   endColumn,
+	}
+	return finding, nil
+}
+
+func sourceLineColumn(content string, byteOffset int) (line, column int) {
+	if byteOffset < 0 {
+		byteOffset = 0
+	}
+	if byteOffset > len(content) {
+		byteOffset = len(content)
+	}
+	line, column = 1, 1
+	for current := 0; current < byteOffset; {
+		r, size := utf8.DecodeRuneInString(content[current:])
+		if r == '\n' {
+			line++
+			column = 1
+		} else {
+			column++
+		}
+		current += size
+	}
+	return line, column
 }
 
 func collectInputs(paths []string, stdin bool, text *string, kind string) ([]*document.Document, error) {
@@ -450,6 +570,15 @@ func (a *App) RunRevise(params ReviseParams) error {
 		return err
 	}
 
+	for _, doc := range docs {
+		if params.Kind != "" {
+			doc.Kind = params.Kind
+		}
+		if len(params.ReferencePaths) > 0 && usesCodeCommentProtocol(params, doc) {
+			return errors.New("code-aware comment revision does not support --reference; omit references or use the legacy stdin/text path")
+		}
+	}
+
 	// Validate terms against profile.
 	if len(terms) > 0 && res != nil && res.Dict != nil {
 		if verr := profile.ValidateAgainstProfile(terms, res.Dict); verr != nil {
@@ -457,12 +586,14 @@ func (a *App) RunRevise(params ReviseParams) error {
 		}
 	}
 
-	// Run static lint findings (for context, not prerequisites).
+	// Run static lint findings only for prose-style revision. Code-aware review
+	// supplies complete source as read-only context and must not present prose
+	// findings over executable tokens as model evidence.
 	enabled := check.Enabled(res)
 	findings := []report.Finding{}
 	for _, doc := range docs {
-		if params.Kind != "" {
-			doc.Kind = params.Kind
+		if usesCodeCommentProtocol(params, doc) {
+			continue
 		}
 		ctx := &check.RunContext{Document: doc, Profile: res, Terms: terms}
 		for _, c := range enabled {
@@ -499,18 +630,37 @@ func (a *App) RunRevise(params ReviseParams) error {
 	}
 
 	type revisionPlan struct {
-		doc    *document.Document
-		chunks []document.ChunkRange
+		doc       *document.Document
+		chunks    []document.ChunkRange
+		codeAware bool
+		noTargets bool
 	}
 	plans := make([]revisionPlan, 0, len(docs))
 	totalRequests := 0
 	for _, doc := range docs {
-		chunks, err := planBudgetedChunks(doc, refPack, llmCfg, maxRequests, res, findings, terms)
-		if err != nil {
-			return fmt.Errorf("planning chunks for %q: %w", doc.Source, err)
+		codeAware := usesCodeCommentProtocol(params, doc)
+		noTargets := false
+		var chunks []document.ChunkRange
+		if codeAware {
+			language, _ := codecomment.DetectLanguage(doc.Source)
+			catalog, catalogErr := codecomment.Extract(doc.Source, language, []byte(doc.Content))
+			if catalogErr != nil {
+				return fmt.Errorf("cataloging comments in %q: %w", doc.Source, catalogErr)
+			}
+			noTargets = len(catalog.Comments) == 0
+			if !noTargets {
+				// Code-aware review is intentionally one whole-source request. Its
+				// request-level context budget is checked by llm.ReviseCodeComments.
+				chunks = []document.ChunkRange{{StartByte: 0, EndByte: len(doc.Content)}}
+			}
+		} else {
+			chunks, err = planBudgetedChunks(doc, refPack, llmCfg, maxRequests, res, findings, terms)
+			if err != nil {
+				return fmt.Errorf("planning chunks for %q: %w", doc.Source, err)
+			}
 		}
 		totalRequests += len(chunks)
-		plans = append(plans, revisionPlan{doc: doc, chunks: chunks})
+		plans = append(plans, revisionPlan{doc: doc, chunks: chunks, codeAware: codeAware, noTargets: noTargets})
 	}
 	if totalRequests > maxRequests {
 		return fmt.Errorf("revision requires %d model requests, exceeding configured max_requests=%d", totalRequests, maxRequests)
@@ -522,6 +672,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 	revisionErrors := make([]report.RevisionError, 0)
 	analysis := make([]report.SourceAnalysis, 0, len(plans))
 	discardedRewrites := 0
+	discardedFindings := 0
 	succeededRequests := 0
 	requestsMade := 0
 	remainingPrimaryRequests := totalRequests
@@ -533,6 +684,9 @@ func (a *App) RunRevise(params ReviseParams) error {
 			}
 		}
 		coverage := report.SourceAnalysis{SourcePath: plan.doc.Source, InputBytes: len(plan.doc.Content), Chunks: len(plan.chunks)}
+		if plan.noTargets {
+			coverage.AnalyzedBytes = len(plan.doc.Content)
+		}
 		if plan.doc.Format == document.FormatHTML {
 			coverage.SourceFormat = "html"
 			coverage.RangeBasis = "visible_text"
@@ -541,13 +695,25 @@ func (a *App) RunRevise(params ReviseParams) error {
 			requestsMade++
 			remainingPrimaryRequests--
 			coverage.ModelRequests++
-			revResp, callErr := llm.ReviseChunk(context.Background(), llmCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte, refPack)
+			var revResp *report.ReviseResponse
+			var callErr error
+			if plan.codeAware {
+				revResp, callErr = llm.ReviseCodeComments(context.Background(), llmCfg, plan.doc, res)
+			} else {
+				revResp, callErr = llm.ReviseChunk(context.Background(), llmCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte, refPack)
+			}
 			if callErr != nil && errors.Is(callErr, llm.ErrInvalidModelResponse) && (llmResponseMode == "json_object" || llmResponseMode == "json_schema") && requestsMade+remainingPrimaryRequests < maxRequests {
 				fallbackCfg := llmCfg
 				fallbackCfg.ResponseMode = "prompt_json"
 				requestsMade++
 				coverage.ModelRequests++
-				fallbackResp, fallbackErr := llm.ReviseChunk(context.Background(), fallbackCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte, refPack)
+				var fallbackResp *report.ReviseResponse
+				var fallbackErr error
+				if plan.codeAware {
+					fallbackResp, fallbackErr = llm.ReviseCodeComments(context.Background(), fallbackCfg, plan.doc, res)
+				} else {
+					fallbackResp, fallbackErr = llm.ReviseChunk(context.Background(), fallbackCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte, refPack)
+				}
 				if fallbackErr == nil {
 					revResp, callErr = fallbackResp, nil
 				} else {
@@ -564,6 +730,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 			succeededRequests++
 			coverage.AnalyzedBytes += chunk.EndByte - chunk.StartByte
 			discardedRewrites += revResp.DiscardedRewrites
+			discardedFindings += revResp.DiscardedFindings
 			allRevisions = append(allRevisions, revResp.Revisions...)
 		}
 		coverage.Complete = coverage.AnalyzedBytes == len(plan.doc.AnalysisContent())
@@ -614,6 +781,7 @@ func (a *App) RunRevise(params ReviseParams) error {
 		Analysis:          analysis,
 		Status:            status,
 		DiscardedRewrites: discardedRewrites,
+		DiscardedFindings: discardedFindings,
 		Errors:            revisionErrors,
 		Revisions:         allRevisions,
 		ReferenceContext:  referenceContext,
@@ -633,6 +801,21 @@ func (a *App) RunRevise(params ReviseParams) error {
 		return fmt.Errorf("%w: %d document revision request(s) failed", ErrReviseFailed, len(revisionErrors))
 	}
 	return nil
+}
+
+// usesCodeCommentProtocol selects lexer-owned comment IDs only for explicit file
+// input. Stdin, --text, and unsupported extensions deliberately retain the
+// legacy prose-style code-comment path.
+func usesCodeCommentProtocol(params ReviseParams, doc *document.Document) bool {
+	return usesCodeCommentCatalog(params.Kind, params.Stdin, params.Text, doc)
+}
+
+func usesCodeCommentCatalog(kind string, stdin bool, text *string, doc *document.Document) bool {
+	if kind != guidance.KindCodeComment || stdin || text != nil || doc == nil {
+		return false
+	}
+	_, ok := codecomment.DetectLanguage(doc.Source)
+	return ok
 }
 
 // planBudgetedChunks plans chunks for a single document, taking into account

@@ -71,6 +71,18 @@ func FromReader(r io.Reader, source, kind string) (*Document, error) {
 	return newDocument(source, kind, content), nil
 }
 
+// FromPlainText creates a text-format document without content-based HTML
+// detection. It is useful for source-derived prose whose coordinate space must
+// remain byte-for-byte identical to text embedded in another document.
+func FromPlainText(text, source, kind string) (*Document, error) {
+	if !utf8.ValidString(text) {
+		return nil, errors.New("invalid UTF-8")
+	}
+	doc := &Document{Source: source, Kind: kind, Format: FormatText, Content: text}
+	doc.Segments = segmentMarkdown(text)
+	return doc, nil
+}
+
 // FromText creates a bounded virtual document from a command-line text value.
 func FromText(text, kind string) (*Document, error) {
 	if len(text) > limits.MaxAggregateBytes {

@@ -44,6 +44,9 @@ type Request struct {
 	Messages       []Message       `json:"messages"`
 	ResponseFormat *ResponseFormat `json:"response_format,omitempty"`
 	MaxTokens      *int            `json:"max_tokens,omitempty"`
+	// InputLimit is a request-scoped message-content ceiling. Zero preserves
+	// the legacy transport ceiling; it is never sent to the endpoint.
+	InputLimit int `json:"-"`
 }
 
 type Message struct {
@@ -108,8 +111,12 @@ func (c *Client) Do(ctx context.Context, req Request) (*Response, error) {
 	for _, m := range req.Messages {
 		totalInput += len(m.Content)
 	}
-	if totalInput > MaxInputChars {
-		return nil, fmt.Errorf("llm input too large")
+	inputLimit := req.InputLimit
+	if inputLimit <= 0 {
+		inputLimit = MaxInputChars
+	}
+	if totalInput > inputLimit {
+		return nil, fmt.Errorf("llm input too large: %d bytes exceeds request limit of %d bytes", totalInput, inputLimit)
 	}
 	if c.MaxOutputTokens() > 0 {
 		tok := c.MaxOutputTokens()

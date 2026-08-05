@@ -3,3 +3,12 @@
 dist/
 node_modules/
 site/.vitepress/cache
+
+# Local Longe evaluation artefacts and copied sibling-repo corpus.
+evals/fixtures/code-comments/seed/_corpus/
+evals/fixtures/**/runs/
+evals/.venv/
+evals/.pytest_cache/
+evals/**/__pycache__/
+evals/dist/
+evals/*.egg-info/

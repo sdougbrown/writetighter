@@ -1,0 +1,12 @@
+{
+  "mode": "code-aware-ids",
+  "minimum_confidence": 0.8,
+  "extra_directions": [
+    "Report only material comment defects, not optional polish or stylistic preference.",
+    "If a comment is accurate and reasonably clear, return no finding even when you can phrase it differently.",
+    "Do not replace one narration of adjacent code with another narration of the same code.",
+    "Treat concise section labels as useful when they make a long function easier to scan.",
+    "Treat comments that explain hidden invariants, ordering assumptions, cache precedence, mutation-test equivalence, or maintenance constraints as useful unless they are genuinely unclear or wrong.",
+    "Prefer a false negative over an ungrounded or low-value finding."
+  ]
+}

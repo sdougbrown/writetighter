@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "output": "evals/fixtures/code-comments/seed/_corpus",
+  "files": [
+    {
+      "repo": "avenor",
+      "language": "go",
+      "path": "internal/digest/accumulate.go",
+      "sha256": "bd28d3c36def7aee80fec11c1af53560225698d7a0f40364c5b7766a43af203d",
+      "size": 4635
+    },
+    {
+      "repo": "writetighter",
+      "language": "go",
+      "path": "internal/guidance/guidance.go",
+      "sha256": "2f296e90777562db9e3a1005eaa013110434ba0aa0d3e0a5a1cfa8b78f1585b0",
+      "size": 13597
+    },
+    {
+      "repo": "longe",
+      "language": "py",
+      "path": "src/longe/runner.py",
+      "sha256": "d96e35bc48eaa9ce019c6b475b33b7d4237447f88112786e717438aef80ebdf8",
+      "size": 9881
+    },
+    {
+      "repo": "vllm-python",
+      "language": "py",
+      "path": "vllm/entrypoints/utils.py",
+      "sha256": "69bbef7f1ffe6ed5d1e25b1649251bd81f9c61bfa8ad5a23c68e118bfe49ef67",
+      "size": 15073
+    },
+    {
+      "repo": "daywatch-cal-rust",
+      "language": "rust",
+      "path": "crates/daywatch-cal/src/scoring.rs",
+      "sha256": "d2094fddb7cbdfb06c8238fcc3efc89fa25dc837a98c2f644ae453821e5ee57b",
+      "size": 9446
+    },
+    {
+      "repo": "vllm-rust",
+      "language": "rust",
+      "path": "rust/src/text/src/lower.rs",
+      "sha256": "df80157ae495fd1884a41ef541f00a19db22a99d8de1c8306603bc263852c751",
+      "size": 23928
+    },
+    {
+      "repo": "daywatch-cal-ts",
+      "language": "ts",
+      "path": "packages/core/src/scoring.ts",
+      "sha256": "50941d9bde9f2303b5194576817c1b371f73fefb77b63777699d5b823d3b9c6a",
+      "size": 5031
+    },
+    {
+      "repo": "umpire",
+      "language": "ts",
+      "path": "packages/core/src/graph.ts",
+      "sha256": "cd67229bb4e799447b41d43b1bf4808d95509915777c095fececb50f39a0f71c",
+      "size": 6302
+    }
+  ]
+}

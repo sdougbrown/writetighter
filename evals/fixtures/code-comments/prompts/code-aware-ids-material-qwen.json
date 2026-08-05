@@ -1,0 +1,13 @@
+{
+  "mode": "code-aware-ids",
+  "model": "qwen-moe-instruct",
+  "minimum_confidence": 0.8,
+  "extra_directions": [
+    "Inspect every catalog entry, but report only material defects established by the source rather than optional polish.",
+    "Treat comments about a previous implementation, a past refactor, or satisfying a linter as stale edit history unless that history states an enduring maintenance constraint. Preserve any still-useful description of current behavior in the rewrite.",
+    "A useful rationale comment may still need a rewrite when compressed shorthand obscures the actor, precedence direction, condition, or consequence. Preserve the rationale instead of deleting it.",
+    "For ordering assumptions, cache collision precedence, and mutation-test equivalence, check that the causal chain is direct and unambiguous. Rewrite dense multi-claim explanations when the adjacent code proves a clearer formulation.",
+    "Do not flag concise section labels, accurate API summaries, or comments that are already reasonably direct.",
+    "Emit a finding only when you can cite a concrete defect and, for rewrites, derive the complete replacement from the source. Such a source-grounded finding should use confidence 0.8 or higher; omit genuinely uncertain suggestions."
+  ]
+}

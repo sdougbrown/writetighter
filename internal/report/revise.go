@@ -20,16 +20,19 @@ type ReferenceContext struct {
 
 // ReviseResponse is the top-level structured JSON response for `writetighter revise`.
 type ReviseResponse struct {
-	SchemaVersion     int               `json:"schema_version"`
-	ToolVersion       string            `json:"tool_version"`
-	Status            string            `json:"status"`
-	ProfileID         string            `json:"profile_id"`
-	ProfileVersion    string            `json:"profile_version"`
-	LLMModel          string            `json:"llm_model"`
-	LLMProvider       string            `json:"llm_provider"`
-	Sources           []string          `json:"sources"`
-	Analysis          []SourceAnalysis  `json:"analysis"`
-	DiscardedRewrites int               `json:"discarded_rewrites"`
+	SchemaVersion     int              `json:"schema_version"`
+	ToolVersion       string           `json:"tool_version"`
+	Status            string           `json:"status"`
+	ProfileID         string           `json:"profile_id"`
+	ProfileVersion    string           `json:"profile_version"`
+	LLMModel          string           `json:"llm_model"`
+	LLMProvider       string           `json:"llm_provider"`
+	Sources           []string         `json:"sources"`
+	Analysis          []SourceAnalysis `json:"analysis"`
+	DiscardedRewrites int              `json:"discarded_rewrites"`
+	// DiscardedFindings counts individually rejected findings in protocols that
+	// validate model output against immutable source-owned targets.
+	DiscardedFindings int               `json:"discarded_findings"`
 	Errors            []RevisionError   `json:"errors,omitempty"`
 	Revisions         []RevisionItem    `json:"revisions"`
 	ReferenceContext  *ReferenceContext `json:"reference_context,omitempty"`
@@ -119,6 +122,9 @@ func RenderReviseHuman(r *ReviseResponse) (string, error) {
 	}
 	if r.DiscardedRewrites > 0 {
 		fmt.Fprintf(&b, "discarded unsafe rewrites: %d\n", r.DiscardedRewrites)
+	}
+	if r.DiscardedFindings > 0 {
+		fmt.Fprintf(&b, "discarded invalid findings: %d\n", r.DiscardedFindings)
 	}
 	for _, item := range r.Errors {
 		fmt.Fprintf(&b, "error: %s: %s\n", item.SourcePath, item.Message)
