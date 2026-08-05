@@ -352,16 +352,15 @@ func isRustLifetime(source []byte, quote int) bool {
 func skipRustBlockComment(source []byte, start int) (int, error) {
 	depth := 1
 	for i := start + 2; i+1 < len(source); i++ {
-		switch string(source[i : i+2]) {
-		case "/*":
-			depth++
-			i++
-		case "*/":
+		if source[i] == '*' && source[i+1] == '/' {
 			depth--
 			i++
 			if depth == 0 {
 				return i + 1, nil
 			}
+		} else if source[i] == '/' && source[i+1] == '*' {
+			depth++
+			i++
 		}
 	}
 	return 0, fmt.Errorf("unterminated nested block comment")
