@@ -1,0 +1,38 @@
+{
+  "name": "writetighter",
+  "version": "0.1.0",
+  "description": "Check drafted prose with the writetighter CLI before shipping — deterministic lint plus contextual revision. Reports rule findings and model-suggested rewrites; you apply them.",
+  "author": {
+    "name": "Doug Brown",
+    "url": "https://github.com/sdougbrown"
+  },
+  "homepage": "https://writetighter.douggo.com/",
+  "repository": "https://github.com/sdougbrown/writetighter",
+  "license": "MIT",
+  "keywords": [
+    "writing",
+    "prose",
+    "lint",
+    "documentation",
+    "markdown"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "WriteTighter",
+    "shortDescription": "Tighten drafted prose before shipping",
+    "longDescription": "Use WriteTighter from Codex to lint and revise drafted prose — PR descriptions, plans, docs, commit bodies, code comments — before it ships. Run the deterministic `lint` and contextual `revise` commands, apply only the changes you can verify, and surface clarification questions instead of guessing.",
+    "developerName": "Doug Brown",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://writetighter.douggo.com/",
+    "defaultPrompt": [
+      "Tighten this drafted prose with writetighter before I ship it — lint and revise, then apply the changes you can verify.",
+      "Run writetighter on the comments introduced in this PR and propose tighter versions.",
+      "Check this README section with writetighter and tell me what's loose."
+    ],
+    "brandColor": "#2563EB"
+  }
+}

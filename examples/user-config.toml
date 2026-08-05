@@ -1,0 +1,29 @@
+# Example user config for WriteTighter — machine-specific model settings.
+#
+# Place at ~/.config/writetighter/config.toml (or the matching XDG path).
+# This file is the only place LLM settings and credentials live. Never pass API
+# keys on the command line. Run `writetighter config` for a guided setup that
+# discovers endpoint, model, and the best supported response mode.
+#
+# Keep this file readable only by you (chmod 0600) if it holds a key.
+
+[llm]
+provider = "openai-compatible"
+base_url = "http://localhost:4000/v1"
+model = "gemma4"
+# How the model is asked for structured output. `json_schema` sends a full JSON
+# Schema (preferred for smaller models). `json_object` is a lighter hint.
+# `prompt_json` relies on prompt instructions only and is the universal
+# fallback. The setup wizard picks the best supported mode automatically.
+response_mode = "json_schema"
+# Caps how many model calls a single revise run may make. Raise deliberately
+# for large documents.
+max_requests = 32
+
+# --- Credentials: pick ONE source, do not commit a real key -----------------
+
+# Option A — a local PAT stored in this 0600 file:
+# api_key = "pat-value"
+
+# Option B — the name of an environment variable, so the key is never persisted:
+# api_key_env = "WRITETIGHTER_API_KEY"

@@ -72,3 +72,7 @@ $ARGUMENTS: the prose to tighten, plus an optional `--kind`
 - **Delegated model:** Good if you've just got a "coding plan" and don't want to configure any API stuff.
 
 Both rely on the commands documented in the [CLI reference](/cli).
+
+::: tip Packaged plugin
+For Claude Code or Codex, you can skip the manual skill file and install the bundled `tighten` plugin instead — see the [Claude Code plugin](/claude-plugin) and [Codex plugin](/codex-plugin) guides. The plugin formalizes the workflow below, including subagent delegation when `revise` is unconfigured.
+:::

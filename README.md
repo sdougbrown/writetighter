@@ -143,6 +143,8 @@ The specialized lenses ask for clarification instead of inferring missing code b
 
 For holistic skill or prompt review, pass `writetighter prompt --kind agent-instruction` and the full instruction to a capable reasoning agent. The wrapping agent still verifies and applies any proposed change.
 
+For Claude Code and Codex, a packaged plugin wraps this workflow as an installable `tighten` skill — see the [Claude Code plugin guide](https://writetighter.douggo.com/claude-plugin) and the [Codex plugin guide](https://writetighter.douggo.com/codex-plugin).
+
 ### `writetighter revise` (Opt-In Contextual Revision)
 
 `revise` runs contextual revision with the configured model. It reads LLM configuration from your user config (`~/.config/writetighter/config.toml [llm]` section) and never modifies target files.
@@ -369,3 +371,5 @@ As this is a private development build, please be aware of the following:
 - [Product naming decision](docs/decisions/0001-product-name.md)
 - [Data provenance and rights](docs/data-provenance.md)
 - [Agent workflow](docs/agent-workflow.md)
+- [Claude Code plugin](https://writetighter.douggo.com/claude-plugin) and [Codex plugin](https://writetighter.douggo.com/codex-plugin)
+- Example configs in [`examples/`](examples/)

@@ -1,0 +1,30 @@
+# Example project config for WriteTighter.
+#
+# Place this file as `.writetighter.toml` at the root of a project (or pass it
+# with `--config PATH`). WriteTighter searches upward from the working directory
+# for `.writetighter.toml`. This file pins the profile version the project is
+# checked against and can extend the dictionary with project-specific terms.
+#
+# Project config never contains LLM settings or credentials — those live in the
+# user config (~/.config/writetighter/config.toml). Run `writetighter config`
+# for model setup.
+
+[profile]
+id = "software-docs-en"
+version = "0.4.0"
+
+# A project term that does not conflict with a discouraged profile entry needs
+# no override.
+[[terms]]
+term = "hydrate"
+parts_of_speech = ["verb"]
+definition = "Restore serialized application state."
+
+# A project term that conflicts with a discouraged profile entry must set
+# `override = true` and give a non-empty reason.
+[[terms]]
+term = "utilize"
+parts_of_speech = ["verb"]
+definition = "The name of the project's public API operation."
+override = true
+reason = "The published API uses this exact operation name."

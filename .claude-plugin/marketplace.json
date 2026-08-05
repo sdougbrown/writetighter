@@ -1,0 +1,24 @@
+{
+  "name": "writetighter",
+  "owner": {
+    "name": "Doug Brown"
+  },
+  "plugins": [
+    {
+      "name": "writetighter",
+      "source": "./marketplace/plugins/writetighter",
+      "displayName": "WriteTighter",
+      "description": "Check drafted prose with the writetighter CLI before shipping — deterministic lint plus contextual revision. Reports rule findings and model-suggested rewrites; the agent applies them.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Doug Brown",
+        "url": "https://github.com/sdougbrown"
+      },
+      "homepage": "https://writetighter.douggo.com/",
+      "repository": "https://github.com/sdougbrown/writetighter",
+      "license": "MIT",
+      "keywords": ["writing", "prose", "lint", "documentation", "markdown"],
+      "category": "Productivity"
+    }
+  ]
+}
