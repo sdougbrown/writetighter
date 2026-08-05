@@ -61,6 +61,22 @@ writetighter profile verify software-docs-en@0.4.0 --format json
 writetighter profile list
 ```
 
+## References (optional)
+
+When the document being revised needs broader context, you can provide
+reference files with `--reference PATH`. Reference material is read-only
+context; it is never linted or returned as a rewrite target. The contextual
+revision can use reference facts to produce grounded rewrites instead of
+asking for clarification.
+
+```sh
+writetighter revise docs/ --reference style-guide.md --format json
+```
+
+Reference paths may be files or directories. When combined with `revise`, the
+`reference_context` field in the response reports metadata about the reference
+material without exposing its content.
+
 ## Precision gating
 
 Lint findings are advisory by default. Enable required rules only

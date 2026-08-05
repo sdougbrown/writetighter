@@ -30,6 +30,30 @@ const (
 	maxResponse        = 1 << 20
 )
 
+// ModelInfo describes a model returned by the /v1/models endpoint.
+type ModelInfo struct {
+	ID               string `json:"id"`
+	ContextLength    int    `json:"context_length,omitempty"`
+	MaxContextLength int    `json:"max_context_length,omitempty"`
+	MaxModelLen      int    `json:"max_model_len,omitempty"`
+}
+
+// SuggestedContextWindow returns the suggested context window from model metadata,
+// or 0 if no metadata is available. The precedence order is:
+// context_length, max_context_length, max_model_len.
+func (m ModelInfo) SuggestedContextWindow() int {
+	if m.ContextLength > 0 {
+		return m.ContextLength
+	}
+	if m.MaxContextLength > 0 {
+		return m.MaxContextLength
+	}
+	if m.MaxModelLen > 0 {
+		return m.MaxModelLen
+	}
+	return 0
+}
+
 // SecretReader reads a secret without persisting it.
 type SecretReader func(prompt string) (string, error)
 
@@ -162,8 +186,9 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	fmt.Fprintf(opts.Out, "Querying %s/models ...\n", baseURL)
-	models, discoveryErr := listModels(ctx, opts.HTTPClient, baseURL, apiKey)
+	models, discoveryErr := ListModels(ctx, opts.HTTPClient, baseURL, apiKey)
 	var model string
+	var selectedModelInfo *ModelInfo
 	if discoveryErr != nil || len(models) == 0 {
 		if discoveryErr != nil {
 			fmt.Fprintf(opts.Out, "Model discovery was unavailable: %v\n", discoveryErr)
@@ -172,7 +197,7 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		}
 		model, err = wizard.ask("Model ID", existing.LLM.Model)
 	} else {
-		model, err = wizard.selectModel(models, existing.LLM.Model)
+		model, selectedModelInfo, err = wizard.selectModel(models, existing.LLM.Model)
 	}
 	if err != nil {
 		return nil, err
@@ -202,15 +227,67 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		break
 	}
 
+	// --- Context capacity prompt ---
+	confirmedContextWindow := 0
+	confirmedMaxOutputTokens := 0
+
+	if selectedModelInfo != nil && selectedModelInfo.SuggestedContextWindow() > 0 {
+		suggested := selectedModelInfo.SuggestedContextWindow()
+		fmt.Fprintf(opts.Out, "Model %s suggests a context window of %d tokens.\n", model, suggested)
+		contextInput, err := wizard.ask("Context window (press Enter to accept)", strconv.Itoa(suggested))
+		if err != nil {
+			return nil, err
+		}
+		if n, parseErr := strconv.Atoi(contextInput); parseErr == nil && n > 0 {
+			confirmedContextWindow = n
+		}
+	} else {
+		// No metadata suggestion; optionally ask.
+		label := "Context window in tokens (or 0 to skip)"
+		if selectedModelInfo == nil {
+			label = "Context window in tokens (or 0 to skip; metadata unavailable)"
+		}
+		contextInput, err := wizard.ask(label, "0")
+		if err != nil {
+			return nil, err
+		}
+		if n, parseErr := strconv.Atoi(contextInput); parseErr == nil && n > 0 {
+			confirmedContextWindow = n
+		}
+	}
+
+	// Max output tokens prompt (always asked).
+	defaultOutput := strconv.Itoa(config.DefaultMaxOutputTokens)
+	if confirmedContextWindow > 0 && config.DefaultMaxOutputTokens >= confirmedContextWindow {
+		defaultOutput = strconv.Itoa(confirmedContextWindow / 2)
+	}
+	outputInput, err := wizard.ask("Max output tokens", defaultOutput)
+	if err != nil {
+		return nil, err
+	}
+	if n, parseErr := strconv.Atoi(outputInput); parseErr == nil && n > 0 {
+		confirmedMaxOutputTokens = n
+	}
+
+	confirmedModel := ""
+	if confirmedContextWindow > 0 {
+		// context_window_model records the model for which the context window
+		// was last confirmed. If capacity was not confirmed, leave it unset so
+		// downstream code never mistakes an unconfirmed window as valid.
+		confirmedModel = model
+	}
 	existing.LLM = config.LLMConfig{
-		Provider:     "openai-compatible",
-		BaseURL:      baseURL,
-		Model:        model,
-		APIKey:       storedAPIKey,
-		APIKeyEnv:    apiKeyEnv,
-		Timeout:      defaultTimeout.String(),
-		ResponseMode: responseMode,
-		MaxRequests:  defaultMaxRequests,
+		Provider:            "openai-compatible",
+		BaseURL:             baseURL,
+		Model:               model,
+		APIKey:              storedAPIKey,
+		APIKeyEnv:           apiKeyEnv,
+		Timeout:             defaultTimeout.String(),
+		ResponseMode:        responseMode,
+		MaxRequests:         defaultMaxRequests,
+		ContextWindowTokens: confirmedContextWindow,
+		MaxOutputTokens:     confirmedMaxOutputTokens,
+		ContextWindowModel:  confirmedModel,
 	}
 	path, err := config.WriteUserConfig(existing)
 	if err != nil {
@@ -248,30 +325,32 @@ func (w *wizard) ask(label, defaultValue string) (string, error) {
 	return value, nil
 }
 
-func (w *wizard) selectModel(models []string, previous string) (string, error) {
+func (w *wizard) selectModel(models []ModelInfo, previous string) (string, *ModelInfo, error) {
 	defaultIndex := 0
 	for i, model := range models {
-		if model == previous {
+		if model.ID == previous {
 			defaultIndex = i
 		}
-		fmt.Fprintf(w.out, "  %d) %s\n", i+1, model)
+		fmt.Fprintf(w.out, "  %d) %s\n", i+1, model.ID)
 	}
 	choice, err := w.ask("Select a model by number or ID", strconv.Itoa(defaultIndex+1))
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 	if n, err := strconv.Atoi(choice); err == nil {
 		if n < 1 || n > len(models) {
-			return "", fmt.Errorf("model selection %d is out of range", n)
+			return "", nil, fmt.Errorf("model selection %d is out of range", n)
 		}
-		return models[n-1], nil
+		info := models[n-1]
+		return info.ID, &info, nil
 	}
 	for _, model := range models {
-		if choice == model {
-			return model, nil
+		if choice == model.ID {
+			info := model
+			return info.ID, &info, nil
 		}
 	}
-	return "", fmt.Errorf("model %q was not reported by the endpoint", choice)
+	return "", nil, fmt.Errorf("model %q was not reported by the endpoint", choice)
 }
 
 // NormalizeBaseURL accepts a URL, a localhost port, or host:port and returns an API root.
@@ -315,12 +394,11 @@ func NormalizeBaseURL(value string) (string, error) {
 }
 
 type modelsEnvelope struct {
-	Data []struct {
-		ID string `json:"id"`
-	} `json:"data"`
+	Data []ModelInfo `json:"data"`
 }
 
-func listModels(ctx context.Context, client *http.Client, baseURL, apiKey string) ([]string, error) {
+// ListModels queries the /v1/models endpoint and returns discovered models with metadata.
+func ListModels(ctx context.Context, client *http.Client, baseURL, apiKey string) ([]ModelInfo, error) {
 	body, err := doJSON(ctx, client, http.MethodGet, baseURL+"/models", apiKey, nil)
 	if err != nil {
 		return nil, err
@@ -330,7 +408,7 @@ func listModels(ctx context.Context, client *http.Client, baseURL, apiKey string
 		return nil, fmt.Errorf("decode models response: %w", err)
 	}
 	seen := make(map[string]struct{})
-	models := make([]string, 0, len(envelope.Data))
+	models := make([]ModelInfo, 0, len(envelope.Data))
 	for _, item := range envelope.Data {
 		id := strings.TrimSpace(item.ID)
 		if !validModelID(id) {
@@ -340,9 +418,9 @@ func listModels(ctx context.Context, client *http.Client, baseURL, apiKey string
 			continue
 		}
 		seen[id] = struct{}{}
-		models = append(models, id)
+		models = append(models, item)
 	}
-	sort.Strings(models)
+	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
 	return models, nil
 }
 
@@ -383,6 +461,29 @@ func probeModel(ctx context.Context, client *http.Client, baseURL, model, apiKey
 		return fmt.Errorf("assistant did not return JSON: %w", err)
 	}
 	return nil
+}
+
+// ProbeResponseMode probes the model for supported response modes and returns
+// the best available mode. It probes json_schema, json_object, then prompt_json.
+func ProbeResponseMode(ctx context.Context, client *http.Client, baseURL, model, apiKey string) (string, error) {
+	probeOrder := []struct {
+		mode      string
+		nextLabel string
+	}{
+		{"json_schema", "json_object"},
+		{"json_object", "prompt-only JSON"},
+		{"prompt_json", ""},
+	}
+	for i, step := range probeOrder {
+		if err := probeModel(ctx, client, baseURL, model, apiKey, step.mode); err != nil {
+			if i == len(probeOrder)-1 {
+				return "", err
+			}
+			continue
+		}
+		return step.mode, nil
+	}
+	return "", errors.New("no response mode accepted")
 }
 
 // buildProbeResponseFormat constructs the response_format field for the

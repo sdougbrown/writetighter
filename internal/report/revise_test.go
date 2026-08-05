@@ -145,6 +145,87 @@ func TestReviseResponseHumanEmpty(t *testing.T) {
 	}
 }
 
+func TestReviseResponseWithReferenceContext(t *testing.T) {
+	rc := &ReferenceContext{
+		Paths:               []string{"refs/"},
+		Files:               []string{"refs/style-guide.md"},
+		InputBytes:          50000,
+		IncludedBytes:       12000,
+		Complete:            false,
+		Warnings:            []string{"skipping symlink: refs/skip.txt"},
+		ContextWindowTokens: 8192,
+		MaxOutputTokens:     4096,
+	}
+	resp := &ReviseResponse{
+		SchemaVersion:    1,
+		ToolVersion:      "0.1.0",
+		Status:           "ok",
+		Revisions:        []RevisionItem{},
+		ReferenceContext: rc,
+	}
+
+	t.Run("json output", func(t *testing.T) {
+		got, err := RenderReviseJSON(resp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, "reference_context") {
+			t.Fatalf("expected reference_context in JSON: %s", got)
+		}
+		if !strings.Contains(got, "refs/style-guide.md") {
+			t.Fatalf("expected file path in JSON: %s", got)
+		}
+		if !strings.Contains(got, `"context_window_tokens": 8192`) {
+			t.Fatalf("expected context_window_tokens in JSON: %s", got)
+		}
+		if !strings.Contains(got, `"warnings"`) || !strings.Contains(got, "skipping symlink: refs/skip.txt") {
+			t.Fatalf("expected warnings in JSON: %s", got)
+		}
+		if !strings.Contains(got, `"max_output_tokens": 4096`) {
+			t.Fatalf("expected max_output_tokens in JSON: %s", got)
+		}
+	})
+
+	t.Run("human output", func(t *testing.T) {
+		got, err := RenderReviseHuman(resp)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(got, "reference context:") {
+			t.Fatalf("expected reference context in human output: %s", got)
+		}
+		if !strings.Contains(got, "1 files, 12000/50000 bytes, complete=false") {
+			t.Fatalf("expected reference context details in human output: %s", got)
+		}
+		if !strings.Contains(got, "reference warning: skipping symlink: refs/skip.txt") {
+			t.Fatalf("expected symlink warning in human output: %s", got)
+		}
+	})
+
+	t.Run("omit when nil", func(t *testing.T) {
+		respNoRef := &ReviseResponse{
+			SchemaVersion: 1,
+			ToolVersion:   "0.1.0",
+			Status:        "ok",
+			Revisions:     []RevisionItem{},
+		}
+		got, err := RenderReviseJSON(respNoRef)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(got, "reference_context") {
+			t.Fatalf("expected no reference_context when nil: %s", got)
+		}
+		human, err := RenderReviseHuman(respNoRef)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(human, "reference context:") {
+			t.Fatalf("expected no reference context in human when nil: %s", human)
+		}
+	})
+}
+
 func TestReviseResponseClarification(t *testing.T) {
 	question := "Did you mean 'optimize'?"
 	resp := &ReviseResponse{

@@ -202,3 +202,131 @@ func TestProjectConfigRejectsApiKeyEnvInProject(t *testing.T) {
 	}
 	t.Logf("got expected error: %v", err)
 }
+
+func TestLLMConfigContextValidation(t *testing.T) {
+	// Helper to write a user config file at the expected path under dir.
+	writeCfg := func(t *testing.T, dir string, data []byte) {
+		t.Helper()
+		cfgDir := filepath.Join(dir, "writetighter")
+		if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		path := filepath.Join(cfgDir, "config.toml")
+		if err := os.WriteFile(path, data, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("valid with both tokens", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='gemma4'\ncontext_window_tokens=8192\nmax_output_tokens=4096\n"))
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		cfg, err := LoadUserConfig()
+		if err != nil {
+			t.Fatalf("expected valid config to load, got: %v", err)
+		}
+		if cfg.LLM.ContextWindowTokens != 8192 {
+			t.Fatalf("expected context_window_tokens=8192, got %d", cfg.LLM.ContextWindowTokens)
+		}
+		if cfg.LLM.MaxOutputTokens != 4096 {
+			t.Fatalf("expected max_output_tokens=4096, got %d", cfg.LLM.MaxOutputTokens)
+		}
+	})
+
+	t.Run("rejects context_window_tokens=0", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\ncontext_window_tokens=0\n"))
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		_, err := LoadUserConfig()
+		if err == nil {
+			t.Fatal("expected error for context_window_tokens=0")
+		}
+		if !strings.Contains(err.Error(), "context_window_tokens must be > 0") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects negative context_window_tokens", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\ncontext_window_tokens=-100\n"))
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		_, err := LoadUserConfig()
+		if err == nil {
+			t.Fatal("expected error for negative context_window_tokens")
+		}
+		if !strings.Contains(err.Error(), "context_window_tokens must be > 0") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects max_output_tokens >= context_window_tokens", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\ncontext_window_tokens=4096\nmax_output_tokens=4096\n"))
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		_, err := LoadUserConfig()
+		if err == nil {
+			t.Fatal("expected error for max_output_tokens >= context_window_tokens")
+		}
+		if !strings.Contains(err.Error(), "must be less than") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects max_output_tokens greater than context", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\ncontext_window_tokens=4096\nmax_output_tokens=8192\n"))
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		_, err := LoadUserConfig()
+		if err == nil {
+			t.Fatal("expected error for max_output_tokens > context_window_tokens")
+		}
+		if !strings.Contains(err.Error(), "must be less than") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("round-trip through write and load", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", root)
+		orig := &UserConfig{LLM: LLMConfig{
+			Provider:            "openai-compatible",
+			BaseURL:             "http://localhost:4000/v1",
+			Model:               "gemma4",
+			APIKeyEnv:           "WRITETIGHTER_API_KEY",
+			ResponseMode:        "json_object",
+			ContextWindowTokens: 8192,
+			MaxOutputTokens:     4096,
+		}}
+		path, err := WriteUserConfig(orig)
+		if err != nil {
+			t.Fatalf("WriteUserConfig failed: %v", err)
+		}
+		loaded, err := LoadUserConfig()
+		if err != nil {
+			t.Fatalf("LoadUserConfig after write failed: %v", err)
+		}
+		if loaded.LLM.ContextWindowTokens != 8192 {
+			t.Fatalf("round-trip context_window_tokens: got %d, want 8192", loaded.LLM.ContextWindowTokens)
+		}
+		if loaded.LLM.MaxOutputTokens != 4096 {
+			t.Fatalf("round-trip max_output_tokens: got %d, want 4096", loaded.LLM.MaxOutputTokens)
+		}
+		if loaded.LLM.ContextWindowModel != "" {
+			t.Fatalf("round-trip context_window_model: got %q, want empty", loaded.LLM.ContextWindowModel)
+		}
+		_ = path
+	})
+
+	t.Run("backward compat without new fields", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='gemma4'\napi_key_env='WRITETIGHTER_API_KEY'\nresponse_mode='json_object'\n"))
+		t.Setenv("XDG_CONFIG_HOME", dir)
+		cfg, err := LoadUserConfig()
+		if err != nil {
+			t.Fatalf("expected backward-compat config to load: %v", err)
+		}
+		if cfg.LLM.ContextWindowTokens != 0 || cfg.LLM.MaxOutputTokens != 0 || cfg.LLM.ContextWindowModel != "" {
+			t.Fatalf("new fields should be zero-valued when absent: %+v", cfg.LLM)
+		}
+	})
+}

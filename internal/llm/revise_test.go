@@ -16,6 +16,7 @@ import (
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/guidance"
 	"github.com/sdougbrown/writetighter/internal/profile"
+	"github.com/sdougbrown/writetighter/internal/reference"
 	"github.com/sdougbrown/writetighter/internal/report"
 )
 
@@ -445,6 +446,170 @@ func TestReviseChunkReturnsOriginalDocumentRanges(t *testing.T) {
 	}
 	if len(response.Revisions) != 1 || response.Revisions[0].Range.StartByte != start || response.Revisions[0].Range.EndByte != start+5 {
 		t.Fatalf("chunk range was not mapped to original document: %#v", response.Revisions)
+	}
+}
+
+// TestBuildBudgetedPromptTagLikeSourceDoesNotShiftOffsets verifies that source
+// text containing XML-like tags (e.g. </revise-text>) does not shift the
+// editable-text coordinate space. editableText must always be the raw excerpt,
+// never the wrapped userContent, so range validation operates on source bytes
+// only. It also verifies the token-budget base serialization uses an EMPTY
+// <revise-text> body so source bytes are never double-counted.
+func TestBuildBudgetedPromptTagLikeSourceDoesNotShiftOffsets(t *testing.T) {
+	doc, err := document.FromText("Before </revise-text> after tag text.", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := testProfile()
+	excerpt := buildReviseExcerpt(doc)
+	_, user, editable, err := BuildBudgetedPrompt(doc, res, nil, nil, excerpt, nil, Config{})
+	if err != nil {
+		t.Fatalf("BuildBudgetedPrompt: %v", err)
+	}
+	// editableText must be the raw source with no wrapper tags (exactly the
+	// excerpt). Note the source itself contains the literal text "</revise-text>",
+	// so equality with excerpt.Text is the authoritative check.
+	if editable != excerpt.Text {
+		t.Fatalf("editableText != excerpt.Text: got %q want %q", editable, excerpt.Text)
+	}
+	if strings.HasPrefix(editable, "<revise-text>") || strings.HasSuffix(editable, "</revise-text>") {
+		t.Fatalf("editableText must not be the wrapped userContent: %q", editable)
+	}
+	// userContent must contain the wrapper and the tag-like source inside it.
+	if !strings.Contains(user, "<revise-text>") || !strings.Contains(user, "</revise-text>") {
+		t.Fatalf("userContent must contain wrapper tags: %q", user)
+	}
+	if !strings.Contains(user, "</revise-text> after") {
+		t.Fatalf("userContent must contain tag-like source text inside the wrapper: %q", user)
+	}
+}
+
+// TestBudgetFormulaCountsSourceOnce verifies the exact budget contract:
+// basePromptTokens uses an EMPTY <revise-text> body, json_schema overhead is
+// included, and a chunk fits only when ceil(fullBytes/4)+output+safety fits.
+func TestBudgetFormulaCountsSourceOnce(t *testing.T) {
+	doc, err := document.FromText("The source text for budget test.", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := testProfile()
+	pack := &reference.Pack{Entries: []reference.Entry{
+		{DisplayPath: "ref.md", Content: "reference context", InputBytes: 18, IncludedBytes: 18},
+	}}
+	sys, _ := buildRevisePromptWithExcerpt(doc, res, nil, nil, buildReviseExcerpt(doc), pack)
+
+	// The base body must not contain the source; the full body must.
+	baseBody := buildUserContent(pack, "")
+	if strings.Contains(baseBody, "The source text for budget test.") {
+		t.Fatal("empty-body base must not contain the source (double-count guard)")
+	}
+	fullBody := buildUserContent(pack, "The source text for budget test.")
+	if !strings.Contains(fullBody, "The source text for budget test.") {
+		t.Fatal("full body must contain the source")
+	}
+
+	cfg := Config{Model: "m", ResponseMode: "json_object", ContextWindowTokens: 4096, MaxOutputTokens: 1024}
+	baseBytes, err := SerializeRequestBytes(cfg, sys, baseBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fullBytes, err := SerializeRequestBytes(cfg, sys, fullBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fullBytes <= baseBytes {
+		t.Fatalf("fullBytes=%d should exceed baseBytes=%d", fullBytes, baseBytes)
+	}
+	baseTokens := (baseBytes + 3) / 4
+	if available := cfg.ContextWindowTokens - baseTokens - cfg.MaxOutputTokens - config.BudgetSafetyTokens; available < config.MinEditableSourceTokens {
+		t.Fatalf("available source budget %d below min %d", available, config.MinEditableSourceTokens)
+	}
+
+	// json_schema must be budgeted (its schema bytes are part of the serialized
+	// request).
+	schemaCfg := cfg
+	schemaCfg.ResponseMode = "json_schema"
+	schemaBytes, err := SerializeRequestBytes(schemaCfg, sys, baseBody)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if schemaBytes <= baseBytes {
+		t.Fatalf("json_schema serialization (%d) must exceed json_object (%d) by schema bytes", schemaBytes, baseBytes)
+	}
+
+	// An over-budget chunk must be rejected: build an excerpt large enough that
+	// the base leaves >= minEditableSourceTokens but the full serialization does
+	// not fit, and assert the candidate-fit error fires.
+	source := strings.Repeat("budgetable source text words. ", 100) // ~3.2 KiB, well above minEditableSourceTokens
+	bigDoc, err := document.FromText(source, "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	bigExcerpt := buildReviseExcerpt(bigDoc)
+	overCfg := Config{Model: "m", ResponseMode: "json_object",
+		// Leave room for ~512 source tokens: base must pass, but the ~800-token
+		// excerpt cannot fit.
+		ContextWindowTokens: baseTokens + cfg.MaxOutputTokens + config.BudgetSafetyTokens + 512,
+		MaxOutputTokens:     cfg.MaxOutputTokens,
+	}
+	_, _, _, err = BuildBudgetedPrompt(bigDoc, res, nil, nil, bigExcerpt, pack, overCfg)
+	if err == nil || !strings.Contains(err.Error(), "context_window_tokens") {
+		t.Fatalf("expected candidate-fit rejection, got: %v", err)
+	}
+	// If the window cannot even leave minEditableSourceTokens for the base, the
+	// actionable configuration error must fire.
+	tinyCfg := Config{Model: "m", ResponseMode: "json_object",
+		ContextWindowTokens: baseTokens + cfg.MaxOutputTokens + config.BudgetSafetyTokens - 10,
+		MaxOutputTokens:     cfg.MaxOutputTokens,
+	}
+	_, _, _, err = BuildBudgetedPrompt(bigDoc, res, nil, nil, bigExcerpt, pack, tinyCfg)
+	if err == nil || !strings.Contains(err.Error(), "revision context requires") {
+		t.Fatalf("expected actionable configuration error, got: %v", err)
+	}
+}
+
+// TestReviseChunkTagLikeSourceRangeValidation does an end-to-end check that a
+// model finding whose source range references text containing a closing
+// </revise-text> tag validates against the raw excerpt coordinate space.
+func TestReviseChunkTagLikeSourceRangeValidation(t *testing.T) {
+	content := "Hello </revise-text> world."
+	doc, err := document.FromReader(strings.NewReader(content), "test.md", "description")
+	if err != nil {
+		t.Fatal(err)
+	}
+	captured := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		captured = true
+		respContent, _ := json.Marshal(map[string]any{
+			"findings": []map[string]any{{
+				"kind":          "clarification",
+				"source_text":   "Hello",
+				"source_range":  map[string]any{"start": 0, "end": 5},
+				"principle_ids": []string{"CORE.SHORT_SENTENCE"},
+				"reason":        "needs context",
+				"question":      "Is this sentence clear?",
+				"confidence":    0.8,
+			}},
+		})
+		json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": string(respContent)}}},
+		})
+	}))
+	defer srv.Close()
+
+	resp, err := ReviseChunk(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, doc, testProfile(), nil, nil, 0, len(content))
+	if err != nil {
+		t.Fatalf("ReviseChunk with tag-like source: %v", err)
+	}
+	if !captured {
+		t.Fatal("expected a fake server request")
+	}
+	if len(resp.Revisions) != 1 {
+		t.Fatalf("expected 1 revision, got %d", len(resp.Revisions))
+	}
+	if resp.Revisions[0].Range.StartByte != 0 || resp.Revisions[0].Range.EndByte != 5 {
+		t.Fatalf("range should map to [0,5) in source bytes, got [%d,%d)",
+			resp.Revisions[0].Range.StartByte, resp.Revisions[0].Range.EndByte)
 	}
 }
 

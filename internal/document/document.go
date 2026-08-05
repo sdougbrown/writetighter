@@ -10,6 +10,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/sdougbrown/writetighter/internal/limits"
 )
 
 type Position struct{ Line, Column, Byte int }
@@ -69,15 +71,9 @@ func FromReader(r io.Reader, source, kind string) (*Document, error) {
 	return newDocument(source, kind, content), nil
 }
 
-// maxAggregateBytes is the maximum total input size across all selected files.
-const maxAggregateBytes = 25 * 1024 * 1024
-
-// maxFileBytes is the maximum size for a single file.
-const maxFileBytes = 5 * 1024 * 1024
-
 // FromText creates a bounded virtual document from a command-line text value.
 func FromText(text, kind string) (*Document, error) {
-	if len(text) > maxAggregateBytes {
+	if len(text) > limits.MaxAggregateBytes {
 		return nil, errors.New("text input too large")
 	}
 	return FromReader(strings.NewReader(text), "<text>", kind)
@@ -85,13 +81,13 @@ func FromText(text, kind string) (*Document, error) {
 
 func CollectInputs(paths []string, stdin bool) ([]*Document, error) {
 	if stdin {
-		// Limit stdin to maxAggregateBytes + 1 so we can detect overflow.
-		limited := io.LimitReader(os.Stdin, int64(maxAggregateBytes+1))
+		// Limit stdin to limits.MaxAggregateBytes + 1 so we can detect overflow.
+		limited := io.LimitReader(os.Stdin, int64(limits.MaxAggregateBytes+1))
 		doc, err := FromReader(limited, "<stdin>", "")
 		if err != nil {
 			return nil, err
 		}
-		if len(doc.Content) > maxAggregateBytes {
+		if len(doc.Content) > limits.MaxAggregateBytes {
 			return nil, errors.New("stdin input too large")
 		}
 		return []*Document{doc}, nil
@@ -114,7 +110,7 @@ func CollectInputs(paths []string, stdin bool) ([]*Document, error) {
 			docs = append(docs, more...)
 			continue
 		}
-		if info.Size() > maxFileBytes {
+		if info.Size() > limits.MaxFileBytes {
 			return nil, fmt.Errorf("file too large: %s", path)
 		}
 		doc, err := FromFile(path, "")
@@ -122,7 +118,7 @@ func CollectInputs(paths []string, stdin bool) ([]*Document, error) {
 			return nil, err
 		}
 		total += int64(len(doc.Content))
-		if total > maxAggregateBytes {
+		if total > limits.MaxAggregateBytes {
 			return nil, errors.New("aggregate input too large")
 		}
 		docs = append(docs, doc)
@@ -130,7 +126,7 @@ func CollectInputs(paths []string, stdin bool) ([]*Document, error) {
 	return docs, nil
 }
 
-// readFileWithBound reads a file but caps actual bytes read at maxFileBytes+1
+// readFileWithBound reads a file but caps actual bytes read at limits.MaxFileBytes+1
 // to detect growth or read-after-stat size changes.
 func readFileWithBound(path string) ([]byte, error) {
 	f, err := os.Open(path)
@@ -138,12 +134,12 @@ func readFileWithBound(path string) ([]byte, error) {
 		return nil, err
 	}
 	defer f.Close()
-	limited := io.LimitReader(f, int64(maxFileBytes+1))
+	limited := io.LimitReader(f, int64(limits.MaxFileBytes+1))
 	data, err := io.ReadAll(limited)
 	if err != nil {
 		return nil, err
 	}
-	if len(data) > maxFileBytes {
+	if len(data) > limits.MaxFileBytes {
 		return nil, fmt.Errorf("file too large: %s", path)
 	}
 	return data, nil
@@ -189,7 +185,7 @@ func collectDir(root string, total *int64) ([]*Document, error) {
 		if err != nil {
 			return nil, err
 		}
-		if info.Size() > maxFileBytes {
+		if info.Size() > limits.MaxFileBytes {
 			return nil, fmt.Errorf("file too large: %s", path)
 		}
 		doc, err := FromFile(path, "")
@@ -197,7 +193,7 @@ func collectDir(root string, total *int64) ([]*Document, error) {
 			return nil, err
 		}
 		*total += int64(len(doc.Content))
-		if *total > maxAggregateBytes {
+		if *total > limits.MaxAggregateBytes {
 			return nil, errors.New("aggregate input too large")
 		}
 		docs = append(docs, doc)
