@@ -66,24 +66,23 @@ the recommended candidate run.
 ### Initial result
 
 The fixture includes a reviewed four-finding ground truth, so every run uses the
-same recall denominator. Across two `gemma4` generation passes scored by local
-`nemotron-ultra`:
+same recall denominator. After configuring WT with Gemma's deployed 80k-token
+context window, two `gemma4` generation passes scored by local
+`nemotron-ultra` produced:
 
 | Variant | Recall | Overall quality | False positives |
 |---|---:|---:|---:|
-| Production baseline | `0.00`, `0.50` (mean `0.25`) | `15`, `45` | `1`, `3` |
-| Conservative whole-file candidate | `0.75`, `0.75` (mean `0.75`) | `35`, `78` | `16`, `1` |
+| Production baseline | `0.25`, `0.25` (mean `0.25`) | `35`, `35` | `2`, `1` |
+| Conservative whole-file candidate | `0.75`, `0.75` (mean `0.75`) | `45`, `55` | `9`, `7` |
 
-The candidate produced higher recall and processed every source file. However,
-these results are provisional: the production runs used a local WT config that
-did not declare the deployed Gemma model's 80k-token context window. That
-configuration mismatch likely contributed to WT's model-budget failures on four
-or five of eight files per pass, so the recall gate must be rerun after setting
-`llm.context_window_tokens = 80000`. The candidate is also not ready to ship:
-its false-positive count varied from one to sixteen despite `temperature: 0`.
-A lexer-enforced target set, stronger structured output, and repeated-trial
-precision gates are required. The aggressive prompt remains available for
-comparison but is not the recommended candidate.
+The candidate clears the recall gate and processed every source file. Production
+WT still failed four or five files per pass: three larger files exceeded WT's
+separate 32,000-character transport ceiling, while other failures came from
+model responses whose `source_text` could not be resolved exactly. The
+candidate is not ready to ship because precision remains poor despite
+`temperature: 0`. A lexer-enforced target set, stronger structured output, and
+repeated-trial precision gates are required. The aggressive prompt remains
+available for comparison but is not the recommended candidate.
 
 ## Scope and caveats
 
