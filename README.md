@@ -110,7 +110,7 @@ The workflow offers three authentication choices: no key, a key stored in the pr
 
 ### `writetighter lint` (Deterministic)
 
-`lint` runs deterministic profile rules. It never invokes a model.
+`lint` runs deterministic profile rules. It never invokes a model. With `--kind code-comment`, explicit source files in the same supported languages as code-aware `revise` are lexed first, so rules inspect only cataloged comments and findings retain their original file ranges. `--stdin`, `--text`, and unsupported extensions retain prose-style linting.
 
 ```sh
 ./writetighter lint README.md --kind description --format json

@@ -244,6 +244,17 @@ func TestFromText(t *testing.T) {
 	}
 }
 
+func TestFromPlainTextDoesNotInferHTMLFromCommentContent(t *testing.T) {
+	content := "// <html> remains literal comment text"
+	doc, err := FromPlainText(content, "sample.go", "code-comment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Format != FormatText || doc.AnalysisContent() != content || len(doc.Segments) == 0 {
+		t.Fatalf("plain text document inferred another format: %#v", doc)
+	}
+}
+
 func TestChunkRangesPreferMarkdownBlocks(t *testing.T) {
 	content := "First paragraph has words.\n\nSecond paragraph has more words.\n\nThird paragraph."
 	doc, err := FromReader(strings.NewReader(content), "test.md", "description")

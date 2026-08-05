@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/sdougbrown/writetighter/internal/check"
+	"github.com/sdougbrown/writetighter/internal/codecomment"
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/report"
 )
@@ -39,6 +41,94 @@ func TestUsesCodeCommentProtocolOnlyForSupportedFileRevision(t *testing.T) {
 	params.Text = &text
 	if usesCodeCommentProtocol(params, goDoc) {
 		t.Fatal("--text selected the ID protocol")
+	}
+}
+
+func TestRunLintScopesChecksToCatalogCommentsAndMapsRanges(t *testing.T) {
+	words := strings.TrimSpace(strings.Repeat("word ", 30))
+	source := "package p\nvar executable = \"" + words + "\"\n// short\nfunc helper() {}\n// " + words + "\nfunc f() {}\n"
+	path := filepath.Join(t.TempDir(), "sample.go")
+	if err := os.WriteFile(path, []byte(source), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunLint(LintParams{Paths: []string{path}, Kind: "code-comment", Format: "json", FailOn: "none"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var response report.Report
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	commentStart := strings.LastIndex(source, "// ")
+	commentEnd := strings.Index(source[commentStart:], "\n") + commentStart
+	seenRules := map[string]bool{}
+	for _, finding := range response.Findings {
+		seenRules[finding.RuleID] = true
+		if finding.Range == nil {
+			continue
+		}
+		if finding.Range.StartByte < commentStart || finding.Range.EndByte > commentEnd {
+			t.Fatalf("finding escaped catalog comment: %#v", finding)
+		}
+		if finding.Range.StartLine != 5 {
+			t.Fatalf("finding line was not mapped to source: %#v", finding.Range)
+		}
+	}
+	if !seenRules["CORE.SENTENCE_LENGTH"] || !seenRules["CORE.NOUN_STACK"] {
+		t.Fatalf("multiple deterministic findings on one comment were not preserved: %#v", response.Findings)
+	}
+}
+
+func TestLintCodeCommentCatalogPreservesCrossCommentChecks(t *testing.T) {
+	doc, err := document.FromReader(strings.NewReader("// check-in\nfunc f() {}\n// checkin\n"), "sample.go", "code-comment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := lintCodeCommentCatalog(doc, nil, nil, []check.Checker{check.Get("CORE.TERM_CONSISTENCY")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].RuleID != "CORE.TERM_CONSISTENCY" || findings[0].Range != nil || findings[0].Path == nil || *findings[0].Path != "sample.go" {
+		t.Fatalf("cross-comment finding = %#v", findings)
+	}
+}
+
+func TestMapCommentFindingPreservesUTF8SourceCoordinates(t *testing.T) {
+	source := "package p\r\n\t// café term\r\n"
+	language, _ := codecomment.DetectLanguage("sample.go")
+	catalog, err := codecomment.Extract("sample.go", language, []byte(source))
+	if err != nil || len(catalog.Comments) != 1 {
+		t.Fatalf("catalog = %#v, err=%v", catalog, err)
+	}
+	comment := catalog.Comments[0]
+	localStart := strings.Index(comment.Text, "café")
+	finding := report.Finding{Checker: "test", Range: &report.FindingRange{StartByte: localStart, EndByte: localStart + len("café")}}
+	mapped, err := mapCommentFinding(finding, comment, source, "sample.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mapped.Range.StartByte != strings.Index(source, "café") || mapped.Range.EndByte != strings.Index(source, "café")+len("café") || mapped.Range.StartLine != 2 || mapped.Range.StartColumn != 5 || mapped.Range.EndLine != 2 || mapped.Range.EndColumn != 9 {
+		t.Fatalf("mapped UTF-8 range = %#v", mapped.Range)
+	}
+}
+
+func TestRunLintSupportedSourceWithoutCommentsHasNoFindings(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "sample.py")
+	if err := os.WriteFile(path, []byte("value = 'This executable prose must not be linted.'\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunLint(LintParams{Paths: []string{path}, Kind: "code-comment", Format: "json", FailOn: "none"}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	var response report.Report
+	if err := json.Unmarshal(output.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Findings) != 0 {
+		t.Fatalf("comment-free source produced lint findings: %#v", response.Findings)
 	}
 }
 

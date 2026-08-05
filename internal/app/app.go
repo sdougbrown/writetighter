@@ -163,14 +163,16 @@ func (a *App) RunLint(params LintParams) error {
 		if params.Kind != "" {
 			doc.Kind = params.Kind
 		}
-		ctx := &check.RunContext{Document: doc, Profile: r, Terms: terms}
-		for _, c := range enabled {
-			more, err := c.Run(ctx)
-			if err != nil {
-				return err
-			}
-			findings = append(findings, more...)
+		var more []report.Finding
+		if usesCodeCommentCatalog(params.Kind, params.Stdin, params.Text, doc) {
+			more, err = lintCodeCommentCatalog(doc, r, terms, enabled)
+		} else {
+			more, err = runDeterministicChecks(doc, r, terms, enabled)
 		}
+		if err != nil {
+			return err
+		}
+		findings = append(findings, more...)
 	}
 	var sourcePath *string
 	if params.Text != nil {
@@ -226,6 +228,123 @@ func (a *App) RunLint(params LintParams) error {
 		return ErrFailThreshold
 	}
 	return nil
+}
+
+func runDeterministicChecks(doc *document.Document, res *profile.Resolution, terms []config.TermEntry, enabled []check.Checker) ([]report.Finding, error) {
+	ctx := &check.RunContext{Document: doc, Profile: res, Terms: terms}
+	var findings []report.Finding
+	for _, checker := range enabled {
+		more, err := checker.Run(ctx)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, more...)
+	}
+	return findings, nil
+}
+
+type commentLintProjection struct {
+	startByte int
+	endByte   int
+	comment   codecomment.Comment
+}
+
+func lintCodeCommentCatalog(doc *document.Document, res *profile.Resolution, terms []config.TermEntry, enabled []check.Checker) ([]report.Finding, error) {
+	language, ok := codecomment.DetectLanguage(doc.Source)
+	if !ok {
+		return nil, fmt.Errorf("code-comment lint does not support %q", doc.Source)
+	}
+	catalog, err := codecomment.Extract(doc.Source, language, []byte(doc.Content))
+	if err != nil {
+		return nil, fmt.Errorf("cataloging comments in %q: %w", doc.Source, err)
+	}
+	var analysis strings.Builder
+	projections := make([]commentLintProjection, 0, len(catalog.Comments))
+	for i, comment := range catalog.Comments {
+		if i > 0 {
+			analysis.WriteString("\n\n")
+		}
+		start := analysis.Len()
+		analysis.WriteString(comment.Text)
+		projections = append(projections, commentLintProjection{startByte: start, endByte: analysis.Len(), comment: comment})
+	}
+	commentDoc, err := document.FromPlainText(analysis.String(), doc.Source, doc.Kind)
+	if err != nil {
+		return nil, err
+	}
+	findings, err := runDeterministicChecks(commentDoc, res, terms, enabled)
+	if err != nil {
+		return nil, err
+	}
+	for i := range findings {
+		findings[i], err = mapProjectedCommentFinding(findings[i], projections, doc.Content, doc.Source)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return findings, nil
+}
+
+func mapProjectedCommentFinding(finding report.Finding, projections []commentLintProjection, source, sourcePath string) (report.Finding, error) {
+	finding.Path = &sourcePath
+	if finding.Range == nil {
+		return finding, nil
+	}
+	for _, projection := range projections {
+		if finding.Range.StartByte < projection.startByte || finding.Range.EndByte > projection.endByte {
+			continue
+		}
+		finding.Range.StartByte -= projection.startByte
+		finding.Range.EndByte -= projection.startByte
+		return mapCommentFinding(finding, projection.comment, source, sourcePath)
+	}
+	return report.Finding{}, fmt.Errorf("checker %s returned range [%d,%d) outside catalog comments", finding.Checker, finding.Range.StartByte, finding.Range.EndByte)
+}
+
+func mapCommentFinding(finding report.Finding, comment codecomment.Comment, source, sourcePath string) (report.Finding, error) {
+	finding.Path = &sourcePath
+	if finding.Range == nil {
+		return finding, nil
+	}
+	start := finding.Range.StartByte
+	end := finding.Range.EndByte
+	if start < 0 || end < start || end > len(comment.Text) {
+		return report.Finding{}, fmt.Errorf("checker %s returned range [%d,%d) outside comment %s", finding.Checker, start, end, comment.ID)
+	}
+	start += comment.Span.StartByte
+	end += comment.Span.StartByte
+	startLine, startColumn := sourceLineColumn(source, start)
+	endLine, endColumn := sourceLineColumn(source, end)
+	finding.Range = &report.FindingRange{
+		StartByte:   start,
+		EndByte:     end,
+		StartLine:   startLine,
+		StartColumn: startColumn,
+		EndLine:     endLine,
+		EndColumn:   endColumn,
+	}
+	return finding, nil
+}
+
+func sourceLineColumn(content string, byteOffset int) (line, column int) {
+	if byteOffset < 0 {
+		byteOffset = 0
+	}
+	if byteOffset > len(content) {
+		byteOffset = len(content)
+	}
+	line, column = 1, 1
+	for current := 0; current < byteOffset; {
+		r, size := utf8.DecodeRuneInString(content[current:])
+		if r == '\n' {
+			line++
+			column = 1
+		} else {
+			column++
+		}
+		current += size
+	}
+	return line, column
 }
 
 func collectInputs(paths []string, stdin bool, text *string, kind string) ([]*document.Document, error) {
@@ -688,7 +807,11 @@ func (a *App) RunRevise(params ReviseParams) error {
 // input. Stdin, --text, and unsupported extensions deliberately retain the
 // legacy prose-style code-comment path.
 func usesCodeCommentProtocol(params ReviseParams, doc *document.Document) bool {
-	if params.Kind != guidance.KindCodeComment || params.Stdin || params.Text != nil || doc == nil {
+	return usesCodeCommentCatalog(params.Kind, params.Stdin, params.Text, doc)
+}
+
+func usesCodeCommentCatalog(kind string, stdin bool, text *string, doc *document.Document) bool {
+	if kind != guidance.KindCodeComment || stdin || text != nil || doc == nil {
 		return false
 	}
 	_, ok := codecomment.DetectLanguage(doc.Source)

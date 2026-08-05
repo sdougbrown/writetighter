@@ -14,7 +14,7 @@ The `writetighter` binary provides five subcommands: `lint` (deterministic), `re
 
 ## writetighter lint
 
-Checks deterministic profile rules.
+Checks deterministic profile rules. For `--kind code-comment`, explicit supported source files (`.go`, TypeScript/JavaScript variants, `.rs`, `.py`, and `.pyi`) are lexed so only cataloged comments are linted; findings map back to the original source ranges. `--stdin`, `--text`, and unsupported extensions retain prose-style linting.
 
 ```
 writetighter lint (PATH... | --stdin | --text STRING) [flags]
