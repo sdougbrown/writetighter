@@ -16,7 +16,7 @@
     "documentation",
     "markdown"
   ],
-  "skills": "./skills/",
+  "skills": "./skills",
   "interface": {
     "displayName": "WriteTighter",
     "shortDescription": "Tighten drafted prose before shipping",
