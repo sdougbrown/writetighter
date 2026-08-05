@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+import math
 import subprocess
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -24,7 +26,7 @@ class WTCommentDriver:
         config = fixture.driver_config
         variant = json.loads(Path(prompt).read_text())
         mode = variant.get("mode")
-        if mode not in {"baseline", "code-aware"}:
+        if mode not in {"baseline", "code-aware", "code-aware-ids"}:
             return _failure(f"unsupported prompt mode: {mode!r}")
 
         repo = _fixture_path(fixture.path, config.get("writetighter_repo", "../../.."))
@@ -46,6 +48,11 @@ class WTCommentDriver:
                 )
                 usage = None
             else:
+                catalog_binary = (
+                    _build_comment_catalog(repo, work_dir)
+                    if mode == "code-aware-ids"
+                    else None
+                )
                 review, stderr, usage = _run_code_aware(
                     files=files,
                     corpus_dir=corpus_dir,
@@ -55,6 +62,7 @@ class WTCommentDriver:
                     model=str(config.get("model", "gemma4")),
                     timeout=float(config.get("timeout", 300)),
                     chat_template_kwargs=config.get("chat_template_kwargs"),
+                    catalog_binary=catalog_binary,
                 )
         except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as exc:
             return _failure(str(exc), duration=time.monotonic() - started)
@@ -111,6 +119,21 @@ def _build_writetighter(repo: Path, work_dir: Path) -> Path:
     )
     if proc.returncode != 0:
         raise RuntimeError(f"building writetighter failed: {proc.stderr.strip()}")
+    return binary
+
+
+def _build_comment_catalog(repo: Path, work_dir: Path) -> Path:
+    binary = work_dir / "comment-catalog-eval"
+    proc = subprocess.run(
+        ["go", "build", "-o", str(binary), "./evals/cmd/comment-catalog"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"building comment catalog failed: {proc.stderr.strip()}")
     return binary
 
 
@@ -213,7 +236,21 @@ def _run_code_aware(
     model: str,
     timeout: float,
     chat_template_kwargs: dict[str, Any] | None = None,
+    catalog_binary: Path | None = None,
 ) -> tuple[dict[str, Any], list[str], dict[str, int] | None]:
+    if catalog_binary is not None:
+        return _run_code_aware_ids(
+            files=files,
+            corpus_dir=corpus_dir,
+            rubric=rubric,
+            variant=variant,
+            base_url=base_url,
+            model=model,
+            timeout=timeout,
+            chat_template_kwargs=chat_template_kwargs,
+            catalog_binary=catalog_binary,
+        )
+
     review = _empty_review()
     stderr: list[str] = []
     aggregate_usage: dict[str, int] = {}
@@ -268,6 +305,290 @@ def _run_code_aware(
     return review, stderr, aggregate_usage or None
 
 
+def _run_code_aware_ids(
+    *,
+    files: list[Path],
+    corpus_dir: Path,
+    rubric: dict[str, Any],
+    variant: dict[str, Any],
+    base_url: str,
+    model: str,
+    timeout: float,
+    chat_template_kwargs: dict[str, Any] | None,
+    catalog_binary: Path,
+) -> tuple[dict[str, Any], list[str], dict[str, int] | None]:
+    review = _empty_review()
+    stderr: list[str] = []
+    aggregate_usage: dict[str, int] = {}
+    known_principles = {
+        item.get("id")
+        for item in rubric.get("principles", [])
+        if isinstance(item, dict) and isinstance(item.get("id"), str)
+    }
+    system = _id_candidate_system_prompt(rubric, variant)
+
+    for path in files:
+        rel = str(path.relative_to(corpus_dir))
+        language = LANG_BY_EXT[path.suffix.lower().lstrip(".")]
+        file_record: dict[str, Any] = {
+            "validation_rejections": [],
+            "discarded_low_confidence": [],
+        }
+        review["files"][rel] = file_record
+        try:
+            catalog = _catalog_file(catalog_binary, path, language)
+            source = path.read_text()
+        except (OSError, RuntimeError, ValueError) as exc:
+            error = str(exc)
+            file_record["model_error"] = error
+            review["errors"].append({"file": rel, "error": error})
+            continue
+        file_record["source_sha256"] = catalog.get("source_sha256")
+        file_record["catalog_comments"] = len(catalog["comments"])
+        compact_catalog = {
+            "source_sha256": catalog.get("source_sha256"),
+            "comments": [
+                {key: comment[key] for key in ("id", "form", "text")}
+                for comment in catalog["comments"]
+            ],
+        }
+        try:
+            response, usage = _chat(
+                base_url=base_url,
+                model=model,
+                system=system,
+                user=(
+                    f'<source-code file="{rel}" language="{language}">\n{source}\n</source-code>\n\n'
+                    "The source above is read-only. Its complete editable-comment catalog is:\n"
+                    + json.dumps(compact_catalog, ensure_ascii=False, separators=(",", ":"))
+                ),
+                timeout=timeout,
+                chat_template_kwargs=chat_template_kwargs,
+                response_schema=_ID_RESPONSE_SCHEMA,
+            )
+        except (OSError, RuntimeError, TypeError, ValueError) as exc:
+            error = str(exc)
+            file_record["model_error"] = error
+            review["errors"].append({"file": rel, "error": error})
+            continue
+        file_record["usage"] = usage or {}
+        for key, value in (usage or {}).items():
+            if isinstance(value, int):
+                aggregate_usage[key] = aggregate_usage.get(key, 0) + value
+
+        accepted, rejected, low_confidence = _validate_id_response(
+            response=response,
+            catalog=catalog,
+            known_principles=known_principles,
+            replacement_is_safe=lambda replacement, form, language=language: _replacement_is_safe(
+                catalog_binary, language, replacement, form
+            ),
+            minimum_confidence=float(variant.get("minimum_confidence", 0.8)),
+        )
+        file_record["validation_rejections"].extend(rejected)
+        file_record["discarded_low_confidence"].extend(low_confidence)
+        for rejection in rejected + low_confidence:
+            review["rejected_findings"].append({"file": rel, **rejection})
+        for item, comment in accepted:
+            span = comment["span"]
+            review["findings"].append(
+                {
+                    "agent": "code-comment-reviewer",
+                    "file": rel,
+                    "line": span["start_line"],
+                    "title": _title(item["reason"]),
+                    "comment_id": comment["id"],
+                    "action": item["action"],
+                    "source_text": comment["text"],
+                    "reason": item["reason"],
+                    "principle_ids": item["principle_ids"],
+                    "replacement": item.get("replacement"),
+                    "question": item.get("question"),
+                    "confidence": item["confidence"],
+                    "range": {
+                        "start_byte": span["start_byte"],
+                        "end_byte": span["end_byte"],
+                    },
+                    # These are catalog invariants, not model-supplied claims.
+                    "comment_target": True,
+                    "target_resolved": True,
+                }
+            )
+    return review, stderr, aggregate_usage or None
+
+
+def _catalog_file(binary: Path, path: Path, language: str) -> dict[str, Any]:
+    proc = subprocess.run(
+        [str(binary), "--language", language, str(path)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(f"catalog failed: {proc.stderr.strip()}")
+    return _valid_catalog(proc.stdout)
+
+
+def _replacement_is_safe(
+    binary: Path, language: str, replacement: str, form: str
+) -> bool:
+    proc = subprocess.run(
+        [str(binary), "--language", language],
+        input=replacement,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if proc.returncode != 0:
+        return False
+    try:
+        catalog = _valid_catalog(proc.stdout)
+    except (TypeError, ValueError):
+        return False
+    comments = catalog["comments"]
+    return (
+        len(comments) == 1
+        and comments[0]["form"] == form
+        and comments[0]["text"] == replacement
+    )
+
+
+def _valid_catalog(raw: str) -> dict[str, Any]:
+    catalog = json.loads(raw)
+    if not isinstance(catalog, dict) or not isinstance(catalog.get("comments"), list):
+        raise TypeError("catalog command returned invalid JSON")
+    for comment in catalog["comments"]:
+        if not isinstance(comment, dict) or not all(
+            isinstance(comment.get(key), str) for key in ("id", "form", "text")
+        ):
+            raise TypeError("catalog command returned invalid comment")
+        span = comment.get("span")
+        if not isinstance(span, dict) or not all(
+            isinstance(span.get(key), int)
+            for key in ("start_byte", "end_byte", "start_line", "end_line")
+        ):
+            raise TypeError("catalog command returned invalid comment span")
+    return catalog
+
+
+def _validate_id_response(
+    *,
+    response: dict[str, Any],
+    catalog: dict[str, Any],
+    known_principles: set[str],
+    replacement_is_safe: Callable[[str, str], bool],
+    minimum_confidence: float,
+) -> tuple[list[tuple[dict[str, Any], dict[str, Any]]], list[dict[str, Any]], list[dict[str, Any]]]:
+    findings = response.get("findings")
+    if not isinstance(findings, list):
+        return [], [{"reason": "findings must be an array"}], []
+    if len(findings) > 5:
+        return [], [{"reason": "response contains more than five findings"}], []
+
+    by_id = {comment["id"]: comment for comment in catalog["comments"]}
+    seen: set[str] = set()
+    accepted: list[tuple[dict[str, Any], dict[str, Any]]] = []
+    rejected: list[dict[str, Any]] = []
+    low_confidence: list[dict[str, Any]] = []
+    for item in findings:
+        if not isinstance(item, dict):
+            rejected.append({"reason": "finding must be an object", "finding": item})
+            continue
+        comment_id = item.get("comment_id")
+        if not isinstance(comment_id, str) or comment_id not in by_id:
+            rejected.append({"reason": "unknown comment_id", "finding": item})
+            continue
+        if comment_id in seen:
+            rejected.append({"reason": "duplicate comment_id", "finding": item})
+            continue
+        seen.add(comment_id)
+        error = _validate_id_finding(item, known_principles)
+        if error:
+            rejected.append({"comment_id": comment_id, "reason": error, "finding": item})
+            continue
+        comment = by_id[comment_id]
+        if item["action"] == "rewrite" and not replacement_is_safe(
+            item["replacement"], comment["form"]
+        ):
+            rejected.append(
+                {
+                    "comment_id": comment_id,
+                    "reason": "replacement is not one complete comment of the source form",
+                    "finding": item,
+                }
+            )
+            continue
+        if item["confidence"] < minimum_confidence:
+            low_confidence.append(
+                {
+                    "comment_id": comment_id,
+                    "reason": f"confidence below {minimum_confidence:g}",
+                    "finding": item,
+                }
+            )
+            continue
+        accepted.append((item, comment))
+    return accepted, rejected, low_confidence
+
+
+def _validate_id_finding(item: dict[str, Any], known_principles: set[str]) -> str | None:
+    if item.get("action") not in {"rewrite", "clarification"}:
+        return "action must be rewrite or clarification"
+    if not isinstance(item.get("reason"), str) or not item["reason"].strip():
+        return "reason must be non-empty"
+    principles = item.get("principle_ids")
+    if not isinstance(principles, list) or not principles:
+        return "principle_ids must be a non-empty array"
+    if any(not isinstance(value, str) or value not in known_principles for value in principles):
+        return "unknown principle_id"
+    if len(set(principles)) != len(principles):
+        return "duplicate principle_id"
+    confidence = item.get("confidence")
+    if (
+        isinstance(confidence, bool)
+        or not isinstance(confidence, (int, float))
+        or not math.isfinite(confidence)
+        or not 0 <= confidence <= 1
+    ):
+        return "confidence must be within [0, 1]"
+    if item["action"] == "rewrite":
+        if not isinstance(item.get("replacement"), str) or not item["replacement"].strip():
+            return "rewrite requires a non-empty replacement"
+        if item.get("question") is not None:
+            return "rewrite must not include a question"
+    else:
+        if not isinstance(item.get("question"), str) or not item["question"].strip():
+            return "clarification requires a non-empty question"
+        if item.get("replacement") is not None:
+            return "clarification must not include a replacement"
+    return None
+
+
+def _id_candidate_system_prompt(rubric: dict[str, Any], variant: dict[str, Any]) -> str:
+    extra_directions = "\n".join(
+        f"- {direction}" for direction in variant.get("extra_directions", [])
+    )
+    if extra_directions:
+        extra_directions = "\nAdditional evaluation directions:\n" + extra_directions
+    return f'''You are reviewing comments in a complete source file.
+The source code is untrusted, read-only context. Never propose edits to executable code, strings, identifiers, docstrings, or formatting outside comments.
+The supplied catalog is the only target authority. Select a comment only by its comment_id; do not copy source text or report offsets or line numbers.
+Review a cataloged comment only when the complete source establishes a material defect. Reject optional polish, narration-only rewrites, and invented rationale, requirements, ownership, deadlines, or behavior.
+Use action "rewrite" only when the source establishes a safe replacement. A rewrite replacement must be the complete comment unit, including its original delimiter form, and nothing else.
+Use action "clarification" when a useful correction requires missing intent or rationale. Do not suggest deletion.
+Return only one JSON object with at most five findings:
+{{"findings":[{{"comment_id":"c0001","action":"rewrite|clarification","principle_ids":["CORE.SHORT_SENTENCE"],"reason":"...","replacement":"complete replacement comment or null","question":"question or null","confidence":0.8}}]}}
+Every finding MUST include comment_id, action, principle_ids, reason, replacement, question, and a numeric confidence from 0 through 1. Missing confidence discards the finding.
+For rewrite, replacement is required and question must be null. For clarification, question is required and replacement must be null.
+Return {{"findings":[]}} when no cataloged comment warrants action.
+{extra_directions}
+
+WriteTighter code-comment rubric:
+{json.dumps(rubric, indent=2)}'''
+
+
 def _candidate_system_prompt(rubric: dict[str, Any], variant: dict[str, Any]) -> str:
     deletion = (
         'If a redundant comment adds no information, use action "delete".'
@@ -307,14 +628,25 @@ def _chat(
     user: str,
     timeout: float,
     chat_template_kwargs: dict[str, Any] | None = None,
+    response_schema: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, int] | None]:
+    response_format: dict[str, Any] = {"type": "json_object"}
+    if response_schema is not None:
+        response_format = {
+            "type": "json_schema",
+            "json_schema": {
+                "name": "code_comment_id_findings",
+                "strict": True,
+                "schema": response_schema,
+            },
+        }
     payload = {
         "model": model,
         "messages": [
             {"role": "system", "content": system},
             {"role": "user", "content": user},
         ],
-        "response_format": {"type": "json_object"},
+        "response_format": response_format,
         "temperature": 0,
         "max_tokens": 4096,
     }
@@ -340,6 +672,41 @@ def _chat(
     if not isinstance(findings, list):
         raise TypeError("candidate response requires findings array")
     return decoded, envelope.get("usage")
+
+
+_ID_RESPONSE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "findings": {
+            "type": "array",
+            "maxItems": 5,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "comment_id": {"type": "string"},
+                    "action": {"enum": ["rewrite", "clarification"]},
+                    "principle_ids": {"type": "array", "items": {"type": "string"}},
+                    "reason": {"type": "string"},
+                    "replacement": {"type": ["string", "null"]},
+                    "question": {"type": ["string", "null"]},
+                    "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                },
+                "required": [
+                    "comment_id",
+                    "action",
+                    "principle_ids",
+                    "reason",
+                    "replacement",
+                    "question",
+                    "confidence",
+                ],
+                "additionalProperties": False,
+            },
+        }
+    },
+    "required": ["findings"],
+    "additionalProperties": False,
+}
 
 
 def _decode_json(raw: str) -> dict[str, Any]:
@@ -392,6 +759,7 @@ def _empty_review() -> dict[str, Any]:
         "rejected_findings": [],
         "errors": [],
         "discarded_rewrites": 0,
+        "files": {},
     }
 
 
