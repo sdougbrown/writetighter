@@ -94,6 +94,33 @@ func TestLintCodeCommentCatalogPreservesCrossCommentChecks(t *testing.T) {
 	}
 }
 
+func TestLintCodeCommentCatalogUnexpandedAbbrevMapsToSource(t *testing.T) {
+	// An expansion in one comment suppresses a bare use in another comment;
+	// a never-expanded abbreviation maps back to its source comment range.
+	source := "// Ending Inventory (EI) is the source of truth.\nfunc f() {}\n// The EI guard is redundant.\n// PEI is separate for now.\n"
+	doc, err := document.FromReader(strings.NewReader(source), "sample.go", "code-comment")
+	if err != nil {
+		t.Fatal(err)
+	}
+	findings, err := lintCodeCommentCatalog(doc, nil, nil, []check.Checker{check.Get("CORE.UNEXPANDED_ABBREV")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 || findings[0].RuleID != "CORE.UNEXPANDED_ABBREV" {
+		t.Fatalf("expected only the PEI finding, got %#v", findings)
+	}
+	f := findings[0]
+	if f.Path == nil || *f.Path != "sample.go" || f.Range == nil {
+		t.Fatalf("mapped finding missing path/range: %#v", f)
+	}
+	if got := source[f.Range.StartByte:f.Range.EndByte]; got != "PEI" {
+		t.Fatalf("range does not point at PEI token: range=%#v source=%q", f.Range, got)
+	}
+	if f.Range.StartLine != 4 {
+		t.Fatalf("PEI should map to line 4, got %#v", f.Range)
+	}
+}
+
 func TestMapCommentFindingPreservesUTF8SourceCoordinates(t *testing.T) {
 	source := "package p\r\n\t// café term\r\n"
 	language, _ := codecomment.DetectLanguage("sample.go")

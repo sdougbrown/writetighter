@@ -29,6 +29,7 @@ func testProfile() *profile.Resolution {
 		{ID: "CORE.CONTRACTION", Enabled: true},
 		{ID: "CORE.BANNED_MODAL", Enabled: true},
 		{ID: "CORE.LATIN_ABBREV", Enabled: true},
+		{ID: "CORE.UNEXPANDED_ABBREV", Enabled: true},
 	}
 	return &profile.Resolution{Rules: &profile.RulesConfig{UnknownTermPolicy: "candidate", Rules: rules}, Dict: dict}
 }
@@ -152,6 +153,7 @@ func TestTermDiscouragedUnicode(t *testing.T) {
 		{ID: "CORE.CONTRACTION", Enabled: true},
 		{ID: "CORE.BANNED_MODAL", Enabled: true},
 		{ID: "CORE.LATIN_ABBREV", Enabled: true},
+		{ID: "CORE.UNEXPANDED_ABBREV", Enabled: true},
 	}
 	p := &profile.Resolution{Rules: &profile.RulesConfig{UnknownTermPolicy: "candidate", Rules: rules}, Dict: dict}
 	ctx := &RunContext{Document: testDoc("café culture matters."), Profile: p}
