@@ -103,6 +103,18 @@ func ReplacementIsSafe(language Language, source []byte, original Comment, repla
 	return comment.Form == original.Form && comment.Text == replacement
 }
 
+// jsxEnabled reports whether source is a JSX-bearing file, whose lexer treats
+// '<' at expression positions as JSX elements. Plain .ts/.js files keep the
+// exact TypeScript behavior with no JSX interpretation.
+func jsxEnabled(filename string) bool {
+	switch strings.ToLower(filepath.Ext(filename)) {
+	case ".tsx", ".jsx":
+		return true
+	default:
+		return false
+	}
+}
+
 // ParseLanguage validates an explicit language argument.
 func ParseLanguage(value string) (Language, error) {
 	switch strings.ToLower(value) {
@@ -133,7 +145,7 @@ func Extract(filename string, language Language, source []byte) (Catalog, error)
 	case Go:
 		tokens, err = scanGo(source)
 	case TypeScript:
-		tokens, err = scanTypeScript(source)
+		tokens, err = scanTypeScript(source, jsxEnabled(filename))
 	case Rust:
 		tokens, err = scanRust(source)
 	case Python:
