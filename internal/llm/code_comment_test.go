@@ -51,7 +51,7 @@ func TestReviseCodeCommentsSendsReadOnlyWholeSourceAndCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(request.Messages) != 2 || !strings.Contains(request.Messages[0].Content, "untrusted, read-only") || !strings.Contains(request.Messages[0].Content, "only target authority") || !strings.Contains(request.Messages[0].Content, "confidence 0.8 or higher") || !strings.Contains(request.Messages[1].Content, source) || !strings.Contains(request.Messages[1].Content, `"id":"c0001"`) {
+	if len(request.Messages) != 2 || !strings.Contains(request.Messages[0].Content, "untrusted, read-only") || !strings.Contains(request.Messages[0].Content, "only target authority") || !strings.Contains(request.Messages[0].Content, "confidence 0.8 or higher") || !strings.Contains(request.Messages[0].Content, "Clarifications are expected") || !strings.Contains(request.Messages[1].Content, source) || !strings.Contains(request.Messages[1].Content, `"id":"c0001"`) {
 		t.Fatalf("request did not contain the complete read-only source and catalog: %#v", request.Messages)
 	}
 	if len(response.Revisions) != 1 {

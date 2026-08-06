@@ -94,6 +94,16 @@ sentences or more than 80 words. The profile carries a reviewed dictionary
 with discouraged-term policies for common filler and AI-slop vocabulary,
 enabled as a non-enforcing `candidate`/`info` rule.
 
+Two non-enforcing `candidate`/`info` rules keep jargon checks precise. `lint` reports a short all-caps abbreviation (`EI`, `NPE`) only when
+it first appears with no parenthetical expansion anywhere in the document
+(common technical abbreviations such as `API`/`ID`/`URL` are excluded, and an
+expansion in either order — `EI (Ending Inventory)` or `Ending Inventory (EI)`
+— suppresses the finding). Noun-stack detection stops at clause boundaries
+(em/en dash, semicolon, colon), rejects windows that read as clauses or end in
+a participle (`unit conversions use`, `barcode registered`), and in
+`code-comment`/`pr` prose ignores identifier- or acronym-heavy stacks
+(``primaryCategoryId``, ``Fabric StateWrapper``).
+
 ## Commands
 
 ### `writetighter config` (Interactive Setup)

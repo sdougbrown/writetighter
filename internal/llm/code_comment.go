@@ -95,7 +95,8 @@ func BuildCodeCommentPrompt(doc *document.Document, catalog codecomment.Catalog)
 	system.WriteString("The supplied catalog is the only target authority. Select a comment only by comment_id; do not copy source text or report offsets or line numbers.\n")
 	system.WriteString("Review a cataloged comment only when the complete source establishes a material defect. Reject optional polish, narration-only rewrites, and invented rationale, requirements, ownership, deadlines, or behavior.\n")
 	system.WriteString("Use action \"rewrite\" only when the source establishes a safe replacement. A rewrite replacement must be the complete comment unit, including its original delimiter form, and nothing else.\n")
-	system.WriteString("Use action \"clarification\" when a useful correction requires missing intent or rationale. Do not suggest deletion.\n")
+	system.WriteString("The source proves what the code does, not why the author wrote the comment. When a correction depends on intent, rationale, or a design decision the source does not establish, prefer a focused clarification over a confident rewrite; never convert unresolved meaning into an asserted replacement.\n")
+	system.WriteString("Use action \"clarification\" when a useful correction requires missing intent or rationale. Clarifications are expected, not failures, whenever the source cannot establish the intended meaning. Do not suggest deletion.\n")
 	system.WriteString("Return only one JSON object with at most five findings. Every finding must include comment_id, action, principle_ids, reason, replacement, question, and numeric confidence from 0 through 1. For rewrite, replacement is required and question must be null. For clarification, question is required and replacement must be null. Return {\"findings\":[]} when no cataloged comment warrants action.\n\n")
 	system.WriteString("WriteTighter code-comment rubric:\n")
 	for _, principle := range rubric.Principles {
@@ -113,7 +114,7 @@ func BuildCodeCommentPrompt(doc *document.Document, catalog codecomment.Catalog)
 	system.WriteString("- A useful rationale comment may still need a rewrite when compressed shorthand obscures the actor, precedence direction, condition, or consequence. Preserve the rationale instead of deleting it.\n")
 	system.WriteString("- For ordering assumptions, cache collision precedence, and mutation-test equivalence, check that the causal chain is direct and unambiguous. Rewrite dense multi-claim explanations when the adjacent code proves a clearer formulation.\n")
 	system.WriteString("- Do not flag concise section labels, accurate API summaries, test arithmetic, or already-clear invariants merely to expand them.\n")
-	system.WriteString("- Emit a finding only when you can cite a concrete defect and, for rewrites, derive the complete replacement from the source. Such a source-grounded finding should use confidence 0.8 or higher; omit genuinely uncertain suggestions.\n")
+	system.WriteString("- Emit a finding only when you can cite a concrete defect. For rewrites, derive the complete replacement from the source and use confidence 0.8 or higher; when the uncertainty is the author's intent or rationale, ask a focused clarification instead of omitting, guessing, or asserting.\n")
 
 	type compactComment struct {
 		ID        string                  `json:"id"`
