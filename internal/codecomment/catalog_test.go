@@ -206,6 +206,7 @@ func TestExtractTSXFailsClosedOnMalformedInput(t *testing.T) {
 		[]byte("const x = <div title=\"unterminated />"),
 		[]byte("const x = /unterminated\n"),
 		[]byte("return (<> <div>{/* unterminated </div>"),
+		[]byte("const x = <div></ invalid>"),
 	} {
 		if _, err := Extract("bad.tsx", TypeScript, source); err == nil {
 			t.Fatalf("malformed TSX accepted: %q", source)
@@ -237,6 +238,22 @@ func TestExtractTSXScansJSXInsideTemplateInterpolationsAndBlockBodyMaps(t *testi
 	want := []string{"// tier comment"}
 	if got := commentTexts(catalog); !equalStrings(got, want) {
 		t.Fatalf("comments = %#v, want %#v", got, want)
+	}
+}
+
+func TestJSXEnabled(t *testing.T) {
+	for _, tc := range []struct {
+		filename string
+		want     bool
+	}{
+		{"sample.tsx", true},
+		{"sample.jsx", true},
+		{"sample.ts", false},
+	} {
+		got := jsxEnabled(tc.filename)
+		if got != tc.want {
+			t.Errorf("jsxEnabled(%q) = %t; want %t", tc.filename, got, tc.want)
+		}
 	}
 }
 
@@ -370,6 +387,15 @@ func TestLanguageDetection(t *testing.T) {
 		if got != test.want || ok != test.ok {
 			t.Errorf("DetectLanguage(%q) = %q, %t; want %q, %t", test.name, got, ok, test.want, test.ok)
 		}
+	}
+}
+
+func TestLooksLikeJSXOpenBoundsGuard(t *testing.T) {
+	if looksLikeJSXOpen(nil, 0, 0) {
+		t.Fatal("expected false for empty source")
+	}
+	if looksLikeJSXOpen([]byte("<"), 0, 1) {
+		t.Fatal("expected false for source containing only '<'")
 	}
 }
 
