@@ -75,6 +75,16 @@
       "id": "CORE.UNEXPANDED_ABBREV",
       "severity": "info",
       "version": 1
+    },
+    {
+      "enabled": false,
+      "enforcement": "candidate",
+      "id": "CORE.CORPUS_NOVELTY",
+      "parameters": {
+        "min_repetition": 2
+      },
+      "severity": "info",
+      "version": 1
     }
   ],
   "unknown_term_policy": "candidate"

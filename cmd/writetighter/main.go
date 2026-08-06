@@ -114,11 +114,12 @@ func runLint(args []string) int {
 	configPath := fs.String("config", "", "")
 	format := fs.String("format", "human", "")
 	failOn := fs.String("fail-on", "none", "")
+	baseline := fs.String("git-compare", "", "")
 	fs.Usage = func() { printHelp("lint") }
 	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
 		return 2
 	}
-	params := app.LintParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, FailOn: *failOn}
+	params := app.LintParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, FailOn: *failOn, GitCompare: *baseline}
 	if text.set {
 		params.Text = &text.value
 	}
@@ -439,7 +440,7 @@ func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 // The documented CLI permits paths before flags. flag.FlagSet stops at the first
 // positional argument, so normalize the small lint/revise grammar before parsing.
 func normalizeInterspersedFlags(args []string) []string {
-	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true, "--text": true, "--reference": true}
+	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true, "--text": true, "--reference": true, "--git-compare": true}
 	var flags, paths []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -638,6 +639,10 @@ FLAGS
   --format <format>   Output format: human, json, agent (default: human)
   --fail-on <level>   Fail when findings reach this severity
                       Choices: none, warning, error (default: none)
+  --git-compare <rev> Git revision to compare against for unfamiliar-term detection
+                      Only valid with file paths. When set, flags terms that
+                      appear in the changed prose but have no precedent in the
+                      comparison revision. Advisory only (candidate/info).
 
 INPUT
   Provide input via file paths, --stdin, or --text (mutually exclusive).

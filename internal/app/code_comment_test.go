@@ -85,7 +85,7 @@ func TestLintCodeCommentCatalogPreservesCrossCommentChecks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings, err := lintCodeCommentCatalog(doc, nil, nil, []check.Checker{check.Get("CORE.TERM_CONSISTENCY")})
+	findings, err := lintCodeCommentCatalog(doc, nil, nil, []check.Checker{check.Get("CORE.TERM_CONSISTENCY")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestLintCodeCommentCatalogUnexpandedAbbrevMapsToSource(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	findings, err := lintCodeCommentCatalog(doc, nil, nil, []check.Checker{check.Get("CORE.UNEXPANDED_ABBREV")})
+	findings, err := lintCodeCommentCatalog(doc, nil, nil, []check.Checker{check.Get("CORE.UNEXPANDED_ABBREV")}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

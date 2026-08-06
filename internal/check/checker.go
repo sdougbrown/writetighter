@@ -2,6 +2,7 @@ package check
 
 import (
 	"github.com/sdougbrown/writetighter/internal/config"
+	"github.com/sdougbrown/writetighter/internal/corpus"
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/profile"
 	"github.com/sdougbrown/writetighter/internal/report"
@@ -11,6 +12,7 @@ type RunContext struct {
 	Document *document.Document
 	Profile  *profile.Resolution
 	Terms    []config.TermEntry
+	Baseline *corpus.Baseline
 }
 
 type Checker interface {
