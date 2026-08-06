@@ -79,6 +79,200 @@ func TestExtractTypeScriptSkipsRegexLiteralsAfterExpressionKeywords(t *testing.T
 	}
 }
 
+// TestExtractTSXSkipsJSXMarkupAndFindsJSXContainerComments mirrors the markup
+// patterns found in the Umpire docs components (fragments, nested sections,
+// self-closing and closing tags, slash-rich text, template children, maps, and
+// block comments inside expression containers). Slash-like JSX text must never
+// be mistaken for comments, and real container comments must be found.
+func TestExtractTSXSkipsJSXMarkupAndFindsJSXContainerComments(t *testing.T) {
+	source := []byte("import { useState } from 'react'\n" +
+		"\n" +
+		"// Component facade: the whole integration surface.\n" +
+		"export default function SignupDemo() {\n" +
+		"  const [plan, setPlan] = useState<'personal' | 'business'>('personal')\n" +
+		"  const planOptions = [\n" +
+		"    { value: 'personal', label: 'Personal' },\n" +
+		"    { value: 'business', label: 'Business' },\n" +
+		"  ]\n" +
+		"\n" +
+		"  return (\n" +
+		"    <>\n" +
+		"      <section className=\"c-demo__panel\" data-kind=\"panel/plain\">\n" +
+		"        <div className=\"c-demo__title\">\n" +
+		"          <span>Plan</span>\n" +
+		"          <code>{planLabel(plan)}</code>\n" +
+		"        </div>\n" +
+		"\n" +
+		"        <p className=\"c-demo__note\">\n" +
+		"          Rates live at https://example.test/guide/a/b; the winter sale runs 12/25.\n" +
+		"          Deps: @preact/signals, no useEffect. 2 > 1 and 1 < 2 stay true.\n" +
+		"        </p>\n" +
+		"\n" +
+		"        <div className=\"c-demo__options\">\n" +
+		"          {planOptions.map((option) => (\n" +
+		"            <button\n" +
+		"              key={option.value}\n" +
+		"              type=\"button\"\n" +
+		"              aria-label={option.label}\n" +
+		"              onClick={() => setPlan(option.value as 'personal' | 'business')}\n" +
+		"            >\n" +
+		"              {option.label}\n" +
+		"            </button>\n" +
+		"          ))}\n" +
+		"        </div>\n" +
+		"\n" +
+		"        <input type=\"text\" placeholder=\"First/Last name\" />\n" +
+		"        <br />\n" +
+		"\n" +
+		"        {/* Focus the plan menu on load. */}\n" +
+		"        {plan === 'business' && <div className=\"is-active\">Business rate</div>}\n" +
+		"      </section>\n" +
+		"    </>\n" +
+		"  )\n" +
+		"}\n")
+	catalog, err := Extract("sample.tsx", TypeScript, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"// Component facade: the whole integration surface.",
+		"/* Focus the plan menu on load. */",
+	}
+	if got := commentTexts(catalog); !equalStrings(got, want) {
+		t.Fatalf("comments = %#v, want %#v", got, want)
+	}
+}
+
+func TestExtractTSXFindsCommentsInJSXAttributeAndChildContainers(t *testing.T) {
+	source := []byte(`export default function Demo() {
+  const header = (
+    <Panel
+      title="Summary"
+      renderContent={() => (
+        /* Header copy: keep it short. */
+        <h1>Total</h1>
+      )}
+    />
+  )
+  return (
+    <div>
+      {header}
+      {/* Footer copy: handled elsewhere. */}
+      <footer>Done.</footer>
+    </div>
+  )
+}
+`)
+	catalog, err := Extract("sample.tsx", TypeScript, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"/* Header copy: keep it short. */",
+		"/* Footer copy: handled elsewhere. */",
+	}
+	if got := commentTexts(catalog); !equalStrings(got, want) {
+		t.Fatalf("comments = %#v, want %#v", got, want)
+	}
+}
+
+// TestExtractTSXBlocksAndCommentsAroundJSX covers comparison operators,
+// generic type parameters, control flow, and generics declared with angle
+// brackets, none of which are JSX, plus line comments around them.
+func TestExtractTSXBlocksAndCommentsAroundJSX(t *testing.T) {
+	source := []byte(`type Pair<T> = { first: T; second: T }
+const identity = <T,>(value: T): T => value
+function byKind<T>(items: T[]): T[] { return items }
+
+if (pair.first < pair.second) {
+  // ordering comment
+}
+const value = useMemo<number>(() => 0, [])
+// trailing comment
+`)
+	catalog, err := Extract("sample.tsx", TypeScript, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"// ordering comment", "// trailing comment"}
+	if got := commentTexts(catalog); !equalStrings(got, want) {
+		t.Fatalf("comments = %#v, want %#v", got, want)
+	}
+}
+
+func TestExtractTSXFailsClosedOnMalformedInput(t *testing.T) {
+	for _, source := range [][]byte{
+		[]byte("const x = {/* unterminated"),
+		[]byte("const x = <div title=\"unterminated />"),
+		[]byte("const x = /unterminated\n"),
+		[]byte("return (<> <div>{/* unterminated </div>"),
+		[]byte("const x = <div></ invalid>"),
+	} {
+		if _, err := Extract("bad.tsx", TypeScript, source); err == nil {
+			t.Fatalf("malformed TSX accepted: %q", source)
+		}
+	}
+}
+
+// TestExtractTSXScansJSXInsideTemplateInterpolationsAndBlockBodyMaps covers the
+// FreightQuote pattern of expression containers with statement bodies, JSX
+// inside template interpolations, and slash-rich JSX text: slashes stay text
+// and the real comment is found.
+func TestExtractTSXScansJSXInsideTemplateInterpolationsAndBlockBodyMaps(t *testing.T) {
+	source := []byte("const badge = `status: ${<strong>ready/active</strong>}`\n" +
+		"const ratio = `~ 1/2 done`\n" +
+		"{fieldGroups.map((group) => {\n" +
+		"  const visible = group.fields.filter((field) => !hidden)\n" +
+		"  return (\n" +
+		"    <div className=\"group\">\n" +
+		"      <h2>{group.title}</h2>\n" +
+		"      {visible.length > 0 && <p>shows 1/2 of items</p>}\n" +
+		"    </div>\n" +
+		"  )\n" +
+		"})}\n" +
+		"// tier comment\n")
+	catalog, err := Extract("sample.tsx", TypeScript, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"// tier comment"}
+	if got := commentTexts(catalog); !equalStrings(got, want) {
+		t.Fatalf("comments = %#v, want %#v", got, want)
+	}
+}
+
+func TestJSXEnabled(t *testing.T) {
+	for _, tc := range []struct {
+		filename string
+		want     bool
+	}{
+		{"sample.tsx", true},
+		{"sample.jsx", true},
+		{"sample.ts", false},
+	} {
+		got := jsxEnabled(tc.filename)
+		if got != tc.want {
+			t.Errorf("jsxEnabled(%q) = %t; want %t", tc.filename, got, tc.want)
+		}
+	}
+}
+
+func TestExtractPlainTypeScriptDoesNotInterpretJSX(t *testing.T) {
+	// Plain .ts files keep the exact pre-JSX lexer behavior: '<' is never an
+	// element opener, so JSX-shaped source fails closed just as before.
+	if _, err := Extract("sample.ts", TypeScript, []byte("const a = <b>c</b>;")); err == nil {
+		t.Fatal("plain TypeScript accepted JSX-shaped source")
+	}
+	// .tsx is required for JSX interpretation.
+	catalog, err := Extract("sample.tsx", TypeScript, []byte("const a = <form.Field>{/* real */}c</form.Field>\n// real\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := commentTexts(catalog); !equalStrings(got, []string{"/* real */", "// real"}) {
+		t.Fatalf("comments = %#v", got)
+	}
+}
+
 func TestExtractSkipsCommentDelimitersInsideSupportedLiteralForms(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -193,6 +387,15 @@ func TestLanguageDetection(t *testing.T) {
 		if got != test.want || ok != test.ok {
 			t.Errorf("DetectLanguage(%q) = %q, %t; want %q, %t", test.name, got, ok, test.want, test.ok)
 		}
+	}
+}
+
+func TestLooksLikeJSXOpenBoundsGuard(t *testing.T) {
+	if looksLikeJSXOpen(nil, 0, 0) {
+		t.Fatal("expected false for empty source")
+	}
+	if looksLikeJSXOpen([]byte("<"), 0, 1) {
+		t.Fatal("expected false for source containing only '<'")
 	}
 }
 
