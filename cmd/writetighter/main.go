@@ -13,6 +13,7 @@ import (
 
 	"github.com/sdougbrown/writetighter/internal/app"
 	"github.com/sdougbrown/writetighter/internal/config"
+	"github.com/sdougbrown/writetighter/internal/llm"
 	"github.com/sdougbrown/writetighter/internal/profile"
 	"github.com/sdougbrown/writetighter/internal/setup"
 	"golang.org/x/term"
@@ -161,11 +162,27 @@ func runRevise(args []string) int {
 	format := fs.String("format", "json", "")
 	var referencePaths pathsFlag
 	fs.Var(&referencePaths, "reference", "")
+	model := fs.String("model", "", "Override the configured model for this run")
+	codeModel := fs.String("code-model", "", "Override the model used for code-aware comment revision")
+	contextTokens := fs.Int("context-tokens", 0, "Override the model context window (tokens); 0 = auto-detect from /v1/models")
+	outputTokens := fs.Int("output-tokens", 0, "Override max output tokens sent to the API; 0 = default when context window is known")
 	fs.Usage = func() { printHelp("revise") }
 	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
 		return 2
 	}
-	params := app.ReviseParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, ReferencePaths: []string(referencePaths)}
+	params := app.ReviseParams{
+		Paths:          fs.Args(),
+		Stdin:          *stdin,
+		Kind:           *kind,
+		Profile:        *profile,
+		ConfigPath:     *configPath,
+		Format:         *format,
+		ReferencePaths: []string(referencePaths),
+		Model:          *model,
+		CodeModel:      *codeModel,
+		ContextTokens:  *contextTokens,
+		OutputTokens:   *outputTokens,
+	}
 	if text.set {
 		params.Text = &text.value
 	}
@@ -237,9 +254,8 @@ func runConfig(args []string) int {
 	fs.Usage = func() { printHelp("config") }
 	wizard := fs.Bool("wizard", false, "Run the interactive configuration wizard")
 	fs.BoolVar(wizard, "w", false, "Run the interactive configuration wizard (short for --wizard)")
-	contextTokens := fs.Int("context", 0, "Set model context window tokens")
-	outputTokens := fs.Int("output-tokens", 0, "Set model max output tokens")
 	model := fs.String("model", "", "Set model ID")
+	codeModel := fs.String("code-model", "", "Set the model used for code-aware comment revision")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -249,23 +265,17 @@ func runConfig(args []string) int {
 		return 2
 	}
 
-	hasTargetedFlags := *contextTokens > 0 || *outputTokens > 0 || *model != ""
+	hasTargetedFlags := *model != "" || *codeModel != ""
 
 	// Targeted flags and --wizard are mutually exclusive.
 	if hasTargetedFlags && *wizard {
-		fmt.Fprintln(os.Stderr, "--context, --output-tokens, and --model cannot be combined with --wizard")
+		fmt.Fprintln(os.Stderr, "--model and --code-model cannot be combined with --wizard")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter config --help` for usage.")
 		return 2
 	}
 
 	// Targeted update path.
 	if hasTargetedFlags {
-		// Validate basic token relationship.
-		if *contextTokens > 0 && *outputTokens > 0 && *outputTokens >= *contextTokens {
-			fmt.Fprintf(os.Stderr, "--output-tokens (%d) must be less than --context (%d)\n", *outputTokens, *contextTokens)
-			return 2
-		}
-
 		// Load existing config. Targeted flags require a valid existing config.
 		existing, err := config.LoadUserConfig()
 		if err != nil {
@@ -281,56 +291,37 @@ func runConfig(args []string) int {
 			return 2
 		}
 
-		// Save previous model for context-clearing logic.
-		prevModel := existing.LLM.Model
-
 		// If --model is specified, preflight it against the endpoint.
 		if *model != "" {
 			apiKey := resolveAPIKey(existing)
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
-			client := &http.Client{Timeout: 45 * time.Second}
 
-			models, discErr := setup.ListModels(ctx, client, existing.LLM.BaseURL, apiKey)
-			var found *setup.ModelInfo
+			models, discErr := llm.ListModels(existing.LLM.BaseURL, apiKey, 45*time.Second)
 			if discErr != nil || len(models) == 0 {
-				// Discovery unavailable or empty: permit the explicitly entered model
-				// ID and rely on chat preflight below. No capacity suggestion is
-				// available in this case.
 				if discErr != nil {
-					fmt.Fprintf(os.Stderr, "Warning: model discovery unavailable: %v; proceeding with explicit model %q (no capacity suggestion).\n", discErr, *model)
+					fmt.Fprintf(os.Stderr, "Warning: model discovery unavailable: %v; proceeding with explicit model %q.\n", discErr, *model)
 				} else {
-					fmt.Fprintf(os.Stderr, "Warning: model discovery returned no models; proceeding with explicit model %q (no capacity suggestion).\n", *model)
+					fmt.Fprintf(os.Stderr, "Warning: model discovery returned no models; proceeding with explicit model %q.\n", *model)
 				}
 			} else {
+				found := false
 				for i := range models {
 					if models[i].ID == *model {
-						found = &models[i]
+						found = true
 						break
 					}
 				}
-				if found == nil {
+				if !found {
 					usageErr(fmt.Sprintf("model %q was not reported by the endpoint", *model))
 					return 2
 				}
 			}
 
-			// If the model is actually changing, clear context window unless --context is also set.
-			if *model != prevModel && *contextTokens == 0 {
-				existing.LLM.ContextWindowTokens = 0
-				existing.LLM.ContextWindowModel = ""
-				fmt.Fprintf(os.Stderr, "Warning: model changed from %q to %q; context_window_tokens cleared.\n", prevModel, *model)
-				fmt.Fprintf(os.Stderr, "  Run 'writetighter config --context N' to set the context window for the new model.\n")
-			}
-
 			existing.LLM.Model = *model
-			// context_window_model records the model for which context_window_tokens
-			// was last confirmed; only set it when a confirmed value exists.
-			if existing.LLM.ContextWindowTokens > 0 || *contextTokens > 0 {
-				existing.LLM.ContextWindowModel = *model
-			}
 
 			// Refresh response mode.
+			client := &http.Client{Timeout: 45 * time.Second}
 			newMode, probeErr := setup.ProbeResponseMode(ctx, client, existing.LLM.BaseURL, *model, apiKey)
 			if probeErr != nil {
 				fmt.Fprintf(os.Stderr, "Warning: response mode preflight failed for %q: %v\n", *model, probeErr)
@@ -338,33 +329,11 @@ func runConfig(args []string) int {
 				existing.LLM.ResponseMode = newMode
 				fmt.Fprintf(os.Stderr, "Response mode refreshed to %q for model %q.\n", newMode, *model)
 			}
-
-			// If metadata has a suggestion and no --context was given, show it.
-			if found != nil && found.SuggestedContextWindow() > 0 && *contextTokens == 0 && existing.LLM.ContextWindowTokens == 0 {
-				fmt.Fprintf(os.Stderr, "Model %q suggests a context window of %d tokens.\n", *model, found.SuggestedContextWindow())
-				fmt.Fprintf(os.Stderr, "  Run 'writetighter config --context %d' to set it.\n", found.SuggestedContextWindow())
-			}
 		}
 
-		// Apply --context (associate with current model).
-		if *contextTokens > 0 {
-			existing.LLM.ContextWindowTokens = *contextTokens
-			if existing.LLM.Model != "" {
-				existing.LLM.ContextWindowModel = existing.LLM.Model
-			}
-		}
-
-		// Apply --output-tokens.
-		if *outputTokens > 0 {
-			existing.LLM.MaxOutputTokens = *outputTokens
-		}
-
-		// Final validation: if both are set, ensure output < context.
-		if existing.LLM.ContextWindowTokens > 0 && existing.LLM.MaxOutputTokens > 0 &&
-			existing.LLM.MaxOutputTokens >= existing.LLM.ContextWindowTokens {
-			usageErr(fmt.Sprintf("max_output_tokens (%d) must be less than context_window_tokens (%d); not saved",
-				existing.LLM.MaxOutputTokens, existing.LLM.ContextWindowTokens))
-			return 2
+		// Apply --code-model.
+		if *codeModel != "" {
+			existing.LLM.CodeModel = *codeModel
 		}
 
 		// Save back.
@@ -440,7 +409,7 @@ func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 // The documented CLI permits paths before flags. flag.FlagSet stops at the first
 // positional argument, so normalize the small lint/revise grammar before parsing.
 func normalizeInterspersedFlags(args []string) []string {
-	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true, "--text": true, "--reference": true, "--git-compare": true}
+	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true, "--text": true, "--reference": true, "--git-compare": true, "--model": true, "--code-model": true, "--context-tokens": true, "--output-tokens": true}
 	var flags, paths []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -674,6 +643,10 @@ FLAGS
   --reference <path>  Path to reference file or directory (repeatable)
                       Reference content provides broader context for revision
                       decisions. May be combined with paths, --stdin, or --text.
+  --model <id>        Override the configured model for this run
+  --code-model <id>   Override the model used for code-aware comment revision
+  --context-tokens <n> Override model context window (0 = auto-detect)
+  --output-tokens <n>  Override max output tokens sent to the API (0 = default)
 
 INPUT
   Provide input via file paths, --stdin, or --text (mutually exclusive).
@@ -683,10 +656,8 @@ CONFIGURATION
   If config is missing and stdin is a terminal, interactive setup is offered
   automatically; otherwise the command exits with a hint.
 
-  Reference revision additionally requires context_window_tokens and
-  max_output_tokens in the LLM configuration. Run:
-    writetighter config --context TOKENS --output-tokens TOKENS
-  to set them after initial configuration.
+  Reference revision auto-detects the context window from the
+  /v1/models endpoint. Use --context-tokens to override it.
 
 EXAMPLES
   writetighter revise --text "Short text." --kind procedure
@@ -726,22 +697,20 @@ USAGE
   writetighter config [flags]
 
 FLAGS
-  --context <tokens>          Set model context window tokens
-  --output-tokens <tokens>    Set model max output tokens
   --model <model>             Set model ID (re-preflights if possible)
+  --code-model <model>        Set the model used for code-aware comment revision
   --wizard, -w                Run the interactive configuration wizard
 
 NOTE
-  --context, --output-tokens, and --model are mutually exclusive with --wizard.
-  When any of these flags are given, the config file is updated directly without
+  --model and --code-model are mutually exclusive with --wizard.
+  When either flag is given, the config file is updated directly without
   the interactive wizard.
 
 EXAMPLES
   writetighter config                         # show sanitized config (or run wizard if unconfigured)
   writetighter config --wizard                # force the wizard even if already configured
-  writetighter config --context 8192           # set context window to 8192 tokens
-  writetighter config --output-tokens 4096     # set max output tokens to 4096
-  writetighter config --model gemma4           # set context window model
+  writetighter config --model gemma4           # switch model (refreshes response mode)
+  writetighter config --code-model qwen-coder  # set a separate model for code comment revision
 `
 
 const explainHelp = `writetighter explain — explain a lint rule

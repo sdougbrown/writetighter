@@ -48,10 +48,25 @@ writetighter lint (PATH... | --stdin | --text STRING) [flags]
 Provides contextual rewrites and clarifications. For `--kind code-comment`, explicit supported source files (`.go`, TypeScript/JavaScript variants, `.rs`, `.py`, and `.pyi`) use a whole-file, lexer-owned comment catalog: only cataloged comments can be findings, and reported source text/ranges are catalog-owned. `--stdin`, `--text`, and unsupported extensions keep the legacy prose-style code-comment path. Code-aware file review rejects `--reference` until bounded cross-file context is supported. Review remains advisory and never applies edits.
 
 ```
-writetighter revise (PATH... | --stdin | --text STRING) --kind KIND
+writetighter revise (PATH... | --stdin | --text STRING) [flags]
 ```
 
-Output is JSON. Each item in `revisions[]` is either a `rewrite` or a `clarification`. 
+### Flags
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--kind` | `description` | Document kind (see lint kinds table) |
+| `--format` | `json` | `json` or `human` |
+| `--profile` | embedded default | Pin a specific `ID@VERSION` |
+| `--reference` | *(none)* | Path to reference file or directory (repeatable) |
+| `--model` | config | Override the configured model for this run |
+| `--code-model` | config | Override the model for code-aware comment revision |
+| `--context-tokens` | auto-detect | Override model context window (0 = auto-detect from `/v1/models`) |
+| `--output-tokens` | default | Override max output tokens sent to the API (0 = default when context window is known) |
+
+Output is JSON. Each item in `revisions[]` is either a `rewrite` or a `clarification`.
+
+When `--reference` is used, `revise` auto-detects the context window from the `/v1/models` endpoint. Use `--context-tokens` to override if the endpoint does not report context metadata.
 
 ## writetighter prompt
 
@@ -64,6 +79,18 @@ writetighter prompt --kind code-comment
 ## writetighter config
 
 Interactive setup for OpenAI-compatible endpoints. Writes to `~/.config/writetighter/config.toml`.
+
+### Flags
+
+| Flag | Description |
+|------|-------------|
+| `--wizard`, `-w` | Run the interactive configuration wizard |
+| `--model` | Set model ID (re-preflights and refreshes response mode) |
+| `--code-model` | Set the model used for code-aware comment revision |
+
+When already configured, `config` prints the current configuration with the API key redacted. The wizard auto-detects context capacity from `/v1/models` but does not persist it — `revise` auto-detects at runtime instead.
+
+Optional `[llm] code_model` in the config file specifies a different model for code-aware comment revision, so you don't need to pass `--code-model` on every invocation.
 
 ## writetighter profile
 

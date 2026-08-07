@@ -26,6 +26,13 @@ const (
 	MaxEnvelopeChars       = 64 * 1024
 	EstimatedBytesPerToken = 4
 	chatPath               = "/chat/completions"
+
+	// Budget constants for token-aware chunking. These are runtime defaults,
+	// not user configuration. They are used when a context window is known
+	// (auto-detected or overridden via flags) to plan requests that fit.
+	DefaultMaxOutputTokens  = 2048
+	BudgetSafetyTokens      = 512
+	MinEditableSourceTokens = 512
 )
 
 type Config struct {

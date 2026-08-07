@@ -66,18 +66,25 @@ func TestLoadUserConfigXDG(t *testing.T) {
 	}
 }
 
-func TestProjectConfigRejectsUnknownFields(t *testing.T) {
+func TestProjectConfigIgnoresUnknownFields(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".writetighter.toml")
 	data := []byte("[profile]\nid='core'\nversion='1'\n[[terms]]\nterm='alpha'\ndefinition='x'\n[llm]\napi_key='sk-abc123'\n")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := LoadProjectConfig(path)
-	if err == nil {
-		t.Fatal("expected error for unknown [llm] section in project config")
+	cfg, err := LoadProjectConfig(path)
+	if err != nil {
+		t.Fatalf("unknown keys should be ignored, got error: %v", err)
 	}
-	t.Logf("got expected error: %v", err)
+	// The [llm] section is unknown to ProjectConfig and must be silently
+	// dropped — no LLM fields exist on ProjectConfig, so secrets cannot leak.
+	if cfg.Profile.ID != "core" || cfg.Profile.Version != "1" {
+		t.Fatalf("expected profile to load, got %#v", cfg.Profile)
+	}
+	if len(cfg.Terms) != 1 || cfg.Terms[0].Term != "alpha" {
+		t.Fatalf("expected terms to load, got %#v", cfg.Terms)
+	}
 }
 
 func TestUserConfigAcceptsStoredAPIKey(t *testing.T) {
@@ -188,22 +195,26 @@ func TestSanitizedTOMLPreservesAPIKeyEnv(t *testing.T) {
 	}
 }
 
-func TestProjectConfigRejectsApiKeyEnvInProject(t *testing.T) {
-	// Project config should reject [llm] sections entirely.
+func TestProjectConfigIgnoresLlmSectionInProject(t *testing.T) {
+	// Project config should not use [llm] sections. With lenient parsing,
+	// the [llm] section is silently ignored — ProjectConfig has no LLM
+	// fields, so secrets in a project config cannot leak or be used.
 	dir := t.TempDir()
 	path := filepath.Join(dir, ".writetighter.toml")
 	data := []byte("[profile]\nid='core'\nversion='1'\n[llm]\napi_key_env='MY_KEY'\n")
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatal(err)
 	}
-	_, err := LoadProjectConfig(path)
-	if err == nil {
-		t.Fatal("expected error for unknown [llm] section in project config")
+	cfg, err := LoadProjectConfig(path)
+	if err != nil {
+		t.Fatalf("unknown [llm] section should be ignored, got error: %v", err)
 	}
-	t.Logf("got expected error: %v", err)
+	if cfg.Profile.ID != "core" || cfg.Profile.Version != "1" {
+		t.Fatalf("expected profile to load, got %#v", cfg.Profile)
+	}
 }
 
-func TestLLMConfigContextValidation(t *testing.T) {
+func TestLLMConfigCodeModel(t *testing.T) {
 	// Helper to write a user config file at the expected path under dir.
 	writeCfg := func(t *testing.T, dir string, data []byte) {
 		t.Helper()
@@ -217,116 +228,65 @@ func TestLLMConfigContextValidation(t *testing.T) {
 		}
 	}
 
-	t.Run("valid with both tokens", func(t *testing.T) {
+	t.Run("loads code_model when present", func(t *testing.T) {
 		dir := t.TempDir()
-		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='gemma4'\ncontext_window_tokens=8192\nmax_output_tokens=4096\n"))
+		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='gemma4'\ncode_model='qwen-coder'\n"))
 		t.Setenv("XDG_CONFIG_HOME", dir)
 		cfg, err := LoadUserConfig()
 		if err != nil {
 			t.Fatalf("expected valid config to load, got: %v", err)
 		}
-		if cfg.LLM.ContextWindowTokens != 8192 {
-			t.Fatalf("expected context_window_tokens=8192, got %d", cfg.LLM.ContextWindowTokens)
-		}
-		if cfg.LLM.MaxOutputTokens != 4096 {
-			t.Fatalf("expected max_output_tokens=4096, got %d", cfg.LLM.MaxOutputTokens)
+		if cfg.LLM.CodeModel != "qwen-coder" {
+			t.Fatalf("expected code_model='qwen-coder', got %q", cfg.LLM.CodeModel)
 		}
 	})
 
-	t.Run("rejects context_window_tokens=0", func(t *testing.T) {
+	t.Run("code_model defaults to empty when absent", func(t *testing.T) {
 		dir := t.TempDir()
-		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\ncontext_window_tokens=0\n"))
+		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='gemma4'\n"))
 		t.Setenv("XDG_CONFIG_HOME", dir)
-		_, err := LoadUserConfig()
-		if err == nil {
-			t.Fatal("expected error for context_window_tokens=0")
+		cfg, err := LoadUserConfig()
+		if err != nil {
+			t.Fatalf("expected config to load, got: %v", err)
 		}
-		if !strings.Contains(err.Error(), "context_window_tokens must be > 0") {
-			t.Fatalf("unexpected error: %v", err)
+		if cfg.LLM.CodeModel != "" {
+			t.Fatalf("expected code_model='', got %q", cfg.LLM.CodeModel)
 		}
 	})
 
-	t.Run("rejects negative context_window_tokens", func(t *testing.T) {
-		dir := t.TempDir()
-		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\ncontext_window_tokens=-100\n"))
-		t.Setenv("XDG_CONFIG_HOME", dir)
-		_, err := LoadUserConfig()
-		if err == nil {
-			t.Fatal("expected error for negative context_window_tokens")
-		}
-		if !strings.Contains(err.Error(), "context_window_tokens must be > 0") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("rejects max_output_tokens >= context_window_tokens", func(t *testing.T) {
-		dir := t.TempDir()
-		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\ncontext_window_tokens=4096\nmax_output_tokens=4096\n"))
-		t.Setenv("XDG_CONFIG_HOME", dir)
-		_, err := LoadUserConfig()
-		if err == nil {
-			t.Fatal("expected error for max_output_tokens >= context_window_tokens")
-		}
-		if !strings.Contains(err.Error(), "must be less than") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("rejects max_output_tokens greater than context", func(t *testing.T) {
-		dir := t.TempDir()
-		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\ncontext_window_tokens=4096\nmax_output_tokens=8192\n"))
-		t.Setenv("XDG_CONFIG_HOME", dir)
-		_, err := LoadUserConfig()
-		if err == nil {
-			t.Fatal("expected error for max_output_tokens > context_window_tokens")
-		}
-		if !strings.Contains(err.Error(), "must be less than") {
-			t.Fatalf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("round-trip through write and load", func(t *testing.T) {
+	t.Run("round-trip code_model through write and load", func(t *testing.T) {
 		root := t.TempDir()
 		t.Setenv("XDG_CONFIG_HOME", root)
 		orig := &UserConfig{LLM: LLMConfig{
-			Provider:            "openai-compatible",
-			BaseURL:             "http://localhost:4000/v1",
-			Model:               "gemma4",
-			APIKeyEnv:           "WRITETIGHTER_API_KEY",
-			ResponseMode:        "json_object",
-			ContextWindowTokens: 8192,
-			MaxOutputTokens:     4096,
+			Provider:     "openai-compatible",
+			BaseURL:      "http://localhost:4000/v1",
+			Model:        "gemma4",
+			APIKeyEnv:    "WRITETIGHTER_API_KEY",
+			ResponseMode: "json_object",
+			CodeModel:    "qwen-coder",
 		}}
-		path, err := WriteUserConfig(orig)
-		if err != nil {
+		if _, err := WriteUserConfig(orig); err != nil {
 			t.Fatalf("WriteUserConfig failed: %v", err)
 		}
 		loaded, err := LoadUserConfig()
 		if err != nil {
 			t.Fatalf("LoadUserConfig after write failed: %v", err)
 		}
-		if loaded.LLM.ContextWindowTokens != 8192 {
-			t.Fatalf("round-trip context_window_tokens: got %d, want 8192", loaded.LLM.ContextWindowTokens)
+		if loaded.LLM.CodeModel != "qwen-coder" {
+			t.Fatalf("round-trip code_model: got %q, want 'qwen-coder'", loaded.LLM.CodeModel)
 		}
-		if loaded.LLM.MaxOutputTokens != 4096 {
-			t.Fatalf("round-trip max_output_tokens: got %d, want 4096", loaded.LLM.MaxOutputTokens)
-		}
-		if loaded.LLM.ContextWindowModel != "" {
-			t.Fatalf("round-trip context_window_model: got %q, want empty", loaded.LLM.ContextWindowModel)
-		}
-		_ = path
 	})
 
-	t.Run("backward compat without new fields", func(t *testing.T) {
+	t.Run("ignores removed config keys (context_window_tokens)", func(t *testing.T) {
 		dir := t.TempDir()
-		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='gemma4'\napi_key_env='WRITETIGHTER_API_KEY'\nresponse_mode='json_object'\n"))
+		writeCfg(t, dir, []byte("[llm]\nprovider='openai-compatible'\nbase_url='http://localhost:4000/v1'\nmodel='gemma4'\ncontext_window_tokens=8192\nmax_output_tokens=4096\ncontext_window_model='gemma4'\n"))
 		t.Setenv("XDG_CONFIG_HOME", dir)
 		cfg, err := LoadUserConfig()
 		if err != nil {
-			t.Fatalf("expected backward-compat config to load: %v", err)
+			t.Fatalf("old config with removed keys should load without error: %v", err)
 		}
-		if cfg.LLM.ContextWindowTokens != 0 || cfg.LLM.MaxOutputTokens != 0 || cfg.LLM.ContextWindowModel != "" {
-			t.Fatalf("new fields should be zero-valued when absent: %+v", cfg.LLM)
+		if cfg.LLM.Model != "gemma4" {
+			t.Fatalf("model should still load, got %q", cfg.LLM.Model)
 		}
 	})
 }

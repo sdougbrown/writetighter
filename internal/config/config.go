@@ -11,12 +11,6 @@ import (
 	"github.com/BurntSushi/toml"
 )
 
-const (
-	DefaultMaxOutputTokens  = 2048
-	BudgetSafetyTokens      = 512
-	MinEditableSourceTokens = 512
-)
-
 type ProjectConfig struct {
 	Profile ProfileConfig `toml:"profile"`
 	Terms   []TermEntry   `toml:"terms"`
@@ -41,17 +35,20 @@ type UserConfig struct {
 }
 
 type LLMConfig struct {
-	Provider            string `toml:"provider"`
-	BaseURL             string `toml:"base_url"`
-	Model               string `toml:"model"`
-	APIKey              string `toml:"api_key,omitempty"`
-	APIKeyEnv           string `toml:"api_key_env,omitempty"`
-	Timeout             string `toml:"timeout"`
-	ResponseMode        string `toml:"response_mode"`
-	MaxRequests         int    `toml:"max_requests,omitempty"`
-	ContextWindowTokens int    `toml:"context_window_tokens,omitzero"`
-	MaxOutputTokens     int    `toml:"max_output_tokens,omitzero"`
-	ContextWindowModel  string `toml:"context_window_model,omitempty"`
+	Provider     string `toml:"provider"`
+	BaseURL      string `toml:"base_url"`
+	Model        string `toml:"model"`
+	APIKey       string `toml:"api_key,omitempty"`
+	APIKeyEnv    string `toml:"api_key_env,omitempty"`
+	Timeout      string `toml:"timeout"`
+	ResponseMode string `toml:"response_mode"`
+	MaxRequests  int    `toml:"max_requests,omitempty"`
+
+	// CodeModel optionally specifies a different model for code-aware comment
+	// revision. When unset, code-comment revision uses Model. This allows
+	// using a model better suited to code understanding (e.g. a larger or
+	// code-specialized model) while keeping a smaller model for prose.
+	CodeModel string `toml:"code_model,omitempty"`
 }
 
 type MergedConfig struct {
@@ -61,13 +58,13 @@ type MergedConfig struct {
 
 func LoadProjectConfig(path string) (*ProjectConfig, error) {
 	var cfg ProjectConfig
-	md, err := toml.DecodeFile(path, &cfg)
-	if err != nil {
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return nil, err
 	}
-	if undecoded := md.Undecoded(); len(undecoded) > 0 {
-		return nil, fmt.Errorf("config %s: unknown key(s): %v", path, undecoded)
-	}
+	// Unknown keys are silently ignored for forward/backward compatibility:
+	// configs written by newer versions should not break older binaries, and
+	// vice versa. ProjectConfig has no LLM fields, so a [llm] section in a
+	// project config is harmlessly ignored rather than leaking secrets.
 	if err := ValidateTermBase(cfg.Terms); err != nil {
 		return nil, err
 	}
@@ -195,27 +192,13 @@ func ValidateTermBase(entries []TermEntry) error {
 
 func loadUserConfigFile(path string) (*UserConfig, error) {
 	var cfg UserConfig
-	md, err := toml.DecodeFile(path, &cfg)
-	if err != nil {
+	// Unknown keys are silently ignored for forward/backward compatibility:
+	// configs written by newer or older versions should not break each other.
+	if _, err := toml.DecodeFile(path, &cfg); err != nil {
 		return nil, err
-	}
-	if undecoded := md.Undecoded(); len(undecoded) > 0 {
-		return nil, fmt.Errorf("config %s: unknown key(s): %v", path, undecoded)
 	}
 	if cfg.LLM.APIKey != "" && cfg.LLM.APIKeyEnv != "" {
 		return nil, fmt.Errorf("config %s: llm.api_key and llm.api_key_env are mutually exclusive", path)
-	}
-	if md.IsDefined("llm", "context_window_tokens") && cfg.LLM.ContextWindowTokens <= 0 {
-		return nil, fmt.Errorf("config %s: llm.context_window_tokens must be > 0", path)
-	}
-	if md.IsDefined("llm", "max_output_tokens") && cfg.LLM.MaxOutputTokens <= 0 {
-		return nil, fmt.Errorf("config %s: llm.max_output_tokens must be > 0", path)
-	}
-	if cfg.LLM.ContextWindowTokens > 0 && cfg.LLM.MaxOutputTokens > 0 && cfg.LLM.MaxOutputTokens >= cfg.LLM.ContextWindowTokens {
-		return nil, fmt.Errorf("config %s: llm.max_output_tokens (%d) must be less than llm.context_window_tokens (%d)", path, cfg.LLM.MaxOutputTokens, cfg.LLM.ContextWindowTokens)
-	}
-	if md.IsDefined("llm", "context_window_model") && cfg.LLM.ContextWindowModel == "" {
-		return nil, fmt.Errorf("config %s: llm.context_window_model must be non-empty if set", path)
 	}
 	return &cfg, nil
 }

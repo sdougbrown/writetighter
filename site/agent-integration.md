@@ -30,6 +30,8 @@ $ARGUMENTS: the prose to tighten, plus an optional `--kind`
 
    `printf '%s' "$DRAFT" | writetighter revise --stdin --kind "$KIND"`
 
+   Override the configured model or code-comment model per invocation with `--model` and `--code-model` if needed.
+
 4. Process revisions:
    - For each `rewrite`: Adopt `replacement` only if it preserves all commands, paths, numbers, and identifiers in `source_text`.
    - For each `clarification`: Surface the `question`. Never guess.

@@ -59,6 +59,26 @@ type ReviseParams struct {
 	ConfigPath     string
 	Format         string
 	ReferencePaths []string
+
+	// Model overrides the configured model for this revise run. When empty,
+	// the [llm] model from user config is used.
+	Model string
+
+	// CodeModel overrides the model used for code-aware comment revision.
+	// When empty, llm.code_model from user config is used, falling back to
+	// the main model.
+	CodeModel string
+
+	// ContextTokens overrides the model context window for this revise run.
+	// When 0, the context window is auto-detected from the /v1/models endpoint
+	// when needed (reference or code-comment revision). When auto-detection
+	// is unavailable, revise falls back to legacy byte-budget chunking.
+	ContextTokens int
+
+	// OutputTokens overrides the max output tokens sent to the API. When 0,
+	// a default is used when a context window is known. When no context
+	// window is known, max_tokens is not sent to the API.
+	OutputTokens int
 }
 
 // PromptParams selects exported revision guidance without model access.
@@ -599,6 +619,20 @@ func (a *App) RunRevise(params ReviseParams) error {
 		llmTimeout = d
 	}
 
+	// Apply runtime model override.
+	if params.Model != "" {
+		llmModel = params.Model
+	}
+
+	// Determine the code-comment model: explicit flag, then config, then main.
+	codeModel := params.CodeModel
+	if codeModel == "" {
+		codeModel = uc.CodeModel
+	}
+	if codeModel == "" {
+		codeModel = llmModel
+	}
+
 	if llmProvider == "" {
 		llmProvider = "openai-compatible"
 	}
@@ -622,14 +656,12 @@ func (a *App) RunRevise(params ReviseParams) error {
 	}
 
 	llmCfg := llm.Config{
-		BaseURL:             llmBaseURL,
-		Model:               llmModel,
-		APIKey:              llmAPIKey,
-		APIKeyEnv:           llmAPIKeyEnv,
-		Timeout:             llmTimeout,
-		ResponseMode:        llmResponseMode,
-		MaxOutputTokens:     uc.MaxOutputTokens,
-		ContextWindowTokens: uc.ContextWindowTokens,
+		BaseURL:      llmBaseURL,
+		Model:        llmModel,
+		APIKey:       llmAPIKey,
+		APIKeyEnv:    llmAPIKeyEnv,
+		Timeout:      llmTimeout,
+		ResponseMode: llmResponseMode,
 	}
 
 	// Validate LLM config before reading input.
@@ -691,14 +723,93 @@ func (a *App) RunRevise(params ReviseParams) error {
 		}
 	}
 
-	// Require confirmed context_window_tokens when references are provided, and
-	// never reuse a capacity that was confirmed for a different model.
-	if refPack != nil {
-		if uc.ContextWindowTokens == 0 {
-			return fmt.Errorf("%w: reference revision requires llm.context_window_tokens to be configured. Use `writetighter config --context TOKENS` to set capacity for model %q", ErrLLMConfigRequired, llmModel)
+	// Determine whether any document uses the code-aware comment protocol.
+	// This affects which model needs context window resolution.
+	hasCodeAware := false
+	for _, doc := range docs {
+		if usesCodeCommentProtocol(params, doc) {
+			hasCodeAware = true
+			break
 		}
-		if uc.ContextWindowModel != "" && uc.ContextWindowModel != llmModel {
-			return fmt.Errorf("%w: context_window_tokens=%d was last confirmed for model %q, not the current model %q; reference revision is unavailable until context is configured for the current model. Use `writetighter config --context TOKENS` to set capacity for %q", ErrLLMConfigRequired, uc.ContextWindowTokens, uc.ContextWindowModel, llmModel, llmModel)
+	}
+
+	// Resolve the API key for endpoint queries (model metadata lookup).
+	resolvedAPIKey := llmAPIKey
+	if resolvedAPIKey == "" && llmAPIKeyEnv != "" {
+		resolvedAPIKey = os.Getenv(llmAPIKeyEnv)
+	}
+
+	// Resolve context window and output tokens at runtime. These are not
+	// stored in config — they are auto-detected from the /v1/models endpoint
+	// or overridden via flags. Auto-detection only runs when needed (reference
+	// revision or code-aware comment revision).
+	//
+	// Main model context window: needed for reference revision, code comment
+	// revision when the code model is the same, or when the user explicitly
+	// provides --context-tokens (which should apply to all prose revision).
+	needsMainContextWindow := refPack != nil || (hasCodeAware && codeModel == llmModel) || params.ContextTokens > 0
+	if needsMainContextWindow {
+		if params.ContextTokens > 0 {
+			llmCfg.ContextWindowTokens = params.ContextTokens
+		} else {
+			cw, lookupErr := llm.LookupContextWindow(llmBaseURL, resolvedAPIKey, llmModel, llmTimeout)
+			if lookupErr != nil {
+				// Auto-detection failed. For reference revision this is fatal;
+				// for code-comment-only revision, fall back to legacy byte budget.
+				if refPack != nil {
+					return fmt.Errorf("%w: could not auto-detect context window for model %q from %s/models: %v; use --context-tokens to specify it explicitly", ErrLLMConfigRequired, llmModel, llmBaseURL, lookupErr)
+				}
+			} else {
+				llmCfg.ContextWindowTokens = cw
+			}
+		}
+		if llmCfg.ContextWindowTokens > 0 {
+			if params.OutputTokens > 0 {
+				llmCfg.MaxOutputTokens = params.OutputTokens
+			} else {
+				llmCfg.MaxOutputTokens = llm.DefaultMaxOutputTokens
+			}
+			if llmCfg.MaxOutputTokens >= llmCfg.ContextWindowTokens {
+				return fmt.Errorf("%w: output tokens (%d) must be less than context window (%d)", ErrLLMConfigRequired, llmCfg.MaxOutputTokens, llmCfg.ContextWindowTokens)
+			}
+		}
+		if refPack != nil && llmCfg.ContextWindowTokens == 0 {
+			return fmt.Errorf("%w: reference revision requires a known context window for model %q, but none was provided by --context-tokens or the /v1/models endpoint; use --context-tokens to specify it explicitly", ErrLLMConfigRequired, llmModel)
+		}
+	}
+
+	// Code model config: when the code model differs from the main model, build
+	// a separate config and resolve its context window independently.
+	codeLlmCfg := llmCfg
+	if hasCodeAware && codeModel != llmModel {
+		codeLlmCfg = llm.Config{
+			BaseURL:      llmBaseURL,
+			Model:        codeModel,
+			APIKey:       llmAPIKey,
+			APIKeyEnv:    llmAPIKeyEnv,
+			Timeout:      llmTimeout,
+			ResponseMode: llmResponseMode,
+		}
+		if params.ContextTokens > 0 {
+			codeLlmCfg.ContextWindowTokens = params.ContextTokens
+		} else {
+			cw, lookupErr := llm.LookupContextWindow(llmBaseURL, resolvedAPIKey, codeModel, llmTimeout)
+			if lookupErr != nil {
+				// Fall back to legacy byte budget for code comment revision.
+				fmt.Fprintf(os.Stderr, "Warning: could not auto-detect context window for code model %q: %v\n", codeModel, lookupErr)
+			} else {
+				codeLlmCfg.ContextWindowTokens = cw
+			}
+		}
+		if codeLlmCfg.ContextWindowTokens > 0 {
+			if params.OutputTokens > 0 {
+				codeLlmCfg.MaxOutputTokens = params.OutputTokens
+			} else {
+				codeLlmCfg.MaxOutputTokens = llm.DefaultMaxOutputTokens
+			}
+			if codeLlmCfg.MaxOutputTokens >= codeLlmCfg.ContextWindowTokens {
+				return fmt.Errorf("%w: output tokens (%d) must be less than context window (%d) for code model %q", ErrLLMConfigRequired, codeLlmCfg.MaxOutputTokens, codeLlmCfg.ContextWindowTokens, codeModel)
+			}
 		}
 	}
 
@@ -771,12 +882,16 @@ func (a *App) RunRevise(params ReviseParams) error {
 			var revResp *report.ReviseResponse
 			var callErr error
 			if plan.codeAware {
-				revResp, callErr = llm.ReviseCodeComments(context.Background(), llmCfg, plan.doc, res)
+				revResp, callErr = llm.ReviseCodeComments(context.Background(), codeLlmCfg, plan.doc, res)
 			} else {
 				revResp, callErr = llm.ReviseChunk(context.Background(), llmCfg, plan.doc, res, docFindings, terms, chunk.StartByte, chunk.EndByte, refPack)
 			}
 			if callErr != nil && errors.Is(callErr, llm.ErrInvalidModelResponse) && (llmResponseMode == "json_object" || llmResponseMode == "json_schema") && requestsMade+remainingPrimaryRequests < maxRequests {
-				fallbackCfg := llmCfg
+				activeCfg := llmCfg
+				if plan.codeAware {
+					activeCfg = codeLlmCfg
+				}
+				fallbackCfg := activeCfg
 				fallbackCfg.ResponseMode = "prompt_json"
 				requestsMade++
 				coverage.ModelRequests++
@@ -836,8 +951,8 @@ func (a *App) RunRevise(params ReviseParams) error {
 			IncludedBytes:       refPack.IncludedBytes,
 			Complete:            refPack.Complete,
 			Warnings:            refPack.Warnings,
-			ContextWindowTokens: uc.ContextWindowTokens,
-			MaxOutputTokens:     uc.MaxOutputTokens,
+			ContextWindowTokens: llmCfg.ContextWindowTokens,
+			MaxOutputTokens:     llmCfg.MaxOutputTokens,
 		}
 		for i, e := range refPack.Entries {
 			referenceContext.Files[i] = e.SourcePath
@@ -914,7 +1029,7 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 	// excerpt. This validates that the system/reference/schema overhead alone
 	// leaves at least minEditableSourceTokens; BuildBudgetedPrompt returns the
 	// actionable configuration error otherwise.
-	minChunkBytes := config.MinEditableSourceTokens * llm.EstimatedBytesPerToken
+	minChunkBytes := llm.MinEditableSourceTokens * llm.EstimatedBytesPerToken
 	oneByteExcerpt := llm.NewChunkExcerpt(doc, 0, 1)
 	sysPrompt, userContent, _, err := llm.BuildBudgetedPrompt(doc, res, findings, terms, oneByteExcerpt, refPack, cfg)
 	if err != nil {
@@ -932,15 +1047,15 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 
 	maxOutputTokens := cfg.MaxOutputTokens
 	if maxOutputTokens <= 0 {
-		maxOutputTokens = config.DefaultMaxOutputTokens
+		maxOutputTokens = llm.DefaultMaxOutputTokens
 	}
 
-	availableSourceBudget := cfg.ContextWindowTokens - basePromptTokens - maxOutputTokens - config.BudgetSafetyTokens
-	if availableSourceBudget < config.MinEditableSourceTokens {
+	availableSourceBudget := cfg.ContextWindowTokens - basePromptTokens - maxOutputTokens - llm.BudgetSafetyTokens
+	if availableSourceBudget < llm.MinEditableSourceTokens {
 		return nil, fmt.Errorf(
 			"revision context requires %d estimated input tokens for system/reference material and output reservation, "+
 				"leaving %d estimated tokens for editable source; "+
-				"configure a larger context_window_tokens or use a smaller reference set",
+				"use a larger --context-tokens value or use a smaller reference set",
 			basePromptTokens+maxOutputTokens, availableSourceBudget)
 	}
 
@@ -1022,13 +1137,13 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 				// editable-source size; fail before any model call.
 				return nil, fmt.Errorf(
 					"cannot fit final fragment of %d bytes for document %q within the available context window budget: %v. "+
-						"Consider increasing context_window_tokens or reducing reference content.",
+						"Consider increasing --context-tokens or reducing reference content.",
 					chunkEnd-chunkStart, doc.Source, lastBudgetErr)
 			}
 			return nil, fmt.Errorf(
 				"cannot fit any chunk of at least %d bytes for document %q "+
 					"within the available context window budget. "+
-					"Consider increasing context_window_tokens or reducing reference content.",
+					"Consider increasing --context-tokens or reducing reference content.",
 				minChunkBytes, doc.Source)
 		}
 

@@ -618,7 +618,7 @@ max_requests=32
 	defer restore()
 
 	// Change model from qwen to gemma4.
-	_, stderr := captureStdoutStderr(t, func() {
+	captureStdoutStderr(t, func() {
 		if got := run([]string{"config", "--model", "gemma4"}); got != 0 {
 			t.Fatalf("expected exit 0, got %d", got)
 		}
@@ -631,17 +631,9 @@ max_requests=32
 	if cfg.LLM.Model != "gemma4" {
 		t.Fatalf("model = %q, want gemma4", cfg.LLM.Model)
 	}
-	// Context should be cleared when model changes.
-	if cfg.LLM.ContextWindowTokens != 0 {
-		t.Fatalf("context_window_tokens = %d, want 0 (cleared)", cfg.LLM.ContextWindowTokens)
-	}
 	// Response mode should be refreshed.
 	if cfg.LLM.ResponseMode != "json_schema" {
 		t.Fatalf("response_mode = %q, want json_schema", cfg.LLM.ResponseMode)
-	}
-	// Should mention the suggestion.
-	if !strings.Contains(stderr, "suggests a context window of 4096 tokens") {
-		t.Fatalf("expected context window suggestion in stderr, got: %s", stderr)
 	}
 }
 
@@ -672,189 +664,6 @@ max_requests=32
 	}
 }
 
-func TestConfigContextSetsTokens(t *testing.T) {
-	server := configTestServer(t)
-	defer server.Close()
-
-	configBody := fmt.Sprintf(`[llm]
-provider='openai-compatible'
-base_url='%s'
-model='qwen'
-api_key=''
-timeout='45s'
-response_mode='json_object'
-max_requests=32
-`, server.URL)
-	_, restore := writeConfigToTempDir(t, configBody)
-	defer restore()
-
-	// Set context window to 8192.
-	captureStdoutStderr(t, func() {
-		if got := run([]string{"config", "--context", "8192"}); got != 0 {
-			t.Fatalf("expected exit 0, got %d", got)
-		}
-	})
-
-	cfg, err := config.LoadUserConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.LLM.ContextWindowTokens != 8192 {
-		t.Fatalf("context_window_tokens = %d, want 8192", cfg.LLM.ContextWindowTokens)
-	}
-	if cfg.LLM.ContextWindowModel != "qwen" {
-		t.Fatalf("context_window_model = %q, want qwen", cfg.LLM.ContextWindowModel)
-	}
-	// Unchanged fields.
-	if cfg.LLM.MaxOutputTokens != 0 {
-		t.Fatalf("max_output_tokens = %d, want 0", cfg.LLM.MaxOutputTokens)
-	}
-}
-
-func TestConfigOutputTokensSetsValue(t *testing.T) {
-	server := configTestServer(t)
-	defer server.Close()
-
-	configBody := fmt.Sprintf(`[llm]
-provider='openai-compatible'
-base_url='%s'
-model='qwen'
-api_key=''
-timeout='45s'
-response_mode='json_object'
-max_requests=32
-`, server.URL)
-	_, restore := writeConfigToTempDir(t, configBody)
-	defer restore()
-
-	captureStdoutStderr(t, func() {
-		if got := run([]string{"config", "--output-tokens", "4096"}); got != 0 {
-			t.Fatalf("expected exit 0, got %d", got)
-		}
-	})
-
-	cfg, err := config.LoadUserConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.LLM.MaxOutputTokens != 4096 {
-		t.Fatalf("max_output_tokens = %d, want 4096", cfg.LLM.MaxOutputTokens)
-	}
-}
-
-func TestConfigContextAndOutputTogether(t *testing.T) {
-	server := configTestServer(t)
-	defer server.Close()
-
-	configBody := fmt.Sprintf(`[llm]
-provider='openai-compatible'
-base_url='%s'
-model='qwen'
-api_key=''
-timeout='45s'
-response_mode='json_object'
-max_requests=32
-`, server.URL)
-	_, restore := writeConfigToTempDir(t, configBody)
-	defer restore()
-
-	captureStdoutStderr(t, func() {
-		if got := run([]string{"config", "--context", "16384", "--output-tokens", "4096"}); got != 0 {
-			t.Fatalf("expected exit 0, got %d", got)
-		}
-	})
-
-	cfg, err := config.LoadUserConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.LLM.ContextWindowTokens != 16384 {
-		t.Fatalf("context_window_tokens = %d, want 16384", cfg.LLM.ContextWindowTokens)
-	}
-	if cfg.LLM.MaxOutputTokens != 4096 {
-		t.Fatalf("max_output_tokens = %d, want 4096", cfg.LLM.MaxOutputTokens)
-	}
-	if cfg.LLM.ContextWindowModel != "qwen" {
-		t.Fatalf("context_window_model = %q, want qwen", cfg.LLM.ContextWindowModel)
-	}
-}
-
-func TestConfigContextGreaterThanOutputValidation(t *testing.T) {
-	server := configTestServer(t)
-	defer server.Close()
-
-	configBody := fmt.Sprintf(`[llm]
-provider='openai-compatible'
-base_url='%s'
-model='qwen'
-api_key=''
-timeout='45s'
-response_mode='json_object'
-max_requests=32
-`, server.URL)
-	_, restore := writeConfigToTempDir(t, configBody)
-	defer restore()
-
-	assertRejected := func(t *testing.T, args ...string) {
-		t.Helper()
-		_, stderr := captureStdoutStderr(t, func() {
-			if got := run(args); got != 2 {
-				t.Fatalf("expected exit 2, got %d", got)
-			}
-		})
-		if !strings.Contains(stderr, "must be less than") {
-			t.Fatalf("expected validation error in stderr, got: %s", stderr)
-		}
-	}
-
-	t.Run("output greater than context", func(t *testing.T) {
-		assertRejected(t, "config", "--context", "4096", "--output-tokens", "8192")
-	})
-	t.Run("output equal to context", func(t *testing.T) {
-		assertRejected(t, "config", "--context", "4096", "--output-tokens", "4096")
-	})
-}
-
-func TestConfigModelKeepsContextWhenExplicitlySet(t *testing.T) {
-	server := configTestServer(t)
-	defer server.Close()
-
-	configBody := fmt.Sprintf(`[llm]
-provider='openai-compatible'
-base_url='%s'
-model='qwen'
-context_window_tokens=8192
-context_window_model='qwen'
-api_key=''
-timeout='45s'
-response_mode='json_object'
-max_requests=32
-`, server.URL)
-	_, restore := writeConfigToTempDir(t, configBody)
-	defer restore()
-
-	// Change model but also set context explicitly.
-	captureStdoutStderr(t, func() {
-		if got := run([]string{"config", "--model", "gemma4", "--context", "4096"}); got != 0 {
-			t.Fatalf("expected exit 0, got %d", got)
-		}
-	})
-
-	cfg, err := config.LoadUserConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.LLM.Model != "gemma4" {
-		t.Fatalf("model = %q, want gemma4", cfg.LLM.Model)
-	}
-	if cfg.LLM.ContextWindowTokens != 4096 {
-		t.Fatalf("context_window_tokens = %d, want 4096", cfg.LLM.ContextWindowTokens)
-	}
-	if cfg.LLM.ContextWindowModel != "gemma4" {
-		t.Fatalf("context_window_model = %q, want gemma4", cfg.LLM.ContextWindowModel)
-	}
-}
-
 func TestConfigFailsWithoutExistingConfig(t *testing.T) {
 	// No config exists; targeted flags should direct user to --wizard.
 	root := t.TempDir()
@@ -862,7 +671,7 @@ func TestConfigFailsWithoutExistingConfig(t *testing.T) {
 	t.Setenv("HOME", root)
 
 	_, stderr := captureStdoutStderr(t, func() {
-		if got := run([]string{"config", "--context", "8192"}); got != 2 {
+		if got := run([]string{"config", "--model", "gemma4"}); got != 2 {
 			t.Fatalf("expected exit 2, got %d", got)
 		}
 	})
@@ -919,7 +728,7 @@ max_requests=32
 	}
 }
 
-func TestConfigModelClearsContextOnChange(t *testing.T) {
+func TestConfigCodeModelSetsValue(t *testing.T) {
 	server := configTestServer(t)
 	defer server.Close()
 
@@ -927,9 +736,6 @@ func TestConfigModelClearsContextOnChange(t *testing.T) {
 provider='openai-compatible'
 base_url='%s'
 model='qwen'
-context_window_tokens=8192
-context_window_model='qwen'
-max_output_tokens=2048
 api_key=''
 timeout='45s'
 response_mode='json_object'
@@ -938,60 +744,8 @@ max_requests=32
 	_, restore := writeConfigToTempDir(t, configBody)
 	defer restore()
 
-	// Change model without --context; context should be cleared.
-	_, stderr := captureStdoutStderr(t, func() {
-		if got := run([]string{"config", "--model", "gemma4"}); got != 0 {
-			t.Fatalf("expected exit 0, got %d", got)
-		}
-	})
-
-	cfg, err := config.LoadUserConfig()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if cfg.LLM.Model != "gemma4" {
-		t.Fatalf("model = %q, want gemma4", cfg.LLM.Model)
-	}
-	// Context should be cleared.
-	if cfg.LLM.ContextWindowTokens != 0 {
-		t.Fatalf("context_window_tokens = %d, want 0 (cleared)", cfg.LLM.ContextWindowTokens)
-	}
-	if cfg.LLM.ContextWindowModel != "" {
-		t.Fatalf("context_window_model = %q, want cleared (no context confirmed for new model)", cfg.LLM.ContextWindowModel)
-	}
-	// Max output tokens is an output-generation preference, not a confirmed
-	// model capacity, so it should be preserved when the model changes.
-	if cfg.LLM.MaxOutputTokens != 2048 {
-		t.Fatalf("max_output_tokens = %d, want 2048", cfg.LLM.MaxOutputTokens)
-	}
-	// Should print warning about clearing.
-	if !strings.Contains(stderr, "context_window_tokens cleared") {
-		t.Fatalf("expected context cleared warning in stderr, got: %s", stderr)
-	}
-}
-
-func TestConfigSameModelPreservesContext(t *testing.T) {
-	server := configTestServer(t)
-	defer server.Close()
-
-	configBody := fmt.Sprintf(`[llm]
-provider='openai-compatible'
-base_url='%s'
-model='qwen'
-context_window_tokens=8192
-context_window_model='qwen'
-max_output_tokens=2048
-api_key=''
-timeout='45s'
-response_mode='json_object'
-max_requests=32
-`, server.URL)
-	_, restore := writeConfigToTempDir(t, configBody)
-	defer restore()
-
-	// Same model; context should be preserved.
 	captureStdoutStderr(t, func() {
-		if got := run([]string{"config", "--model", "qwen"}); got != 0 {
+		if got := run([]string{"config", "--code-model", "qwen-coder"}); got != 0 {
 			t.Fatalf("expected exit 0, got %d", got)
 		}
 	})
@@ -1000,10 +754,10 @@ max_requests=32
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.LLM.ContextWindowTokens != 8192 {
-		t.Fatalf("context_window_tokens = %d, want 8192 (preserved)", cfg.LLM.ContextWindowTokens)
+	if cfg.LLM.CodeModel != "qwen-coder" {
+		t.Fatalf("code_model = %q, want qwen-coder", cfg.LLM.CodeModel)
 	}
-	if cfg.LLM.MaxOutputTokens != 2048 {
-		t.Fatalf("max_output_tokens = %d, want 2048 (preserved)", cfg.LLM.MaxOutputTokens)
+	if cfg.LLM.Model != "qwen" {
+		t.Fatalf("model should be unchanged, got %q", cfg.LLM.Model)
 	}
 }

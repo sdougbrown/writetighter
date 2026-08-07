@@ -231,10 +231,10 @@ without exposing the reference content itself. Files skipped during collection
 under `reference_context.warnings` so nothing is dropped silently.
 
 **Requirements:**
-- Reference revision requires `context_window_tokens` and `max_output_tokens`
-  in the LLM configuration. Run `writetighter config --context TOKENS --output-tokens TOKENS`
-  to set them.
-- If the configured context window is too small for the combined system prompt,
+- Reference revision auto-detects the model context window from the
+  `/v1/models` endpoint. Use `--context-tokens` to override it if the endpoint
+  does not report context metadata.
+- If the context window is too small for the combined system prompt,
   references, and editable source, `revise` reports an error before making any
   model call.
 
@@ -348,11 +348,11 @@ Project configuration cannot contain LLM settings or credentials.
 
 Model configuration is always read from the user config file. Run `writetighter config` for guided endpoint discovery, model selection, and preflight. Never pass API keys on the command line.
 
-Set capacity without editing TOML:
+Switch models or set a code-comment model without editing TOML:
 
 ```sh
-writetighter config --context 8192 --output-tokens 4096
 writetighter config --model gemma4
+writetighter config --code-model qwen-coder
 ```
 
 Put machine-specific LLM settings in `~/.config/writetighter/config.toml` (or the matching XDG config path):
@@ -364,10 +364,8 @@ base_url = "http://sparky:4000/v1"
 model = "gemma4"
 response_mode = "json_schema"
 max_requests = 32
-# Model context capacity (required for reference revision)
-context_window_tokens = 8192
-max_output_tokens = 4096
-context_window_model = "gemma4"
+# Optional: use a different model for code-aware comment revision
+# code_model = "qwen-coder"
 ```
 
 `response_mode` controls how the model is asked to produce structured output. `json_schema` sends a full JSON Schema (see `schemas/revise-response-v1.schema.json`). It is preferred for smaller models that benefit from grammar-constrained generation. `json_object` sends a lighter `{"type":"json_object"}` hint. `prompt_json` relies on prompt instructions only and is the universal fallback. The setup wizard discovers the best supported mode automatically.
@@ -386,7 +384,7 @@ api_key_env = "WRITETIGHTER_API_KEY"
 
 ### Revision analysis
 
-`revise` analyzes every selected document regardless of static findings. It reads model settings from the user config file; it has no model-related command-line flags.
+`revise` analyzes every selected document regardless of static findings. It reads model settings from the user config file. Use `--model` to override the configured model for a single run, or `--code-model` to use a different model for code-aware comment revision. Use `--context-tokens` and `--output-tokens` to override the auto-detected context window and max output tokens.
 
 The command splits large Markdown documents at block boundaries and sends each chunk sequentially to the configured endpoint. Returned Markdown and text revisions retain original-document ranges. The response reports whether every byte was analyzed.
 
@@ -412,7 +410,10 @@ Never pass API keys as command-line arguments. The setup workflow can save a key
 
 ### Context capacity and budgeting
 
-When `context_window_tokens` and `max_output_tokens` are configured, `revise`
+`revise` auto-detects the model context window from the `/v1/models` endpoint
+when needed (reference revision or code-aware comment revision). Use
+`--context-tokens` to override it, or `--output-tokens` to override the max
+output tokens sent to the API. When the context window is known, `revise`
 reserves output tokens, accounts for the system prompt, response format,
 reference content, and a safety margin before allocating tokens to editable
 source text. Token estimates use a 4-bytes-per-token heuristic. A hard byte
@@ -423,9 +424,9 @@ If the budget cannot accommodate every source chunk, `revise` reports an
 actionable error before making model calls. It never silently truncates source
 or reference content.
 
-The setup wizard suggests context capacity from the model's `/v1/models` metadata
-when available. The suggestion is always presented for confirmation; it is never
-adopted automatically.
+For plain prose revision without references, `revise` falls back to legacy
+byte-budget chunking and does not send `max_tokens` to the API, preserving
+backward-compatible behavior.
 
 ## Practical Workflows
 

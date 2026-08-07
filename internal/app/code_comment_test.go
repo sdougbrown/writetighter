@@ -166,6 +166,10 @@ func TestRunReviseRoutesSupportedCodeFilesToCatalogProtocol(t *testing.T) {
 		} `json:"messages"`
 	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "test-model", "context_length": 8192}}})
+			return
+		}
 		if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
 			t.Fatal(err)
 		}
@@ -201,6 +205,10 @@ func TestRunReviseRoutesSupportedCodeFilesToCatalogProtocol(t *testing.T) {
 func TestRunReviseSkipsModelForSupportedFileWithoutComments(t *testing.T) {
 	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "test-model", "context_length": 8192}}})
+			return
+		}
 		called = true
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -231,6 +239,10 @@ func TestRunReviseSkipsModelForSupportedFileWithoutComments(t *testing.T) {
 func TestRunReviseRejectsReferencesForCodeAwareFiles(t *testing.T) {
 	called := false
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "test-model", "context_length": 8192}}})
+			return
+		}
 		called = true
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
@@ -302,5 +314,43 @@ func TestRunReviseKeepsUnsupportedAndStdinCodeCommentsOnLegacyPath(t *testing.T)
 	}
 	if !bytes.Contains(output.Bytes(), []byte(`"status": "ok"`)) {
 		t.Fatalf("stdin fallback did not render a public revise report: %s", output.String())
+	}
+}
+
+func TestRunReviseCodeModelOverride(t *testing.T) {
+	var capturedModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+				{"id": "test-model", "context_length": 8192},
+				{"id": "code-specialist", "context_length": 16384},
+			}})
+			return
+		}
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		capturedModel = req.Model
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": `{"findings":[{"comment_id":"c0001","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"Missing context.","replacement":null,"question":"What does this protect?","confidence":0.9}]}`}}}})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	path := filepath.Join(t.TempDir(), "sample.go")
+	if err := os.WriteFile(path, []byte("package p\n// real\nfunc f() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:     []string{path},
+			Kind:      "code-comment",
+			Format:    "json",
+			CodeModel: "code-specialist",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if capturedModel != "code-specialist" {
+		t.Fatalf("code-comment request used model %q, want code-specialist", capturedModel)
 	}
 }

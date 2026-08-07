@@ -521,8 +521,8 @@ func TestBudgetFormulaCountsSourceOnce(t *testing.T) {
 		t.Fatalf("fullBytes=%d should exceed baseBytes=%d", fullBytes, baseBytes)
 	}
 	baseTokens := (baseBytes + 3) / 4
-	if available := cfg.ContextWindowTokens - baseTokens - cfg.MaxOutputTokens - config.BudgetSafetyTokens; available < config.MinEditableSourceTokens {
-		t.Fatalf("available source budget %d below min %d", available, config.MinEditableSourceTokens)
+	if available := cfg.ContextWindowTokens - baseTokens - cfg.MaxOutputTokens - BudgetSafetyTokens; available < MinEditableSourceTokens {
+		t.Fatalf("available source budget %d below min %d", available, MinEditableSourceTokens)
 	}
 
 	// json_schema must be budgeted (its schema bytes are part of the serialized
@@ -549,7 +549,7 @@ func TestBudgetFormulaCountsSourceOnce(t *testing.T) {
 	overCfg := Config{Model: "m", ResponseMode: "json_object",
 		// Leave room for ~512 source tokens: base must pass, but the ~800-token
 		// excerpt cannot fit.
-		ContextWindowTokens: baseTokens + cfg.MaxOutputTokens + config.BudgetSafetyTokens + 512,
+		ContextWindowTokens: baseTokens + cfg.MaxOutputTokens + BudgetSafetyTokens + 512,
 		MaxOutputTokens:     cfg.MaxOutputTokens,
 	}
 	_, _, _, err = BuildBudgetedPrompt(bigDoc, res, nil, nil, bigExcerpt, pack, overCfg)
@@ -559,7 +559,7 @@ func TestBudgetFormulaCountsSourceOnce(t *testing.T) {
 	// If the window cannot even leave minEditableSourceTokens for the base, the
 	// actionable configuration error must fire.
 	tinyCfg := Config{Model: "m", ResponseMode: "json_object",
-		ContextWindowTokens: baseTokens + cfg.MaxOutputTokens + config.BudgetSafetyTokens - 10,
+		ContextWindowTokens: baseTokens + cfg.MaxOutputTokens + BudgetSafetyTokens - 10,
 		MaxOutputTokens:     cfg.MaxOutputTokens,
 	}
 	_, _, _, err = BuildBudgetedPrompt(bigDoc, res, nil, nil, bigExcerpt, pack, tinyCfg)
