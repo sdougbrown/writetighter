@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/sdougbrown/writetighter/internal/check"
 	"github.com/sdougbrown/writetighter/internal/config"
+	"github.com/sdougbrown/writetighter/internal/corpus"
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/llm"
 	"github.com/sdougbrown/writetighter/internal/profile"
@@ -1715,5 +1718,239 @@ func TestRunReviseE2ENoRefPreservesLegacy(t *testing.T) {
 	}
 	if response.Analysis[0].AnalyzedBytes != len(srcContent) {
 		t.Errorf("analyzed bytes = %d, want %d", response.Analysis[0].AnalyzedBytes, len(srcContent))
+	}
+}
+
+// --- GitCompare flow tests ---
+
+func TestRunLintGitCompareInvalidWithStdin(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.Write([]byte("stdin text"))
+	w.Close()
+
+	oldStdin := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = oldStdin }()
+
+	params := LintParams{
+		GitCompare: "HEAD~1",
+		Stdin:      true,
+		Kind:       "description",
+		Format:     "json",
+		FailOn:     "none",
+	}
+	err = runLintWithParams(params)
+	if err == nil || !strings.Contains(err.Error(), "--git-compare is only valid with file paths") {
+		t.Fatalf("expected error about git-compare requiring file paths, got: %v", err)
+	}
+}
+
+func TestRunLintGitCompareInvalidWithText(t *testing.T) {
+	text := "direct text input"
+	params := LintParams{
+		GitCompare: "HEAD~1",
+		Text:       &text,
+		Kind:       "description",
+		Format:     "json",
+		FailOn:     "none",
+	}
+	err := runLintWithParams(params)
+	if err == nil || !strings.Contains(err.Error(), "--git-compare is only valid with file paths") {
+		t.Fatalf("expected error about git-compare requiring file paths, got: %v", err)
+	}
+}
+
+func TestRunLintGitCompareNoPaths(t *testing.T) {
+	params := LintParams{
+		GitCompare: "HEAD~1",
+		Kind:       "description",
+		Format:     "json",
+		FailOn:     "none",
+	}
+	err := runLintWithParams(params)
+	if err == nil || !strings.Contains(err.Error(), "--git-compare requires file paths") {
+		t.Fatalf("expected git-compare path requirement error, got: %v", err)
+	}
+}
+
+func TestRunLintGitCompareNonRepoPath(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.txt")
+	if err := os.WriteFile(path, []byte("test content"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	params := LintParams{
+		GitCompare: "HEAD~1",
+		Paths:      []string{path},
+		Kind:       "description",
+		Format:     "json",
+		FailOn:     "none",
+	}
+	err := runLintWithParams(params)
+	if err == nil || !strings.Contains(err.Error(), "not a Git repository") {
+		t.Fatalf("expected not-a-git-repo error, got: %v", err)
+	}
+}
+
+// TestRunLintGitCompareFullFlow exercises comparison-corpus construction,
+// automatic novelty-checker enablement, and report rendering against a real Git revision.
+func TestRunLintGitCompareFullFlow(t *testing.T) {
+	repoDir := t.TempDir()
+	runAppGit(t, repoDir, "init", "-q")
+	runAppGit(t, repoDir, "config", "user.email", "test@example.com")
+	runAppGit(t, repoDir, "config", "user.name", "Test")
+
+	path := filepath.Join(repoDir, "input.md")
+	if err := os.WriteFile(path, []byte("The established term appears here.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	runAppGit(t, repoDir, "add", "input.md")
+	runAppGit(t, repoDir, "commit", "-q", "-m", "comparison revision")
+	comparisonRevision := runAppGitOutput(t, repoDir, "rev-parse", "HEAD")
+	if err := os.WriteFile(path, []byte("The fluxion appears. The fluxion remains.\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	buf := captureStdout(t, func() {
+		err := runLintWithParams(LintParams{
+			Paths:      []string{path},
+			GitCompare: "HEAD",
+			Kind:       "description",
+			Format:     "json",
+			FailOn:     "none",
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	var reportData struct {
+		Findings []report.Finding `json:"findings"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &reportData); err != nil {
+		t.Fatalf("invalid JSON output: %v\n%s", err, buf.String())
+	}
+	if len(reportData.Findings) != 1 {
+		t.Fatalf("expected exactly one corpus-novelty finding, got %#v", reportData.Findings)
+	}
+	finding := reportData.Findings[0]
+	if finding.RuleID != "CORE.CORPUS_NOVELTY" {
+		t.Fatalf("rule ID = %q, want CORE.CORPUS_NOVELTY", finding.RuleID)
+	}
+	wantEvidence := fmt.Sprintf("corpus-novelty: term %q git_compare_count=0 change_count=2 git_compare_rev=%s", "fluxion", comparisonRevision)
+	if finding.Evidence != wantEvidence {
+		t.Fatalf("evidence = %q, want %q", finding.Evidence, wantEvidence)
+	}
+	if !strings.Contains(finding.Message, comparisonRevision[:8]) {
+		t.Fatalf("message %q does not identify comparison revision %s", finding.Message, comparisonRevision[:8])
+	}
+}
+
+func runAppGit(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	_ = runAppGitOutput(t, dir, args...)
+}
+
+func runAppGitOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = dir
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v\n%s", args, err, output)
+	}
+	return strings.TrimSpace(string(output))
+}
+
+// --- docAnalysisText tests ---
+
+func TestDocAnalysisTextProseDocument(t *testing.T) {
+	doc := testDoc("This is some prose text.")
+	result := docAnalysisText(doc)
+	if result != "This is some prose text." {
+		t.Fatalf("expected original prose, got: %q", result)
+	}
+}
+
+func TestDocAnalysisTextCodeCommentExtractsComments(t *testing.T) {
+	// Write a Go source file with comments
+	content := `package main
+
+// This is a comment explaining the function.
+func Foo() {
+	// Another inline comment.
+	return
+}`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "main.go")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	docs, err := collectInputs([]string{path}, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 document, got %d", len(docs))
+	}
+	result := docAnalysisText(docs[0])
+	if !strings.Contains(result, "This is a comment explaining the function") {
+		t.Fatalf("expected extracted comment in analysis text, got: %q", result)
+	}
+	if !strings.Contains(result, "Another inline comment") {
+		t.Fatalf("expected second comment in analysis text, got: %q", result)
+	}
+}
+
+func TestDocAnalysisTextCodeCommentFallbackReturnsAnalysisContent(t *testing.T) {
+	// Write an unsupported language file — detectLanguage returns false,
+	// so docAnalysisText falls through to AnalysisContent().
+	content := `some content here`
+	dir := t.TempDir()
+	path := filepath.Join(dir, "file.xyz")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+	docs, err := collectInputs([]string{path}, false, nil, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(docs) != 1 {
+		t.Fatalf("expected 1 document, got %d", len(docs))
+	}
+	result := docAnalysisText(docs[0])
+	if result != "some content here" {
+		t.Fatalf("expected fallback to analysis content, got: %q", result)
+	}
+}
+
+// --- Minimal test checker for GitCompare propagation ---
+
+type testGitCompareChecker struct {
+	received **corpus.GitCompare
+}
+
+func (c testGitCompareChecker) ID() string   { return "TEST.GIT_COMPARE_CHECKER" }
+func (c testGitCompareChecker) Version() int { return 1 }
+
+func (c testGitCompareChecker) Run(ctx *check.RunContext) ([]report.Finding, error) {
+	*c.received = ctx.GitCompare
+	return nil, nil
+}
+
+func TestRunDeterministicChecksPassesGitCompare(t *testing.T) {
+	gitCompare := &corpus.GitCompare{Revision: "abc123"}
+	var received *corpus.GitCompare
+	checker := testGitCompareChecker{received: &received}
+
+	_, err := runDeterministicChecks(testDoc("hello world."), testProfile(), nil, []check.Checker{checker}, gitCompare)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if received != gitCompare {
+		t.Fatalf("checker received GitCompare %p, want %p", received, gitCompare)
 	}
 }

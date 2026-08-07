@@ -45,6 +45,7 @@ var knownRuleParams = map[string]map[string]bool{
 	"CORE.BANNED_MODAL":           {},
 	"CORE.LATIN_ABBREV":           {},
 	"CORE.UNEXPANDED_ABBREV":      {},
+	"CORE.CORPUS_NOVELTY":        {"min_repetition": true},
 }
 
 var knownRules = map[string]bool{
@@ -52,6 +53,7 @@ var knownRules = map[string]bool{
 	"CORE.TERM_CASE": true, "CORE.TERM_UNKNOWN": true, "CORE.TERM_CONSISTENCY": true, "CORE.PROCEDURE_MULTI_ACTION": true,
 	"CORE.NOUN_STACK": true, "CORE.GERUND_OPENER": true,
 	"CORE.CONTRACTION": true, "CORE.BANNED_MODAL": true, "CORE.LATIN_ABBREV": true, "CORE.UNEXPANDED_ABBREV": true,
+	"CORE.CORPUS_NOVELTY": true,
 }
 
 func (rc *RulesConfig) Validate() error {
