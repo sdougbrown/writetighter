@@ -14,11 +14,11 @@ import (
 
 // CORE.CORPUS_NOVELTY is an opt-in, advisory-only checker that flags content
 // words and bounded phrases appearing in the changed prose but absent from a
-// declared baseline revision. It asks for clarification (definition,
+// declared Git comparison revision. It asks for clarification (definition,
 // established name, or plainer wording). It does NOT declare a term invalid,
 // does NOT modify terminology status, and does NOT act as a vocabulary gate.
 //
-// The checker abstains entirely when RunContext.Baseline is nil (no --git-compare
+// The checker abstains entirely when RunContext.GitCompare is nil (no --git-compare
 // flag was passed). It is disabled by default in the profile rules.
 
 // corpusNoveltyStopwords are function words and common English words that
@@ -147,7 +147,7 @@ func (corpusNoveltyChecker) ID() string   { return "CORE.CORPUS_NOVELTY" }
 func (corpusNoveltyChecker) Version() int { return 1 }
 
 func (corpusNoveltyChecker) Run(ctx *RunContext) ([]report.Finding, error) {
-	if ctx == nil || ctx.Document == nil || ctx.Baseline == nil {
+	if ctx == nil || ctx.Document == nil || ctx.GitCompare == nil {
 		return nil, nil
 	}
 
@@ -171,6 +171,8 @@ func (corpusNoveltyChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 	var out []report.Finding
 	reported := make(map[string]bool) // dedupe by normalized term within this document
 
+	revStr := safeRevisionPrefix(ctx.GitCompare.Revision)
+
 	for _, seg := range ctx.Document.Segments {
 		if seg.Type != document.SegmentProse {
 			continue
@@ -180,19 +182,19 @@ func (corpusNoveltyChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 		// --- Token pass ---
 		rawTokens := extractRawTokens(text)
 		for _, rt := range rawTokens {
-			lt := foldToken(rt)
+			lt := corpus.FoldUnicode(rt)
 			if reported[lt] {
 				continue
 			}
 			if isExcludedToken(rt, lt, ctx) {
 				continue
 			}
-			changeCount := ctx.Baseline.ChangeTermCounts[lt]
+			changeCount := ctx.GitCompare.ChangeTermCounts[lt]
 			if changeCount < minRepetition {
 				continue
 			}
-			baselineCount := ctx.Baseline.TermCounts[lt]
-			if baselineCount > 0 {
+			gitCompareCount := ctx.GitCompare.TermCounts[lt]
+			if gitCompareCount > 0 {
 				continue
 			}
 			reported[lt] = true
@@ -213,17 +215,17 @@ func (corpusNoveltyChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 					EndLine:     seg.Range.End.Line,
 					EndColumn:   seg.Range.End.Column,
 				},
-				Evidence: fmt.Sprintf("corpus-novelty: term %q baseline_count=0 change_count=%d baseline_rev=%s",
-					lt, changeCount, ctx.Baseline.Revision),
-				Message: fmt.Sprintf("Term %q appears %d time(s) in the changed prose but has no precedent in the baseline (revision %s). "+
+				Evidence: fmt.Sprintf("corpus-novelty: term %q git_compare_count=0 change_count=%d git_compare_rev=%s",
+					lt, changeCount, ctx.GitCompare.Revision),
+				Message: fmt.Sprintf("Term %q appears %d time(s) in the changed prose but has no precedent in the comparison revision (%s). "+
 					"If this is an established project term, consider documenting it. If not, consider plainer wording.",
-					lt, changeCount, ctx.Baseline.Revision[:8]),
+					lt, changeCount, revStr),
 				Confidence: 1,
 			})
 		}
 
 		// --- Phrase pass (2–3 word phrases) ---
-		phrases := extractPhrases(text)
+		phrases := corpus.ExtractPhrases(text)
 		for _, phrase := range phrases {
 			if reported[phrase] {
 				continue
@@ -231,12 +233,12 @@ func (corpusNoveltyChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 			if isExcludedPhrase(phrase, ctx) {
 				continue
 			}
-			changeCount := ctx.Baseline.ChangePhraseCounts[phrase]
+			changeCount := ctx.GitCompare.ChangePhraseCounts[phrase]
 			if changeCount < minRepetition {
 				continue
 			}
-			baselineCount := ctx.Baseline.PhraseCounts[phrase]
-			if baselineCount > 0 {
+			gitCompareCount := ctx.GitCompare.PhraseCounts[phrase]
+			if gitCompareCount > 0 {
 				continue
 			}
 			reported[phrase] = true
@@ -257,11 +259,11 @@ func (corpusNoveltyChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 					EndLine:     seg.Range.End.Line,
 					EndColumn:   seg.Range.End.Column,
 				},
-				Evidence: fmt.Sprintf("corpus-novelty: phrase %q baseline_count=0 change_count=%d baseline_rev=%s",
-					phrase, changeCount, ctx.Baseline.Revision),
-				Message: fmt.Sprintf("Phrase %q appears %d time(s) in the changed prose but has no precedent in the baseline (revision %s). "+
+				Evidence: fmt.Sprintf("corpus-novelty: phrase %q git_compare_count=0 change_count=%d git_compare_rev=%s",
+					phrase, changeCount, ctx.GitCompare.Revision),
+				Message: fmt.Sprintf("Phrase %q appears %d time(s) in the changed prose but has no precedent in the comparison revision (%s). "+
 					"If this is an established project term, consider documenting it. If not, consider plainer wording.",
-					phrase, changeCount, ctx.Baseline.Revision[:8]),
+					phrase, changeCount, revStr),
 				Confidence: 1,
 			})
 		}
@@ -302,34 +304,14 @@ func extractRawTokens(text string) []string {
 	return tokens
 }
 
-// foldToken lowercases a token via Unicode case folding.
-func foldToken(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		b.WriteRune(unicode.ToLower(r))
+// safeRevisionPrefix returns up to the first 8 characters of revision,
+// falling back to the full revision when it is shorter than 8 chars.
+// This prevents panics on short revisions used in message construction.
+func safeRevisionPrefix(revision string) string {
+	if len(revision) <= 8 {
+		return revision
 	}
-	return b.String()
-}
-
-// extractPhrases extracts bounded 2–3 word phrases from text, lowercased.
-func extractPhrases(text string) []string {
-	var b strings.Builder
-	for _, r := range text {
-		if unicode.IsLetter(r) || unicode.IsDigit(r) || r == '-' || r == ' ' || r == '\n' || r == '\t' {
-			b.WriteRune(r)
-		} else {
-			b.WriteRune(' ')
-		}
-	}
-	words := strings.Fields(b.String())
-	var phrases []string
-	for i := range words {
-		for n := 2; n <= 3 && i+n <= len(words); n++ {
-			phrase := foldToken(strings.Join(words[i:i+n], " "))
-			phrases = append(phrases, phrase)
-		}
-	}
-	return phrases
+	return revision[:8]
 }
 
 // isExcludedToken checks all exclusion rules for a single token.

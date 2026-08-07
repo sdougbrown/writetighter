@@ -1,8 +1,8 @@
-// Package corpus enumerates a declared baseline corpus from a Git revision
-// and counts term occurrences for corpus-novelty comparison.
+// Package corpus builds a comparison corpus from a declared Git revision and
+// counts term occurrences for corpus-novelty comparison.
 //
 // It uses read-only Git commands only and never modifies the working tree.
-// The baseline is enumerated once per lint invocation and is not persisted.
+// The comparison corpus is built once per lint invocation and is not persisted.
 package corpus
 
 import (
@@ -22,20 +22,20 @@ import (
 	"github.com/sdougbrown/writetighter/internal/profile"
 )
 
-// Baseline holds the term counts for a declared baseline revision and the
-// change counts across all selected input documents. A nil Baseline in a
-// check.RunContext means no baseline was requested; the novelty checker
-// must abstain.
-type Baseline struct {
-	// Revision is the resolved Git SHA for the baseline.
+// GitCompare holds term counts from the requested Git comparison revision and
+// change counts across all selected input documents. A nil GitCompare in a
+// check.RunContext means --git-compare was not requested, so the novelty
+// checker must abstain.
+type GitCompare struct {
+	// Revision is the resolved Git SHA for the comparison revision.
 	Revision string
 
 	// TermCounts maps normalized terms to their occurrence count in the
-	// baseline corpus (extracted comment/prose text at the baseline revision).
+	// comparison corpus at Revision.
 	TermCounts map[string]int
 
 	// PhraseCounts maps normalized multiword phrases (2–3 words) to their
-	// occurrence count in the baseline corpus.
+	// occurrence count in the comparison corpus at Revision.
 	PhraseCounts map[string]int
 
 	// ChangeTermCounts maps normalized terms to their occurrence count across
@@ -45,9 +45,6 @@ type Baseline struct {
 	// ChangePhraseCounts maps normalized phrases to their occurrence count across
 	// all selected input documents.
 	ChangePhraseCounts map[string]int
-
-	// ChangedPaths is the set of file paths in the selected input.
-	ChangedPaths []string
 }
 
 // IsIdentifier reports whether token looks like a code identifier (camelCase,
@@ -111,8 +108,10 @@ func IsURLOrPath(token string) bool {
 	return false
 }
 
-// foldString lowercases a string via Unicode case folding.
-func foldString(s string) string {
+// FoldUnicode lowercases a string via Unicode case folding.
+// It is exported so other packages can share a single implementation rather
+// than duplicating their own lowercase helpers.
+func FoldUnicode(s string) string {
 	var b strings.Builder
 	for _, r := range s {
 		b.WriteRune(unicode.ToLower(r))
@@ -136,8 +135,8 @@ func isCodeFile(path string) bool {
 	return ok
 }
 
-// isEligible reports whether a file at the baseline revision should be
-// included in the corpus.
+// isEligible reports whether a file at the comparison revision belongs in the
+// corpus.
 func isEligible(path string) bool {
 	ext := filepath.Ext(path)
 	return isProseExt(ext) || isCodeFile(path)
@@ -203,7 +202,7 @@ func Tokenize(text string) []string {
 		if raw == "" {
 			continue
 		}
-		tokens = append(tokens, foldString(raw))
+		tokens = append(tokens, FoldUnicode(raw))
 	}
 	return tokens
 }
@@ -223,7 +222,7 @@ func ExtractPhrases(text string) []string {
 	var phrases []string
 	for i := range words {
 		for n := 2; n <= 3 && i+n <= len(words); n++ {
-			phrase := foldString(strings.Join(words[i:i+n], " "))
+			phrase := FoldUnicode(strings.Join(words[i:i+n], " "))
 			phrases = append(phrases, phrase)
 		}
 	}
@@ -281,24 +280,24 @@ func IsPhraseExcluded(phrase string, projectTerms []config.TermEntry, dict *prof
 	return false
 }
 
-// Enumerate enumerates the baseline corpus at the given revision from the
+// BuildGitCompare builds a comparison corpus from the given revision in the
 // repository root. It uses read-only Git commands only.
-func Enumerate(repoDir, revision string) (*Baseline, error) {
-	// Resolve the revision to a full SHA.
+func BuildGitCompare(repoDir, revision string) (*GitCompare, error) {
+	// Resolve the comparison revision to a full SHA.
 	sha, err := gitRevParse(repoDir, revision)
 	if err != nil {
-		return nil, fmt.Errorf("baseline revision %q: %w", revision, err)
+		return nil, fmt.Errorf("comparison revision %q: %w", revision, err)
 	}
 
-	// Verify the revision exists as a commit.
+	// Verify the comparison revision exists as a commit.
 	if err := gitCatFileExists(repoDir, sha); err != nil {
-		return nil, fmt.Errorf("baseline revision %q: %w", revision, err)
+		return nil, fmt.Errorf("comparison revision %q: %w", revision, err)
 	}
 
-	// List files at the revision.
+	// List files at the comparison revision.
 	files, err := gitLsTree(repoDir, sha)
 	if err != nil {
-		return nil, fmt.Errorf("listing baseline files: %w", err)
+		return nil, fmt.Errorf("listing comparison files: %w", err)
 	}
 
 	// Filter to eligible files and sort.
@@ -328,9 +327,9 @@ func Enumerate(repoDir, revision string) (*Baseline, error) {
 		}
 	}
 
-	return &Baseline{
-		Revision:    sha,
-		TermCounts:  termCounts,
+	return &GitCompare{
+		Revision:     sha,
+		TermCounts:   termCounts,
 		PhraseCounts: phraseCounts,
 	}, nil
 }

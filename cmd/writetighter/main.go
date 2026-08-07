@@ -114,12 +114,12 @@ func runLint(args []string) int {
 	configPath := fs.String("config", "", "")
 	format := fs.String("format", "human", "")
 	failOn := fs.String("fail-on", "none", "")
-	baseline := fs.String("git-compare", "", "")
+	gitCompare := fs.String("git-compare", "", "")
 	fs.Usage = func() { printHelp("lint") }
 	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
 		return 2
 	}
-	params := app.LintParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, FailOn: *failOn, GitCompare: *baseline}
+	params := app.LintParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, FailOn: *failOn, GitCompare: *gitCompare}
 	if text.set {
 		params.Text = &text.value
 	}

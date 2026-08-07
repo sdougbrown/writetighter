@@ -126,6 +126,14 @@ func (a *App) RunLint(params LintParams) error {
 		terms = merged.Project.Terms
 	}
 
+	if params.GitCompare != "" {
+		if params.Stdin || params.Text != nil {
+			return fmt.Errorf("--git-compare is only valid with file paths, not --stdin or --text")
+		}
+		if len(params.Paths) == 0 {
+			return fmt.Errorf("--git-compare requires file paths")
+		}
+	}
 	docs, err := collectInputs(params.Paths, params.Stdin, params.Text, params.Kind)
 	if err != nil {
 		return err
@@ -138,8 +146,7 @@ func (a *App) RunLint(params LintParams) error {
 	enabled := check.Enabled(r)
 
 	// When --git-compare is passed, auto-enable the corpus-novelty checker.
-	// The checker itself abstains when Baseline is nil, so enabling it
-	// here is safe — it only produces findings when a baseline is present.
+	// The checker abstains without comparison data, so enabling it here is safe.
 	if params.GitCompare != "" {
 		if c := check.Get("CORE.CORPUS_NOVELTY"); c != nil {
 			alreadyEnabled := false
@@ -156,40 +163,30 @@ func (a *App) RunLint(params LintParams) error {
 	}
 	findings := []report.Finding{}
 
-	// Baseline corpus-novelty: enumerate the baseline revision and compute
-	// change counts across all selected documents if --git-compare was passed.
-	var baseline *corpus.Baseline
+	// Build comparison data and change counts for --git-compare.
+	var gitCompare *corpus.GitCompare
 	if params.GitCompare != "" {
-		if params.Stdin || params.Text != nil {
-			return fmt.Errorf("--git-compare is only valid with file paths, not --stdin or --text")
-		}
-		if len(params.Paths) == 0 {
-			return fmt.Errorf("--git-compare requires file paths")
-		}
 		repoRoot, err := corpus.FindRepoRoot(params.Paths[0])
 		if err != nil {
 			return fmt.Errorf("--git-compare %q: %w", params.GitCompare, err)
 		}
-		baseline, err = corpus.Enumerate(repoRoot, params.GitCompare)
+		gitCompare, err = corpus.BuildGitCompare(repoRoot, params.GitCompare)
 		if err != nil {
 			return fmt.Errorf("--git-compare %q: %w", params.GitCompare, err)
 		}
 		// Compute change counts across all selected documents.
-		baseline.ChangeTermCounts = make(map[string]int)
-		baseline.ChangePhraseCounts = make(map[string]int)
-		var changedPaths []string
+		gitCompare.ChangeTermCounts = make(map[string]int)
+		gitCompare.ChangePhraseCounts = make(map[string]int)
 		for _, doc := range docs {
-			changedPaths = append(changedPaths, doc.Source)
 			text := docAnalysisText(doc)
 			tc, pc := corpus.CountTerms(text)
 			for t, c := range tc {
-				baseline.ChangeTermCounts[t] += c
+				gitCompare.ChangeTermCounts[t] += c
 			}
 			for p, c := range pc {
-				baseline.ChangePhraseCounts[p] += c
+				gitCompare.ChangePhraseCounts[p] += c
 			}
 		}
-		baseline.ChangedPaths = changedPaths
 	}
 
 	coverage := make([]report.RuleCoverage, 0, len(r.Rules.Rules)+len(check.All()))
@@ -221,9 +218,9 @@ func (a *App) RunLint(params LintParams) error {
 		}
 		var more []report.Finding
 		if usesCodeCommentCatalog(params.Kind, params.Stdin, params.Text, doc) {
-			more, err = lintCodeCommentCatalog(doc, r, terms, enabled, baseline)
+			more, err = lintCodeCommentCatalog(doc, r, terms, enabled, gitCompare)
 		} else {
-			more, err = runDeterministicChecks(doc, r, terms, enabled, baseline)
+			more, err = runDeterministicChecks(doc, r, terms, enabled, gitCompare)
 		}
 		if err != nil {
 			return err
@@ -286,8 +283,8 @@ func (a *App) RunLint(params LintParams) error {
 	return nil
 }
 
-func runDeterministicChecks(doc *document.Document, res *profile.Resolution, terms []config.TermEntry, enabled []check.Checker, baseline *corpus.Baseline) ([]report.Finding, error) {
-	ctx := &check.RunContext{Document: doc, Profile: res, Terms: terms, Baseline: baseline}
+func runDeterministicChecks(doc *document.Document, res *profile.Resolution, terms []config.TermEntry, enabled []check.Checker, gitCompare *corpus.GitCompare) ([]report.Finding, error) {
+	ctx := &check.RunContext{Document: doc, Profile: res, Terms: terms, GitCompare: gitCompare}
 	var findings []report.Finding
 	for _, checker := range enabled {
 		more, err := checker.Run(ctx)
@@ -305,7 +302,7 @@ type commentLintProjection struct {
 	comment   codecomment.Comment
 }
 
-func lintCodeCommentCatalog(doc *document.Document, res *profile.Resolution, terms []config.TermEntry, enabled []check.Checker, baseline *corpus.Baseline) ([]report.Finding, error) {
+func lintCodeCommentCatalog(doc *document.Document, res *profile.Resolution, terms []config.TermEntry, enabled []check.Checker, gitCompare *corpus.GitCompare) ([]report.Finding, error) {
 	language, ok := codecomment.DetectLanguage(doc.Source)
 	if !ok {
 		return nil, fmt.Errorf("code-comment lint does not support %q", doc.Source)
@@ -328,7 +325,7 @@ func lintCodeCommentCatalog(doc *document.Document, res *profile.Resolution, ter
 	if err != nil {
 		return nil, err
 	}
-	findings, err := runDeterministicChecks(commentDoc, res, terms, enabled, baseline)
+	findings, err := runDeterministicChecks(commentDoc, res, terms, enabled, gitCompare)
 	if err != nil {
 		return nil, err
 	}

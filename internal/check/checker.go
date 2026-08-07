@@ -9,10 +9,10 @@ import (
 )
 
 type RunContext struct {
-	Document *document.Document
-	Profile  *profile.Resolution
-	Terms    []config.TermEntry
-	Baseline *corpus.Baseline
+	Document   *document.Document
+	Profile    *profile.Resolution
+	Terms      []config.TermEntry
+	GitCompare *corpus.GitCompare
 }
 
 type Checker interface {

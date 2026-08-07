@@ -12,15 +12,15 @@ func TestIsIdentifier(t *testing.T) {
 		token string
 		want  bool
 	}{
-		{"bracketIndexId", true},  // camelCase
-		{"NodeFilter", true},        // PascalCase
-		{"API", true},                 // ALLCAPS acronym (3)
-		{"EI", true},                  // ALLCAPS acronym (2)
-		{"hello", false},              // ordinary word
-		{"Hello", false},              // sentence-initial capital only
-		{"level1", true},              // digit-bearing
-		{"case", false},               // ordinary word
-		{"bracket-mesh", false},    // hyphenated ordinary words
+		{"bracketIndexId", true}, // camelCase
+		{"NodeFilter", true},     // PascalCase
+		{"API", true},            // ALLCAPS acronym (3)
+		{"EI", true},             // ALLCAPS acronym (2)
+		{"hello", false},         // ordinary word
+		{"Hello", false},         // sentence-initial capital only
+		{"level1", true},         // digit-bearing
+		{"case", false},          // ordinary word
+		{"bracket-mesh", false},  // hyphenated ordinary words
 		{"", false},
 	}
 	for _, tc := range tests {
@@ -55,16 +55,39 @@ func TestIsURLOrPath(t *testing.T) {
 }
 
 func TestTokenize(t *testing.T) {
-	tokens := Tokenize("The bracket-mesh overgrid provides the factory keys.")
-	// Should include "bracket-mesh" as a single hyphenated token
-	found := false
-	for _, tok := range tokens {
-		if tok == "bracket-mesh" {
-			found = true
-		}
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "hyphenated words",
+			input: "The bracket-mesh overgrid provides the factory keys.",
+			want:  []string{"the", "bracket-mesh", "overgrid", "provides", "the", "factory", "keys"},
+		},
+		{
+			name:  "re-derives",
+			input: "The overgrid re-derives metadata.",
+			want:  []string{"the", "overgrid", "re-derives", "metadata"},
+		},
+		{
+			name:  "empty input",
+			input: "",
+			want:  nil,
+		},
 	}
-	if !found {
-		t.Errorf("expected 'bracket-mesh' in tokens, got %v", tokens)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			tokens := Tokenize(tc.input)
+			if len(tokens) != len(tc.want) {
+				t.Errorf("Tokenize(%q): got %d tokens, want %d; got %v", tc.input, len(tokens), len(tc.want), tokens)
+			}
+			for i, tok := range tokens {
+				if i >= len(tc.want) || tok != tc.want[i] {
+					t.Errorf("Tokenize(%q)[%d] = %q, want %q", tc.input, i, tok, tc.want[i])
+				}
+			}
+		})
 	}
 }
 
@@ -80,6 +103,93 @@ func TestCountTerms(t *testing.T) {
 	// Should have "the overgrid" phrase
 	if pc["the overgrid"] != 2 {
 		t.Errorf("expected 'the overgrid' phrase count=2, got %d", pc["the overgrid"])
+	}
+}
+
+func TestIsProseExt(t *testing.T) {
+	tests := []struct {
+		ext  string
+		want bool
+	}{
+		{".md", true},
+		{".markdown", true},
+		{".txt", true},
+		{".html", true},
+		{".htm", true},
+		{".go", false},
+		{".js", false},
+		{".json", false},
+		{".yaml", false},
+	}
+	for _, tc := range tests {
+		got := isProseExt(tc.ext)
+		if got != tc.want {
+			t.Errorf("isProseExt(%q) = %v, want %v", tc.ext, got, tc.want)
+		}
+	}
+}
+
+func TestIsCodeFile(t *testing.T) {
+	tests := []struct {
+		path string
+		want bool
+	}{
+		{"src/main.ts", true},
+		{"src/index.tsx", true},
+		{"main.go", true},
+		{"README.md", false},
+		{"data.json", false},
+		{"Makefile", false},
+	}
+	for _, tc := range tests {
+		got := isCodeFile(tc.path)
+		if got != tc.want {
+			t.Errorf("isCodeFile(%q) = %v, want %v", tc.path, got, tc.want)
+		}
+	}
+}
+
+func TestExtractPhrases(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name:  "all 2- and 3-word phrases",
+			input: "one two three four",
+			want:  []string{"one two", "one two three", "two three", "two three four", "three four"},
+		},
+		{
+			name:  "3-word phrases for short input",
+			input: "a b c d",
+			want:  []string{"a b", "a b c", "b c", "b c d", "c d"},
+		},
+		{
+			name:  "single word excluded",
+			input: "hello",
+			want:  nil,
+		},
+		{
+			name:  "no 4-word phrases",
+			input: "one two three four five",
+			want: []string{"one two", "one two three", "two three", "two three four",
+				"three four", "three four five", "four five"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			phrases := ExtractPhrases(tc.input)
+			if len(phrases) != len(tc.want) {
+				t.Errorf("ExtractPhrases(%q): got %d phrases, want %d; got %v", tc.input, len(phrases), len(tc.want), phrases)
+				return
+			}
+			for i, p := range phrases {
+				if p != tc.want[i] {
+					t.Errorf("ExtractPhrases(%q)[%d] = %q, want %q", tc.input, i, p, tc.want[i])
+				}
+			}
+		})
 	}
 }
 
@@ -108,59 +218,59 @@ func TestExtractTextFromProseFile(t *testing.T) {
 	}
 }
 
-func TestEnumerate(t *testing.T) {
+func TestBuildGitCompare(t *testing.T) {
 	// Create a temp git repo
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-q")
 	runGit(t, dir, "config", "user.email", "test@test.test")
 	runGit(t, dir, "config", "user.name", "Test")
 
-	// Write baseline file with a comment using "sorter"
-	baselineContent := "// The sorter reads the tagline from the camera.\n"
-	os.WriteFile(filepath.Join(dir, "sorter.ts"), []byte(baselineContent), 0644)
+	// Write gitCompare file with a comment using "sorter"
+	gitCompareContent := "// The sorter reads the tagline from the camera.\n"
+	os.WriteFile(filepath.Join(dir, "sorter.ts"), []byte(gitCompareContent), 0644)
 	runGit(t, dir, "add", "-A")
-	runGit(t, dir, "commit", "-q", "-m", "baseline")
+	runGit(t, dir, "commit", "-q", "-m", "gitCompare")
 
-	// Get the baseline SHA
+	// Get the gitCompare SHA
 	rev := runGitOutput(t, dir, "rev-parse", "HEAD")
 
 	// Write changed file with a coined term
 	changedContent := "// The spinotron drives the warp core.\n// The spinotron re-derives metadata.\n"
 	os.WriteFile(filepath.Join(dir, "sorter.ts"), []byte(changedContent), 0644)
 
-	// Enumerate baseline
-	baseline, err := Enumerate(dir, rev)
+	// BuildGitCompare gitCompare
+	gitCompare, err := BuildGitCompare(dir, rev)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	// "sorter" should be in baseline with count 1
-	if baseline.TermCounts["sorter"] == 0 {
-		t.Error("expected 'sorter' to be in baseline term counts")
+	// "sorter" should be in gitCompare with count 1
+	if gitCompare.TermCounts["sorter"] == 0 {
+		t.Error("expected 'sorter' to be in gitCompare term counts")
 	}
-	if baseline.TermCounts["tagline"] == 0 {
-		t.Error("expected 'tagline' to be in baseline term counts")
+	if gitCompare.TermCounts["tagline"] == 0 {
+		t.Error("expected 'tagline' to be in gitCompare term counts")
 	}
-	// "spinotron" should NOT be in baseline
-	if baseline.TermCounts["spinotron"] > 0 {
-		t.Error("expected 'spinotron' to NOT be in baseline")
+	// "spinotron" should NOT be in gitCompare
+	if gitCompare.TermCounts["spinotron"] > 0 {
+		t.Error("expected 'spinotron' to NOT be in gitCompare")
 	}
 	// Revision should be the full SHA
-	if baseline.Revision != rev {
-		t.Errorf("expected revision %s, got %s", rev, baseline.Revision)
+	if gitCompare.Revision != rev {
+		t.Errorf("expected revision %s, got %s", rev, gitCompare.Revision)
 	}
 }
 
-func TestEnumerateMissingRevision(t *testing.T) {
+func TestBuildGitCompareMissingRevision(t *testing.T) {
 	dir := t.TempDir()
 	runGit(t, dir, "init", "-q")
 	runGit(t, dir, "config", "user.email", "test@test.test")
 	runGit(t, dir, "config", "user.name", "Test")
 	os.WriteFile(filepath.Join(dir, "test.ts"), []byte("// hello\n"), 0644)
 	runGit(t, dir, "add", "-A")
-	runGit(t, dir, "commit", "-q", "-m", "baseline")
+	runGit(t, dir, "commit", "-q", "-m", "gitCompare")
 
-	_, err := Enumerate(dir, "nonexistent-revision")
+	_, err := BuildGitCompare(dir, "nonexistent-revision")
 	if err == nil {
 		t.Fatal("expected error for missing revision")
 	}
