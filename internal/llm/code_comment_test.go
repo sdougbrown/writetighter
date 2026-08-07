@@ -193,7 +193,7 @@ func TestReviseCodeCommentsRejectsInsufficientContextBeforeTransport(t *testing.
 	}))
 	defer server.Close()
 	_, err := ReviseCodeComments(context.Background(), Config{BaseURL: server.URL, Model: "test", Timeout: time.Second, ContextWindowTokens: 4096}, doc, &profile.Resolution{})
-	if err == nil || called || !strings.Contains(err.Error(), "context_window_tokens") {
+	if err == nil || called || !strings.Contains(err.Error(), "--context-tokens") {
 		t.Fatalf("expected actionable preflight budget error, called=%t err=%v", called, err)
 	}
 }

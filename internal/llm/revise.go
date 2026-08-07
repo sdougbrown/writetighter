@@ -705,20 +705,20 @@ func BuildBudgetedPrompt(doc *document.Document, res *profile.Resolution, findin
 
 		maxOutputTokens := cfg.MaxOutputTokens
 		if maxOutputTokens <= 0 {
-			maxOutputTokens = config.DefaultMaxOutputTokens
+			maxOutputTokens = DefaultMaxOutputTokens
 		}
 
 		// availableSourceBudget = ContextWindowTokens - basePromptTokens -
 		// MaxOutputTokens - budgetSafetyTokens.
-		availableSourceBudget := cfg.ContextWindowTokens - basePromptTokens - maxOutputTokens - config.BudgetSafetyTokens
+		availableSourceBudget := cfg.ContextWindowTokens - basePromptTokens - maxOutputTokens - BudgetSafetyTokens
 
 		// The base calculation must leave at least minEditableSourceTokens for
 		// the editable source.
-		if availableSourceBudget < config.MinEditableSourceTokens {
+		if availableSourceBudget < MinEditableSourceTokens {
 			return "", "", "", fmt.Errorf(
 				"revision context requires %d estimated input tokens for system/reference material and output reservation, "+
 					"leaving %d estimated tokens for editable source; "+
-					"configure a larger context_window_tokens or use a smaller reference set",
+					"use a larger --context-tokens value or use a smaller reference set",
 				basePromptTokens+maxOutputTokens, availableSourceBudget)
 		}
 
@@ -730,12 +730,12 @@ func BuildBudgetedPrompt(doc *document.Document, res *profile.Resolution, findin
 			return "", "", "", fmt.Errorf("budget calculation: %w", marshalErr)
 		}
 		fullPromptTokens := int(math.Ceil(float64(fullSerializedBytes) / float64(EstimatedBytesPerToken)))
-		if fullPromptTokens+maxOutputTokens+config.BudgetSafetyTokens > cfg.ContextWindowTokens {
+		if fullPromptTokens+maxOutputTokens+BudgetSafetyTokens > cfg.ContextWindowTokens {
 			return "", "", "", fmt.Errorf(
 				"revision chunk requires %d estimated input tokens plus %d reserved output tokens and %d safety tokens, "+
 					"exceeding context_window_tokens=%d; "+
 					"narrow the revision chunk or reduce reference content",
-				fullPromptTokens, maxOutputTokens, config.BudgetSafetyTokens, cfg.ContextWindowTokens)
+				fullPromptTokens, maxOutputTokens, BudgetSafetyTokens, cfg.ContextWindowTokens)
 		}
 
 		// Also enforce the hard MaxInputChars transport ceiling on total message

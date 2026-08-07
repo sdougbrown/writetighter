@@ -15,7 +15,6 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/writetighter/internal/check"
-	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/corpus"
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/llm"
@@ -1064,21 +1063,14 @@ func TestRunReviseHTMLReportsVisibleTextAnalysis(t *testing.T) {
 	}
 }
 
-// writeReviseUserConfigWithTokens writes a user config with context_window_tokens
-// and max_output_tokens set, for budget-aware tests.
-func writeReviseUserConfigWithTokens(t *testing.T, baseURL string, ctxTokens, outTokens int) {
+// writeReviseUserConfigWithTokens writes a plain user config (no token fields
+// in config — those are now runtime values). The ctxTokens and outTokens
+// parameters are returned for the caller to pass via ReviseParams, but are
+// no longer written to the config file.
+func writeReviseUserConfigWithTokens(t *testing.T, baseURL string, ctxTokens, outTokens int) (int, int) {
 	t.Helper()
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
-	t.Setenv("HOME", root)
-	dir := filepath.Join(root, "writetighter")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	body := fmt.Sprintf("[llm]\nprovider = \"openai-compatible\"\nbase_url = %q\nmodel = \"test-model\"\nresponse_mode = \"json_object\"\ncontext_window_tokens = %d\nmax_output_tokens = %d\n", baseURL, ctxTokens, outTokens)
-	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
+	writeReviseUserConfig(t, baseURL, "")
+	return ctxTokens, outTokens
 }
 
 // fakeReviseServerWithCapture creates a fake server that captures the request body
@@ -1109,7 +1101,7 @@ func TestRunReviseWithReferences(t *testing.T) {
 	})
 	defer server.Close()
 
-	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+	ctxTokens, outTokens := writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
 
 	srcPath := writeTempFile(t, "This is the source document to revise.")
 
@@ -1124,6 +1116,8 @@ func TestRunReviseWithReferences(t *testing.T) {
 			ReferencePaths: []string{refPath},
 			Kind:           "description",
 			Format:         "json",
+			ContextTokens:  ctxTokens,
+			OutputTokens:   outTokens,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -1167,7 +1161,8 @@ func TestRunReviseNoContextWindowWithReferences(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Config with context_window_tokens=0 (unset) but references provided.
+	// Config without context window — auto-detection will fail since the
+	// test server does not serve /models.
 	writeReviseUserConfig(t, server.URL, "")
 
 	refPath := filepath.Join(t.TempDir(), "ref.md")
@@ -1182,10 +1177,10 @@ func TestRunReviseNoContextWindowWithReferences(t *testing.T) {
 		Format:         "json",
 	})
 	if err == nil {
-		t.Fatal("expected error when references provided without context_window_tokens")
+		t.Fatal("expected error when references provided and context window cannot be auto-detected")
 	}
-	if !strings.Contains(err.Error(), "reference revision requires llm.context_window_tokens") {
-		t.Fatalf("expected context_window_tokens error, got: %v", err)
+	if !strings.Contains(err.Error(), "context window") {
+		t.Fatalf("expected context window error, got: %v", err)
 	}
 }
 
@@ -1197,7 +1192,7 @@ func TestRunReviseOverBudgetReferences(t *testing.T) {
 	}))
 	defer server.Close()
 
-	writeReviseUserConfigWithTokens(t, server.URL, 1024, 256) // Very small budget
+	ctxTokens, outTokens := writeReviseUserConfigWithTokens(t, server.URL, 1024, 256) // Very small budget
 
 	// Create a large reference file that will exceed the budget.
 	refPath := filepath.Join(t.TempDir(), "large_ref.md")
@@ -1211,6 +1206,8 @@ func TestRunReviseOverBudgetReferences(t *testing.T) {
 		ReferencePaths: []string{refPath},
 		Kind:           "description",
 		Format:         "json",
+		ContextTokens:  ctxTokens,
+		OutputTokens:   outTokens,
 	})
 	if err == nil {
 		t.Fatal("expected error for over-budget references")
@@ -1230,13 +1227,15 @@ func TestRunReviseReferenceMissingFile(t *testing.T) {
 	}))
 	defer server.Close()
 
-	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+	ctxTokens, outTokens := writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
 
 	err := (&App{}).RunRevise(ReviseParams{
 		Paths:          []string{writeTempFile(t, "source.")},
 		ReferencePaths: []string{"/nonexistent/path/reference.md"},
 		Kind:           "description",
 		Format:         "json",
+		ContextTokens:  ctxTokens,
+		OutputTokens:   outTokens,
 	})
 	if err == nil {
 		t.Fatal("expected error for missing reference file")
@@ -1253,7 +1252,7 @@ func TestRunReviseReferenceIsSourceFile(t *testing.T) {
 	})
 	defer server.Close()
 
-	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+	ctxTokens, outTokens := writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
 
 	// Use the same file as both source and reference.
 	srcContent := "This is the source document."
@@ -1265,6 +1264,8 @@ func TestRunReviseReferenceIsSourceFile(t *testing.T) {
 			ReferencePaths: []string{srcPath}, // same file
 			Kind:           "description",
 			Format:         "json",
+			ContextTokens:  ctxTokens,
+			OutputTokens:   outTokens,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -1302,49 +1303,6 @@ func TestRunReviseReferenceIsSourceFile(t *testing.T) {
 	}
 	if strings.Contains(string(capturedBody), "<reference") {
 		t.Fatal("request body should not contain <reference> tags when only source file is provided as reference")
-	}
-}
-
-// TestRunReviseStaleContextWindowModel verifies that reference revision is
-// rejected when context_window_model does not match the current model, even
-// when context_window_tokens is set. Capacity confirmed for one model must
-// never be silently reused for a different model.
-func TestRunReviseStaleContextWindowModel(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		_ = json.NewEncoder(w).Encode(map[string]any{
-			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
-		})
-	}))
-	defer server.Close()
-
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
-	t.Setenv("HOME", root)
-	dir := filepath.Join(root, "writetighter")
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	body := fmt.Sprintf("[llm]\nprovider = \"openai-compatible\"\nbase_url = %q\nmodel = \"current-model\"\nresponse_mode = \"json_object\"\ncontext_window_tokens = 8192\nmax_output_tokens = 2048\ncontext_window_model = \"old-model\"\n", server.URL)
-	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	refPath := filepath.Join(t.TempDir(), "ref.md")
-	if err := os.WriteFile(refPath, []byte("reference content"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	err := (&App{}).RunRevise(ReviseParams{
-		Paths:          []string{writeTempFile(t, "source text.")},
-		ReferencePaths: []string{refPath},
-		Kind:           "description",
-		Format:         "json",
-	})
-	if err == nil {
-		t.Fatal("expected error for stale context_window_model")
-	}
-	if !strings.Contains(err.Error(), "old-model") || !strings.Contains(err.Error(), "current-model") {
-		t.Fatalf("expected model mismatch error mentioning both models, got: %v", err)
 	}
 }
 
@@ -1390,7 +1348,7 @@ func TestPlanBudgetedChunksCannotFit(t *testing.T) {
 		cfg := llm.Config{
 			Model:               "m",
 			ResponseMode:        "json_object",
-			ContextWindowTokens: base + maxOutput + config.BudgetSafetyTokens + config.MinEditableSourceTokens, // availableSourceBudget == 512 exactly
+			ContextWindowTokens: base + maxOutput + llm.BudgetSafetyTokens + llm.MinEditableSourceTokens, // availableSourceBudget == 512 exactly
 			MaxOutputTokens:     maxOutput,
 		}
 		_, err := planBudgetedChunks(doc, pack, cfg, 8, res, nil, nil)
@@ -1413,7 +1371,7 @@ func TestPlanBudgetedChunksCannotFit(t *testing.T) {
 		cfg := llm.Config{
 			Model:               "m",
 			ResponseMode:        "json_object",
-			ContextWindowTokens: base + maxOutput + config.BudgetSafetyTokens + 600, // A=600, base still passes
+			ContextWindowTokens: base + maxOutput + llm.BudgetSafetyTokens + 600, // A=600, base still passes
 			MaxOutputTokens:     maxOutput,
 		}
 		_, err := planBudgetedChunks(doc, pack, cfg, 8, res, nil, nil)
@@ -1431,7 +1389,7 @@ func TestRunReviseEmptySourceWithReferences(t *testing.T) {
 	called := false
 	server := fakeReviseServerWithCapture(t, func(body []byte) { called = true })
 	defer server.Close()
-	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+	ctxTokens, outTokens := writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
 	refPath := filepath.Join(t.TempDir(), "ref.md")
 	if err := os.WriteFile(refPath, []byte("reference content"), 0o600); err != nil {
 		t.Fatal(err)
@@ -1443,6 +1401,8 @@ func TestRunReviseEmptySourceWithReferences(t *testing.T) {
 			ReferencePaths: []string{refPath},
 			Kind:           "description",
 			Format:         "json",
+			ContextTokens:  ctxTokens,
+			OutputTokens:   outTokens,
 		}); err != nil {
 			t.Fatalf("empty source with references should succeed, got: %v", err)
 		}
@@ -1472,7 +1432,7 @@ func TestRunReviseReferenceContextInReport(t *testing.T) {
 	}))
 	defer server.Close()
 
-	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+	ctxTokens, outTokens := writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
 
 	srcPath := writeTempFile(t, "Source text.")
 
@@ -1489,6 +1449,8 @@ func TestRunReviseReferenceContextInReport(t *testing.T) {
 			ReferencePaths: []string{refPath},
 			Kind:           "description",
 			Format:         "json",
+			ContextTokens:  ctxTokens,
+			OutputTokens:   outTokens,
 		}); err != nil {
 			t.Fatal(err)
 		}
@@ -1563,7 +1525,7 @@ func TestRunReviseE2EWithReferences(t *testing.T) {
 		})
 	}))
 	defer server.Close()
-	writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
+	ctxTokens, outTokens := writeReviseUserConfigWithTokens(t, server.URL, 8192, 1024)
 	refDir := t.TempDir()
 	refPath := filepath.Join(refDir, "style-guide.md")
 	refContent := "Use active voice. Prefer simple present tense."
@@ -1576,6 +1538,8 @@ func TestRunReviseE2EWithReferences(t *testing.T) {
 			ReferencePaths: []string{refPath},
 			Kind:           "description",
 			Format:         "json",
+			ContextTokens:  ctxTokens,
+			OutputTokens:   outTokens,
 		})
 	})
 	if !reqCaptureDone {
@@ -1718,6 +1682,201 @@ func TestRunReviseE2ENoRefPreservesLegacy(t *testing.T) {
 	}
 	if response.Analysis[0].AnalyzedBytes != len(srcContent) {
 		t.Errorf("analyzed bytes = %d, want %d", response.Analysis[0].AnalyzedBytes, len(srcContent))
+	}
+}
+
+func TestRunReviseModelOverride(t *testing.T) {
+	var capturedModel string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "override-model", "context_length": 8192}}})
+			return
+		}
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		capturedModel = req.Model
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+
+	writeReviseUserConfig(t, server.URL, "")
+	srcPath := writeTempFile(t, "Source text to revise.")
+
+	captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:  []string{srcPath},
+			Kind:   "description",
+			Format: "json",
+			Model:  "override-model",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if capturedModel != "override-model" {
+		t.Fatalf("request model = %q, want override-model", capturedModel)
+	}
+}
+
+func TestRunReviseContextTokensOverride(t *testing.T) {
+	var capturedMaxTokens *int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "test-model", "context_length": 4096}}})
+			return
+		}
+		var req struct {
+			MaxTokens *int `json:"max_tokens,omitempty"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		capturedMaxTokens = req.MaxTokens
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+
+	writeReviseUserConfig(t, server.URL, "")
+	srcPath := writeTempFile(t, "Source text to revise.")
+
+	captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:         []string{srcPath},
+			Kind:          "description",
+			Format:        "json",
+			ContextTokens: 8192,
+			OutputTokens:  1024,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if capturedMaxTokens == nil {
+		t.Fatal("request missing max_tokens")
+	}
+	if *capturedMaxTokens != 1024 {
+		t.Fatalf("max_tokens = %d, want 1024", *capturedMaxTokens)
+	}
+}
+
+func TestRunReviseContextTokensOverrideWithReferences(t *testing.T) {
+	var capturedMaxTokens *int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			// Return a small context window; --context-tokens should override it.
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "test-model", "context_length": 2048}}})
+			return
+		}
+		var req struct {
+			MaxTokens *int `json:"max_tokens,omitempty"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		capturedMaxTokens = req.MaxTokens
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+
+	writeReviseUserConfig(t, server.URL, "")
+	srcPath := writeTempFile(t, "Source text.")
+	refPath := filepath.Join(t.TempDir(), "ref.md")
+	os.WriteFile(refPath, []byte("Reference content."), 0o600)
+
+	captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:          []string{srcPath},
+			ReferencePaths: []string{refPath},
+			Kind:           "description",
+			Format:         "json",
+			ContextTokens:  8192,
+			OutputTokens:   512,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	if capturedMaxTokens == nil {
+		t.Fatal("request missing max_tokens")
+	}
+	if *capturedMaxTokens != 512 {
+		t.Fatalf("max_tokens = %d, want 512 (override should take precedence over auto-detect)", *capturedMaxTokens)
+	}
+}
+
+// TestRunReviseOutputTokensMustBeLessThanContextWindow exercises the
+// main-model context-window validation branch: when the user supplies both
+// --context-tokens and --output-tokens (or only --context-tokens, with the
+// default max output), the latter must be strictly less than the former.
+func TestRunReviseOutputTokensMustBeLessThanContextWindow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	path := writeTempFile(t, "short test.")
+
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:         []string{path},
+		Kind:          "description",
+		Format:        "json",
+		ContextTokens: 4096,
+		OutputTokens:  4096,
+	})
+	if err == nil {
+		t.Fatal("expected error when output tokens equals context window")
+	}
+	if !strings.Contains(err.Error(), "output tokens") || !strings.Contains(err.Error(), "must be less than context window") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestRunReviseAutoDetectsContextWindow(t *testing.T) {
+	var capturedMaxTokens *int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "test-model", "context_length": 8192}}})
+			return
+		}
+		var req struct {
+			MaxTokens *int `json:"max_tokens,omitempty"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		capturedMaxTokens = req.MaxTokens
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+
+	writeReviseUserConfig(t, server.URL, "")
+	srcPath := writeTempFile(t, "Source text.")
+	refPath := filepath.Join(t.TempDir(), "ref.md")
+	os.WriteFile(refPath, []byte("Reference content."), 0o600)
+
+	captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:          []string{srcPath},
+			ReferencePaths: []string{refPath},
+			Kind:           "description",
+			Format:         "json",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	// Auto-detected context window should cause max_tokens to be set to default.
+	if capturedMaxTokens == nil {
+		t.Fatal("request missing max_tokens — auto-detection should have set it")
+	}
+	if *capturedMaxTokens != 2048 {
+		t.Fatalf("max_tokens = %d, want 2048 (default when auto-detected)", *capturedMaxTokens)
 	}
 }
 

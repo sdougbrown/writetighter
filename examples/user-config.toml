@@ -20,6 +20,11 @@ response_mode = "json_schema"
 # for large documents.
 max_requests = 32
 
+# Optional: use a different model for code-aware comment revision. When unset,
+# code-comment revision uses the model above. This lets you use a larger or
+# code-specialized model for code review while keeping a smaller model for prose.
+# code_model = "qwen-coder"
+
 # --- Credentials: pick ONE source, do not commit a real key -----------------
 
 # Option A — a local PAT stored in this 0600 file:

@@ -12,12 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
-	"unicode/utf8"
 
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
@@ -29,30 +26,6 @@ const (
 	defaultMaxRequests = 32
 	maxResponse        = 1 << 20
 )
-
-// ModelInfo describes a model returned by the /v1/models endpoint.
-type ModelInfo struct {
-	ID               string `json:"id"`
-	ContextLength    int    `json:"context_length,omitempty"`
-	MaxContextLength int    `json:"max_context_length,omitempty"`
-	MaxModelLen      int    `json:"max_model_len,omitempty"`
-}
-
-// SuggestedContextWindow returns the suggested context window from model metadata,
-// or 0 if no metadata is available. The precedence order is:
-// context_length, max_context_length, max_model_len.
-func (m ModelInfo) SuggestedContextWindow() int {
-	if m.ContextLength > 0 {
-		return m.ContextLength
-	}
-	if m.MaxContextLength > 0 {
-		return m.MaxContextLength
-	}
-	if m.MaxModelLen > 0 {
-		return m.MaxModelLen
-	}
-	return 0
-}
 
 // SecretReader reads a secret without persisting it.
 type SecretReader func(prompt string) (string, error)
@@ -186,9 +159,9 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 	}
 
 	fmt.Fprintf(opts.Out, "Querying %s/models ...\n", baseURL)
-	models, discoveryErr := ListModels(ctx, opts.HTTPClient, baseURL, apiKey)
+	models, discoveryErr := llm.ListModels(baseURL, apiKey, defaultTimeout)
 	var model string
-	var selectedModelInfo *ModelInfo
+	var selectedModelInfo *llm.ModelInfo
 	if discoveryErr != nil || len(models) == 0 {
 		if discoveryErr != nil {
 			fmt.Fprintf(opts.Out, "Model discovery was unavailable: %v\n", discoveryErr)
@@ -227,67 +200,27 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 		break
 	}
 
-	// --- Context capacity prompt ---
-	confirmedContextWindow := 0
-	confirmedMaxOutputTokens := 0
-
-	if selectedModelInfo != nil && selectedModelInfo.SuggestedContextWindow() > 0 {
-		suggested := selectedModelInfo.SuggestedContextWindow()
-		fmt.Fprintf(opts.Out, "Model %s suggests a context window of %d tokens.\n", model, suggested)
-		contextInput, err := wizard.ask("Context window (press Enter to accept)", strconv.Itoa(suggested))
-		if err != nil {
-			return nil, err
-		}
-		if n, parseErr := strconv.Atoi(contextInput); parseErr == nil && n > 0 {
-			confirmedContextWindow = n
-		}
-	} else {
-		// No metadata suggestion; optionally ask.
-		label := "Context window in tokens (or 0 to skip)"
-		if selectedModelInfo == nil {
-			label = "Context window in tokens (or 0 to skip; metadata unavailable)"
-		}
-		contextInput, err := wizard.ask(label, "0")
-		if err != nil {
-			return nil, err
-		}
-		if n, parseErr := strconv.Atoi(contextInput); parseErr == nil && n > 0 {
-			confirmedContextWindow = n
+	// Inform the user about auto-detected context capacity. The wizard does
+	// not persist context window tokens — revise auto-detects from the
+	// /v1/models endpoint at runtime, or the user can override with
+	// --context-tokens at revise time.
+	if selectedModelInfo != nil {
+		if cw := selectedModelInfo.SuggestedContextWindow(); cw > 0 {
+			fmt.Fprintf(opts.Out, "Model %s reports a context window of %d tokens.\n", model, cw)
+			fmt.Fprintln(opts.Out, "Context capacity will be auto-detected by 'revise' when needed.")
 		}
 	}
 
-	// Max output tokens prompt (always asked).
-	defaultOutput := strconv.Itoa(config.DefaultMaxOutputTokens)
-	if confirmedContextWindow > 0 && config.DefaultMaxOutputTokens >= confirmedContextWindow {
-		defaultOutput = strconv.Itoa(confirmedContextWindow / 2)
-	}
-	outputInput, err := wizard.ask("Max output tokens", defaultOutput)
-	if err != nil {
-		return nil, err
-	}
-	if n, parseErr := strconv.Atoi(outputInput); parseErr == nil && n > 0 {
-		confirmedMaxOutputTokens = n
-	}
-
-	confirmedModel := ""
-	if confirmedContextWindow > 0 {
-		// context_window_model records the model for which the context window
-		// was last confirmed. If capacity was not confirmed, leave it unset so
-		// downstream code never mistakes an unconfirmed window as valid.
-		confirmedModel = model
-	}
 	existing.LLM = config.LLMConfig{
-		Provider:            "openai-compatible",
-		BaseURL:             baseURL,
-		Model:               model,
-		APIKey:              storedAPIKey,
-		APIKeyEnv:           apiKeyEnv,
-		Timeout:             defaultTimeout.String(),
-		ResponseMode:        responseMode,
-		MaxRequests:         defaultMaxRequests,
-		ContextWindowTokens: confirmedContextWindow,
-		MaxOutputTokens:     confirmedMaxOutputTokens,
-		ContextWindowModel:  confirmedModel,
+		Provider:     "openai-compatible",
+		BaseURL:      baseURL,
+		Model:        model,
+		APIKey:       storedAPIKey,
+		APIKeyEnv:    apiKeyEnv,
+		Timeout:      defaultTimeout.String(),
+		ResponseMode: responseMode,
+		MaxRequests:  defaultMaxRequests,
+		CodeModel:    existing.LLM.CodeModel,
 	}
 	path, err := config.WriteUserConfig(existing)
 	if err != nil {
@@ -325,7 +258,7 @@ func (w *wizard) ask(label, defaultValue string) (string, error) {
 	return value, nil
 }
 
-func (w *wizard) selectModel(models []ModelInfo, previous string) (string, *ModelInfo, error) {
+func (w *wizard) selectModel(models []llm.ModelInfo, previous string) (string, *llm.ModelInfo, error) {
 	defaultIndex := 0
 	for i, model := range models {
 		if model.ID == previous {
@@ -391,37 +324,6 @@ func NormalizeBaseURL(value string) (string, error) {
 	u.RawQuery = ""
 	u.Fragment = ""
 	return strings.TrimRight(u.String(), "/"), nil
-}
-
-type modelsEnvelope struct {
-	Data []ModelInfo `json:"data"`
-}
-
-// ListModels queries the /v1/models endpoint and returns discovered models with metadata.
-func ListModels(ctx context.Context, client *http.Client, baseURL, apiKey string) ([]ModelInfo, error) {
-	body, err := doJSON(ctx, client, http.MethodGet, baseURL+"/models", apiKey, nil)
-	if err != nil {
-		return nil, err
-	}
-	var envelope modelsEnvelope
-	if err := json.Unmarshal(body, &envelope); err != nil {
-		return nil, fmt.Errorf("decode models response: %w", err)
-	}
-	seen := make(map[string]struct{})
-	models := make([]ModelInfo, 0, len(envelope.Data))
-	for _, item := range envelope.Data {
-		id := strings.TrimSpace(item.ID)
-		if !validModelID(id) {
-			continue
-		}
-		if _, ok := seen[id]; ok {
-			continue
-		}
-		seen[id] = struct{}{}
-		models = append(models, item)
-	}
-	sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
-	return models, nil
 }
 
 func probeModel(ctx context.Context, client *http.Client, baseURL, model, apiKey, responseMode string) error {
@@ -535,31 +437,10 @@ func doJSON(ctx context.Context, client *http.Client, method, endpoint, apiKey s
 		if apiKey != "" {
 			message = strings.ReplaceAll(message, apiKey, "[REDACTED]")
 		}
-		message = safeDisplay(message)
+		message = llm.SafeDisplay(message)
 		return nil, fmt.Errorf("HTTP %d: %s", response.StatusCode, message)
 	}
 	return body, nil
-}
-
-func validModelID(value string) bool {
-	if value == "" || len(value) > 256 || !utf8.ValidString(value) {
-		return false
-	}
-	for _, r := range value {
-		if unicode.IsControl(r) {
-			return false
-		}
-	}
-	return true
-}
-
-func safeDisplay(value string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, value)
 }
 
 func validEnvName(value string) bool {

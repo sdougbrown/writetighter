@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/sdougbrown/writetighter/internal/codecomment"
-	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/guidance"
 	"github.com/sdougbrown/writetighter/internal/profile"
@@ -161,24 +160,24 @@ func codeCommentInputLimit(cfg Config, req Request) (int, error) {
 	}
 	if cfg.ContextWindowTokens == 0 {
 		if messageBytes > MaxInputChars {
-			return 0, fmt.Errorf("code-comment request message content too large: %d bytes exceeds the legacy %d-byte allowance; configure llm.context_window_tokens for whole-source review", messageBytes, MaxInputChars)
+			return 0, fmt.Errorf("code-comment request message content too large: %d bytes exceeds the legacy %d-byte allowance; use --context-tokens to specify the context window for whole-source review", messageBytes, MaxInputChars)
 		}
 		return MaxInputChars, nil
 	}
 	maxOutput := cfg.MaxOutputTokens
 	if maxOutput <= 0 {
-		maxOutput = config.DefaultMaxOutputTokens
+		maxOutput = DefaultMaxOutputTokens
 	}
-	availableInputTokens := cfg.ContextWindowTokens - maxOutput - config.BudgetSafetyTokens
+	availableInputTokens := cfg.ContextWindowTokens - maxOutput - BudgetSafetyTokens
 	if availableInputTokens <= 0 {
-		return 0, fmt.Errorf("code-comment context requires %d reserved output tokens and %d safety tokens, exceeding context_window_tokens=%d; configure a larger context window", maxOutput, config.BudgetSafetyTokens, cfg.ContextWindowTokens)
+		return 0, fmt.Errorf("code-comment context requires %d reserved output tokens and %d safety tokens, exceeding context_window_tokens=%d; use a larger --context-tokens value", maxOutput, BudgetSafetyTokens, cfg.ContextWindowTokens)
 	}
 	inputLimit := maxCodeCommentInputChars
 	if availableInputTokens < maxCodeCommentInputChars/EstimatedBytesPerToken {
 		inputLimit = availableInputTokens * EstimatedBytesPerToken
 	}
 	if messageBytes > inputLimit {
-		return 0, fmt.Errorf("code-comment request message content requires %d bytes, exceeding request allowance of %d bytes; configure a larger context_window_tokens", messageBytes, inputLimit)
+		return 0, fmt.Errorf("code-comment request message content requires %d bytes, exceeding request allowance of %d bytes; use a larger --context-tokens value", messageBytes, inputLimit)
 	}
 	budgetRequest := req
 	budgetRequest.Model = cfg.Model
@@ -191,8 +190,8 @@ func codeCommentInputLimit(cfg Config, req Request) (int, error) {
 		return 0, fmt.Errorf("code-comment budget calculation: %w", err)
 	}
 	inputTokens := int(math.Ceil(float64(len(serialized)) / float64(EstimatedBytesPerToken)))
-	if inputTokens+maxOutput+config.BudgetSafetyTokens > cfg.ContextWindowTokens {
-		return 0, fmt.Errorf("code-comment request requires %d estimated input tokens plus %d reserved output tokens and %d safety tokens, exceeding context_window_tokens=%d; configure a larger context window", inputTokens, maxOutput, config.BudgetSafetyTokens, cfg.ContextWindowTokens)
+	if inputTokens+maxOutput+BudgetSafetyTokens > cfg.ContextWindowTokens {
+		return 0, fmt.Errorf("code-comment request requires %d estimated input tokens plus %d reserved output tokens and %d safety tokens, exceeding context_window_tokens=%d; use a larger --context-tokens value", inputTokens, maxOutput, BudgetSafetyTokens, cfg.ContextWindowTokens)
 	}
 	return inputLimit, nil
 }
