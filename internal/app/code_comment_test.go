@@ -354,3 +354,121 @@ func TestRunReviseCodeModelOverride(t *testing.T) {
 		t.Fatalf("code-comment request used model %q, want code-specialist", capturedModel)
 	}
 }
+
+func TestRunReviseRejectsOutputTokensExceedingCodeModelContextWindow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+				{"id": "test-model", "context_length": 8192},
+				{"id": "small-code", "context_length": 4096},
+			}})
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	path := filepath.Join(t.TempDir(), "sample.go")
+	if err := os.WriteFile(path, []byte("package p\n// real\nfunc f() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:        []string{path},
+		Kind:         "code-comment",
+		Format:       "json",
+		CodeModel:    "small-code",
+		OutputTokens: 4096,
+	})
+	if err == nil {
+		t.Fatal("expected actionable code-model output-token error, got nil")
+	}
+	if !strings.Contains(err.Error(), "output tokens") {
+		t.Fatalf("expected error mentioning 'output tokens', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "must be less than context window") {
+		t.Fatalf("expected error mentioning 'must be less than context window', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "small-code") {
+		t.Fatalf("expected error mentioning 'small-code', got: %v", err)
+	}
+}
+
+func TestRunReviseCodeModelLookupFailureFallsBackToLegacyPath(t *testing.T) {
+	var capturedModel string
+	modelRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			modelRequests++
+			// Code-model /models lookup fails (non-2xx).
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		var req struct {
+			Model string `json:"model"`
+		}
+		_ = json.NewDecoder(r.Body).Decode(&req)
+		capturedModel = req.Model
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": `{"findings":[{"comment_id":"c0001","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"Missing context.","replacement":null,"question":"What does this protect?","confidence":0.9}]}`}}}})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	path := filepath.Join(t.TempDir(), "sample.go")
+	if err := os.WriteFile(path, []byte("package p\n// real\nfunc f() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Capture stderr to check for the warning message.
+	oldStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() {
+		os.Stderr = oldStderr
+		_ = w.Close()
+		_ = r.Close()
+	}()
+
+	output := captureStdout(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:     []string{path},
+			Kind:      "code-comment",
+			Format:    "json",
+			CodeModel: "fallback-code",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	os.Stderr = oldStderr
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var stderrBuf bytes.Buffer
+	if _, err := stderrBuf.ReadFrom(r); err != nil {
+		t.Fatal(err)
+	}
+
+	// One /models call expected: code-model lookup only (main model skipped since codeModel != llmModel).
+	if modelRequests != 1 {
+		t.Fatalf("expected 1 /models request, got %d", modelRequests)
+	}
+	if capturedModel != "fallback-code" {
+		t.Fatalf("revision used model %q, want fallback-code", capturedModel)
+	}
+
+	// Stdout should contain a valid revise response.
+	if !bytes.Contains(output.Bytes(), []byte(`"status": "ok"`)) {
+		t.Fatalf("expected successful revise report in stdout, got: %s", output.String())
+	}
+
+	// Stderr should contain the warning naming the code model.
+	if !bytes.Contains(stderrBuf.Bytes(), []byte("Warning: could not auto-detect context window for code model")) {
+		t.Fatalf("expected code-model lookup failure warning on stderr, got: %s", stderrBuf.String())
+	}
+	if !bytes.Contains(stderrBuf.Bytes(), []byte("fallback-code")) {
+		t.Fatalf("expected code model name in warning, got: %s", stderrBuf.String())
+	}
+}

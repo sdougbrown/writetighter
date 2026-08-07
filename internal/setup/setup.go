@@ -15,7 +15,6 @@ import (
 	"strconv"
 	"strings"
 	"time"
-	"unicode"
 
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
@@ -438,19 +437,10 @@ func doJSON(ctx context.Context, client *http.Client, method, endpoint, apiKey s
 		if apiKey != "" {
 			message = strings.ReplaceAll(message, apiKey, "[REDACTED]")
 		}
-		message = safeDisplay(message)
+		message = llm.SafeDisplay(message)
 		return nil, fmt.Errorf("HTTP %d: %s", response.StatusCode, message)
 	}
 	return body, nil
-}
-
-func safeDisplay(value string) string {
-	return strings.Map(func(r rune) rune {
-		if unicode.IsControl(r) {
-			return ' '
-		}
-		return r
-	}, value)
 }
 
 func validEnvName(value string) bool {

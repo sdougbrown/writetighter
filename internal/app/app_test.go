@@ -1808,6 +1808,35 @@ func TestRunReviseContextTokensOverrideWithReferences(t *testing.T) {
 	}
 }
 
+// TestRunReviseOutputTokensMustBeLessThanContextWindow exercises the
+// main-model context-window validation branch: when the user supplies both
+// --context-tokens and --output-tokens (or only --context-tokens, with the
+// default max output), the latter must be strictly less than the former.
+func TestRunReviseOutputTokensMustBeLessThanContextWindow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"content": `{"findings":[]}`}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	path := writeTempFile(t, "short test.")
+
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:         []string{path},
+		Kind:          "description",
+		Format:        "json",
+		ContextTokens: 4096,
+		OutputTokens:  4096,
+	})
+	if err == nil {
+		t.Fatal("expected error when output tokens equals context window")
+	}
+	if !strings.Contains(err.Error(), "output tokens") || !strings.Contains(err.Error(), "must be less than context window") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestRunReviseAutoDetectsContextWindow(t *testing.T) {
 	var capturedMaxTokens *int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

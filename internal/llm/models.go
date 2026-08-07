@@ -71,7 +71,7 @@ func ListModels(baseURL, apiKey string, timeout time.Duration) ([]ModelInfo, err
 		if apiKey != "" {
 			message = strings.ReplaceAll(message, apiKey, "[REDACTED]")
 		}
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, safeDisplay(message))
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, SafeDisplay(message))
 	}
 	var envelope modelsEnvelope
 	if err := json.Unmarshal(body, &envelope); err != nil {
@@ -123,7 +123,8 @@ func validModelID(value string) bool {
 	return true
 }
 
-func safeDisplay(value string) string {
+// SafeDisplay replaces every Unicode control character with a space.
+func SafeDisplay(value string) string {
 	return strings.Map(func(r rune) rune {
 		if unicode.IsControl(r) {
 			return ' '

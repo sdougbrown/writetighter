@@ -9,8 +9,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 	"testing"
+	"time"
+	"unicode"
 
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
@@ -258,6 +259,37 @@ func TestListModelsViaLLMPackage(t *testing.T) {
 	}
 	if models[0].SuggestedContextWindow() != 4096 {
 		t.Fatalf("SuggestedContextWindow = %d, want 4096", models[0].SuggestedContextWindow())
+	}
+}
+
+func TestDoSanitizesControlCharactersInNon2xxBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusTeapot)
+		_, _ = w.Write([]byte("\x1b[2Jbad response\n"))
+	}))
+	defer server.Close()
+
+	client := server.Client()
+	ctx := context.Background()
+
+	_, err := doJSON(ctx, client, http.MethodGet, server.URL+"/", "", nil)
+	if err == nil {
+		t.Fatal("expected error for non-2xx response")
+	}
+
+	errStr := err.Error()
+	// Should contain status and message content.
+	if !strings.Contains(errStr, "HTTP 418") {
+		t.Fatalf("error should contain HTTP status: %s", errStr)
+	}
+	if !strings.Contains(errStr, "bad response") {
+		t.Fatalf("error should contain body message: %s", errStr)
+	}
+	// Should NOT contain any control characters from the response body.
+	for i, r := range errStr {
+		if unicode.IsControl(r) {
+			t.Fatalf("error contains control character at byte index %d: %q", i, string(r))
+		}
 	}
 }
 
