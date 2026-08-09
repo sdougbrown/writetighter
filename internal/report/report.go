@@ -86,6 +86,9 @@ func RenderHuman(report *Report) (string, error) {
 	fmt.Fprintf(&b, "status: %s\n", report.Status)
 	for _, f := range report.Findings {
 		fmt.Fprintf(&b, "%s %s %s\n", f.Severity, f.RuleID, f.Message)
+		if f.Evidence != "" {
+			fmt.Fprintf(&b, "  evidence: %s\n", f.Evidence)
+		}
 	}
 	return b.String(), nil
 }

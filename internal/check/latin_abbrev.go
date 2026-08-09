@@ -13,12 +13,24 @@ import (
 // should be written out: "for example", "that is", or name the items.
 var latinAbbrevRe = regexp.MustCompile(`(?i)\b(e\.g\.|i\.e\.|etc\.?)`)
 
-// latinAbbrevSuggestions maps each abbreviation to its replacement guidance.
-var latinAbbrevSuggestions = map[string]string{
-	"e.g.": "Write 'for example'.",
-	"i.e.": "Write 'that is'.",
-	"etc":  "Name the items or write 'and more'.",
-	"etc.": "Name the items or write 'and more'.",
+// latinAbbrevSuggestion returns replacement guidance for a Latin abbreviation,
+// reading from the profile dictionary when available.
+func latinAbbrevSuggestion(abbrev string, ctx *RunContext) string {
+	if ctx != nil && ctx.Profile != nil && ctx.Profile.Dict != nil {
+		if s, ok := ctx.Profile.Dict.BannedLatinAbbrevSuggestions[abbrev]; ok && s != "" {
+			return s
+		}
+	}
+	// Fallback for v1 profiles without latin_abbrev_suggestions.
+	switch abbrev {
+	case "e.g.":
+		return "Write 'for example'."
+	case "i.e.":
+		return "Write 'that is'."
+	case "etc", "etc.":
+		return "Name the items or write 'and more'."
+	}
+	return "Replace the Latin abbreviation."
 }
 
 type latinAbbrevChecker struct{}
@@ -41,10 +53,7 @@ func (latinAbbrevChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 			start, end := match[0], match[1]
 			word := seg.Text[start:end]
 			lower := lower(word)
-			msg := "Replace the Latin abbreviation."
-			if suggestion, ok := latinAbbrevSuggestions[lower]; ok {
-				msg = suggestion
-			}
+			msg := latinAbbrevSuggestion(lower, ctx)
 			path := ctx.Document.Source
 			out = append(out, report.Finding{
 				RuleID:         latinAbbrevChecker{}.ID(),

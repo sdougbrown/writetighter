@@ -55,7 +55,7 @@ type PayloadHash struct {
 
 func (m *Manifest) Validate() error {
 	var errs []error
-	if m.FormatVersion != 1 {
+	if m.FormatVersion != 1 && m.FormatVersion != 2 {
 		errs = append(errs, fmt.Errorf("unsupported manifest format_version %d", m.FormatVersion))
 	}
 	if !profileIDRe.MatchString(m.ID) {

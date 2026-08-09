@@ -13,7 +13,7 @@
   },
   "payloads": {
     "dictionary.json": {
-      "sha256": "6d57a527164b4e4f6188f1ae7651cf9270624bad341fd1ddde8d99e552237478"
+      "sha256": "83932d0dc96694ad69abd66765b3ed8a2154b9aa82f64ffebcc06a4f1ff49221"
     },
     "rules.json": {
       "sha256": "012acff57a6ccd1d49d05e93e351200c715b0bceae6f2a2cefece90aaebc701f"
@@ -50,5 +50,5 @@
     "procedure",
     "pr"
   ],
-  "version": "0.4.0"
+  "version": "0.5.0"
 }

@@ -9,17 +9,6 @@ import (
 	"github.com/sdougbrown/writetighter/internal/report"
 )
 
-// gerundDeterminers are the words that, following a gerund, signal a gerund
-// phrase opener: "Arming the...", "Configuring your...", "Running this...".
-// The combination of a gerund + determiner at the start of a non-list sentence
-// is the structural signal — not the specific gerund itself.
-var gerundDeterminers = map[string]bool{
-	"the": true, "a": true, "an": true, "this": true, "that": true,
-	"your": true, "our": true, "their": true, "his": true, "her": true,
-	"its": true, "some": true, "any": true, "every": true, "each": true,
-	"all": true, "no": true, "these": true, "those": true,
-}
-
 type gerundOpenerChecker struct{}
 
 func (gerundOpenerChecker) ID() string   { return "CORE.GERUND_OPENER" }
@@ -58,7 +47,7 @@ func (gerundOpenerChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 			if utf8.RuneCountInString(first) < 6 {
 				continue
 			}
-			if !gerundDeterminers[second] {
+			if !isGerundDeterminer(second, ctx) {
 				continue
 			}
 			path := ctx.Document.Source
@@ -83,6 +72,23 @@ func (gerundOpenerChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 		}
 	}
 	return out, nil
+}
+
+// isGerundDeterminer checks whether word is a determiner that signals a gerund
+// phrase opener. It reads from the profile dictionary's "gerund_determiner"
+// word class, falling back to a minimal hardcoded set for v1 profiles.
+func isGerundDeterminer(word string, ctx *RunContext) bool {
+	if ctx.Profile != nil && ctx.Profile.Dict != nil && ctx.Profile.Dict.HasWordClass(word, "gerund_determiner") {
+		return true
+	}
+	// Fallback for v1 profiles without word classes.
+	switch word {
+	case "the", "a", "an", "this", "that", "your", "our", "their",
+		"his", "her", "its", "some", "any", "every", "each",
+		"all", "no", "these", "those":
+		return true
+	}
+	return false
 }
 
 func init() { Register(gerundOpenerChecker{}) }
