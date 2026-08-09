@@ -29,17 +29,42 @@ type Entry struct {
 }
 
 type Dictionary struct {
-	FormatVersion int     `json:"format_version"`
-	Entries       []Entry `json:"entries"`
+	FormatVersion                int                 `json:"format_version"`
+	Entries                      []Entry             `json:"entries"`
+	WordClasses                  map[string][]string `json:"word_classes,omitempty"`
+	BannedModalSuggestions       map[string]string    `json:"banned_modal_suggestions,omitempty"`
+	BannedLatinAbbrevSuggestions map[string]string    `json:"banned_latin_abbrev_suggestions,omitempty"`
+
+	// Internal indices built during Validate; not serialized.
 	index         map[string]*Entry
+	wordClassSet  map[string]map[string]bool
 }
 
 func (d *Dictionary) Validate() error {
 	var errs []error
-	if d.FormatVersion != 1 {
+	if d.FormatVersion != 1 && d.FormatVersion != 2 {
 		errs = append(errs, fmt.Errorf("unsupported dictionary format_version %d", d.FormatVersion))
 	}
 	d.index = map[string]*Entry{}
+	d.wordClassSet = map[string]map[string]bool{}
+
+	// Build word class index.
+	for class, words := range d.WordClasses {
+		if class == "" {
+			errs = append(errs, fmt.Errorf("word class with empty name"))
+			continue
+		}
+		set := make(map[string]bool, len(words))
+		for _, w := range words {
+			if w == "" {
+				errs = append(errs, fmt.Errorf("word class %q: empty word", class))
+				continue
+			}
+			set[foldString(w)] = true
+		}
+		d.wordClassSet[class] = set
+	}
+
 	for i := range d.Entries {
 		e := &d.Entries[i]
 		if e.Term == "" {
@@ -104,6 +129,42 @@ func (d *Dictionary) Lookup(term string) *Entry {
 		return nil
 	}
 	return d.index[foldString(term)]
+}
+
+// HasWordClass reports whether the given word belongs to the named word class.
+// The check is case-insensitive. Returns false if the word class does not exist.
+func (d *Dictionary) HasWordClass(word, class string) bool {
+	if d == nil || d.wordClassSet == nil {
+		return false
+	}
+	set, ok := d.wordClassSet[class]
+	if !ok {
+		return false
+	}
+	return set[foldString(word)]
+}
+
+// WordClassSet returns the set of words in the given class, or nil if the class
+// does not exist. The caller MUST NOT modify the returned map.
+func (d *Dictionary) WordClassSet(class string) map[string]bool {
+	if d == nil || d.wordClassSet == nil {
+		return nil
+	}
+	return d.wordClassSet[class]
+}
+
+// HasWordClassAny reports whether the word belongs to any of the named classes.
+func (d *Dictionary) HasWordClassAny(word string, classes ...string) bool {
+	if d == nil || d.wordClassSet == nil {
+		return false
+	}
+	lower := foldString(word)
+	for _, class := range classes {
+		if set, ok := d.wordClassSet[class]; ok && set[lower] {
+			return true
+		}
+	}
+	return false
 }
 
 func parseDictionary(data []byte) (*Dictionary, error) {

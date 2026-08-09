@@ -9,18 +9,22 @@ import (
 )
 
 // bannedModalRe matches STE-unapproved modal verbs: should, would, may,
-// might, could.  These hedge or hypothesize where technical documentation
+// might, could. These hedge or hypothesize where technical documentation
 // should state facts, requirements, or possibilities directly.
 // Approved modals (can, will, must) are not matched.
 var bannedModalRe = regexp.MustCompile(`(?i)\b(should|would|may|might|could)\b`)
 
-// bannedModalSuggestions maps each banned modal to its fix guidance.
-var bannedModalSuggestions = map[string]string{
-	"should": "Write 'must' if required, or delete if optional.",
-	"would":  "Restructure: state the fact or write 'If X occurs, Y occurs.'",
-	"may":    "Write 'can' for possibility or permission.",
-	"might":  "Write 'can' for possibility.",
-	"could":  "Write 'can' for possibility.",
+// bannedModalSuggestion returns replacement guidance for a banned modal,
+// reading from the profile dictionary when available. The embedded profile
+// always provides the suggestions map, so the fallback here is only reached
+// in edge cases (nil dict) and is intentionally generic.
+func bannedModalSuggestion(modal string, ctx *RunContext) string {
+	if ctx != nil && ctx.Profile != nil && ctx.Profile.Dict != nil {
+		if s, ok := ctx.Profile.Dict.BannedModalSuggestions[modal]; ok && s != "" {
+			return s
+		}
+	}
+	return "Replace the unapproved modal."
 }
 
 type bannedModalChecker struct{}
@@ -43,10 +47,7 @@ func (bannedModalChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 			start, end := match[0], match[1]
 			word := seg.Text[start:end]
 			lower := lower(word)
-			msg := "Replace the unapproved modal."
-			if suggestion, ok := bannedModalSuggestions[lower]; ok {
-				msg = suggestion
-			}
+			msg := bannedModalSuggestion(lower, ctx)
 			path := ctx.Document.Source
 			out = append(out, report.Finding{
 				RuleID:         bannedModalChecker{}.ID(),

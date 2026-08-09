@@ -270,8 +270,8 @@ func TestEmbeddedProfilePinnedIDAndVersion(t *testing.T) {
 	if res.ID != ProfileID("software-docs-en") {
 		t.Errorf("expected pinned ID %q, got %q", "software-docs-en", res.ID)
 	}
-	if res.Version != Version("0.4.0") {
-		t.Errorf("expected pinned version %q, got %q", "0.4.0", res.Version)
+	if res.Version != Version("0.5.0") {
+		t.Errorf("expected pinned version %q, got %q", "0.5.0", res.Version)
 	}
 }
 
@@ -280,8 +280,8 @@ func TestEmbeddedProfilePinnedManifestHashes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("embedded profile load failed: %v", err)
 	}
-	// Expected payload hashes from the reviewed manifest for software-docs-en@0.4.0
-	const wantDictHash = "26acb9d56c603c951e7e6e67fd625a5f1d29507adb3b7d1e427d613302d7063f"
+	// Expected payload hashes from the reviewed manifest for software-docs-en@0.5.0
+	const wantDictHash = "83932d0dc96694ad69abd66765b3ed8a2154b9aa82f64ffebcc06a4f1ff49221"
 	const wantRulesHash = "012acff57a6ccd1d49d05e93e351200c715b0bceae6f2a2cefece90aaebc701f"
 
 	if res.Manifest.Payloads.DictionarySHA256.SHA256 != wantDictHash {
@@ -299,7 +299,7 @@ func TestEmbeddedProfileCanonicalResolutionHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("embedded profile load failed: %v", err)
 	}
-	const expectedSHA = "13c81d2fcf45b739e81180a07a1081218e2e20514c1dfe903e2d87be68fc8024"
+	const expectedSHA = "2b7ddf37375e03f0ba01e1a5dd5da3639b4d8af6fd137bc478ed3db18fac2914"
 	if res.SHA256 != expectedSHA {
 		t.Errorf("resolution SHA256:\n  got:  %s\n  want: %s", res.SHA256, expectedSHA)
 	}

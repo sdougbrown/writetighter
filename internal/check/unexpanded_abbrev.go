@@ -26,54 +26,9 @@ const (
 	maxUnfoldedAbbrevLen = 5
 )
 
-// knownShortAbbrevs are common technical abbreviations a reader of software
-// prose is expected to know without an expansion. Deliberately narrow on
-// purpose: a domain abbreviation not listed here (EI, NPE, PEI, HID) stays
-// fair game when it first appears without an in-document expansion. Keys are
-// lowercased.
-var knownShortAbbrevs = map[string]bool{
-	// Infrastructure and transport
-	"api": true, "url": true, "uri": true, "uuid": true, "guid": true,
-	"http": true, "https": true, "html": true, "css": true,
-	"js": true, "ts": true, "tsx": true, "jsx": true, "json": true,
-	"xml": true, "csv": true, "php": true,
-	"yaml": true, "yml": true, "toml": true, "sql": true, "cli": true,
-	"wasm": true, "zip": true, "tar": true, "gz": true, "bin": true,
-	"exe": true, "dll": true, "env": true, "cfg": true, "ini": true, "rc": true,
-	"sdk": true, "ui": true, "ux": true, "gui": true,
-	"cpu": true, "gpu": true, "ram": true, "rom": true, "db": true,
-	"dns": true, "dhcp": true, "tcp": true, "udp": true, "ip": true,
-	"icmp": true, "os": true, "io": true, "iso": true, "tls": true,
-	"ssl": true, "ssh": true, "ftp": true, "smtp": true, "pop": true,
-	"imap": true, "aws": true, "gcp": true, "ci": true, "cd": true,
-	"npm": true, "yarn": true, "pnpm": true, "jvm": true, "jdk": true,
-	"jre": true, "jit": true, "vm": true, "k8s": true, "oauth": true,
-	"jwt": true, "rpc": true, "grpc": true, "www": true, "rn": true,
-	"tbd": true, "tba": true, "wip": true,
-	// Files, media, and formats
-	"pdf": true, "png": true, "jpg": true, "jpeg": true, "gif": true,
-	"svg": true, "txt": true, "md5": true, "sha": true, "pem": true,
-	"crt": true, "acl": true,
-	// Editorial markers and severity levels
-	"todo": true, "fixme": true, "xxx": true, "note": true, "notes": true,
-	"warn": true, "warning": true, "danger": true, "caution": true,
-	"important": true, "info": true, "error": true, "debug": true,
-	"fatal": true, "trace": true, "hint": true, "ok": true,
-	// Time and units
-	"utc": true, "gmt": true, "est": true, "edt": true, "cst": true,
-	"cdt": true, "mst": true, "mdt": true, "pst": true, "pdt": true,
-	"ist": true, "cet": true, "kb": true, "mb": true, "gb": true, "tb": true,
-	"hz": true, "khz": true, "mhz": true, "ghz": true, "am": true,
-	"pm": true, "bc": true, "ad": true, "ce": true,
-	// Common alphanumerics and misc
-	"id": true, "ids": true, "usd": true, "eur": true, "gbp": true,
-	"ai": true, "ml": true, "nl": true, "nlp": true, "rng": true,
-	"qa": true, "fps": true, "gps": true, "hd": true, "hdmi": true,
-	"ic": true, "isp": true, "lcd": true, "led": true, "lte": true,
-	"mvp": true, "nfc": true, "oled": true, "pc": true, "qos": true,
-	"rf": true, "rss": true, "sms": true, "snmp": true, "sso": true,
-	"ssd": true, "usb": true, "vpn": true, "vram": true,
-}
+// knownShortAbbrevs are now defined in the profile dictionary under the
+// "known_abbrev" word class. That class is loaded in the Run method and
+// used in place of this former hardcoded map.
 
 // isAbbrevCandidate reports whether token is a plausible short all-caps
 // abbreviation (a maximal uppercase run of abbreviation length).
@@ -91,7 +46,7 @@ func isAbbrevCandidate(token string) bool {
 // wordInitials returns the uppercase initials of the content words in text,
 // skipping stopwords and single letters — the standard way a parenthetical
 // expansion abbreviates its phrase ("Null Pointer Exception" -> N, P, E).
-func wordInitials(text string) []rune {
+func wordInitials(text string, stopwords map[string]bool) []rune {
 	runes := []rune(text)
 	n := len(runes)
 	var initials []rune
@@ -108,7 +63,7 @@ func wordInitials(text string) []rune {
 			i++
 		}
 		word := strings.ToLower(string(runes[start:i]))
-		if proseStopwords[word] || len(word) < 2 {
+		if stopwords[word] || len(word) < 2 {
 			continue
 		}
 		initials = append(initials, runes[start])
@@ -119,7 +74,7 @@ func wordInitials(text string) []rune {
 // trailingWordInitials returns, in forward document order, the initials of the
 // content words that immediately precede the end of text. The caller uses the
 // trailing span as the expansion of an abbreviation restated in parentheses.
-func trailingWordInitials(text string) []rune {
+func trailingWordInitials(text string, stopwords map[string]bool) []rune {
 	runes := []rune(text)
 	var reversed []rune
 	i := len(runes) - 1
@@ -134,7 +89,7 @@ func trailingWordInitials(text string) []rune {
 			i--
 		}
 		word := strings.ToLower(string(runes[i:end]))
-		if proseStopwords[word] || len(word) < 2 {
+		if stopwords[word] || len(word) < 2 {
 			i--
 			continue
 		}
@@ -150,8 +105,8 @@ func trailingWordInitials(text string) []rune {
 
 // expansionInitialsMatch reports whether the initials of the phrase in content
 // begin with the abbreviation (prefix match so trailing words are allowed).
-func expansionInitialsMatch(content, abbrev string) bool {
-	initials := wordInitials(content)
+func expansionInitialsMatch(content, abbrev string, stopwords map[string]bool) bool {
+	initials := wordInitials(content, stopwords)
 	r := []rune(abbrev)
 	if len(initials) < len(r) {
 		return false
@@ -173,7 +128,7 @@ func initialUppercase(r rune) rune {
 
 // detectExpansions records abbreviations parenthetically expanded in text, in
 // either order. Nested parentheses are not supported; the first ')' closes.
-func detectExpansions(text string, expanded map[string]bool) {
+func detectExpansions(text string, expanded map[string]bool, stopwords map[string]bool) {
 	runes := []rune(text)
 	for i, r := range runes {
 		if r != '(' {
@@ -194,7 +149,7 @@ func detectExpansions(text string, expanded map[string]bool) {
 
 		// Restatement order: Ending Inventory (EI)
 		if isAbbrevCandidate(inner) {
-			trailing := trailingWordInitials(string(runes[:i]))
+			trailing := trailingWordInitials(string(runes[:i]), stopwords)
 			abbrevRunes := []rune(inner)
 			if len(trailing) >= len(abbrevRunes) {
 				tail := trailing[len(trailing)-len(abbrevRunes):]
@@ -217,7 +172,7 @@ func detectExpansions(text string, expanded map[string]bool) {
 
 		// Expansion order: EI (Ending Inventory)
 		pre := wordBefore(runes, i)
-		if isAbbrevCandidate(pre) && expansionInitialsMatch(content, pre) {
+		if isAbbrevCandidate(pre) && expansionInitialsMatch(content, pre, stopwords) {
 			expanded[strings.ToLower(pre)] = true
 		}
 	}
@@ -312,6 +267,14 @@ func (unexpandedAbbrevChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 	if ctx == nil || ctx.Document == nil {
 		return nil, nil
 	}
+
+	// Load word classes from the profile dictionary.
+	var stopwords, knownAbbrevs map[string]bool
+	if ctx.Profile != nil && ctx.Profile.Dict != nil {
+		stopwords = ctx.Profile.Dict.WordClassSet("stopword")
+		knownAbbrevs = ctx.Profile.Dict.WordClassSet("known_abbrev")
+	}
+
 	expanded := map[string]bool{}
 	// Pass 1: an expansion anywhere in the document suppresses the
 	// abbreviation everywhere, because a definition may live in a nearby
@@ -320,7 +283,7 @@ func (unexpandedAbbrevChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 		if seg.Type != document.SegmentProse {
 			continue
 		}
-		detectExpansions(seg.Text, expanded)
+		detectExpansions(seg.Text, expanded, stopwords)
 	}
 
 	enforcement, severity := ruleEnforcement(ctx, unexpandedAbbrevChecker{}.ID())
@@ -332,7 +295,7 @@ func (unexpandedAbbrevChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 		}
 		for _, cand := range allCapsCandidates(seg.Text) {
 			key := strings.ToLower(cand.text)
-			if knownShortAbbrevs[key] || proseStopwords[key] || expanded[key] || reported[key] {
+			if knownAbbrevs[key] || stopwords[key] || expanded[key] || reported[key] {
 				continue
 			}
 			reported[key] = true

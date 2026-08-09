@@ -2,7 +2,7 @@
 
 WriteTighter is a local technical-writing revision harness for Markdown. Its primary command, `revise`, asks a configured OpenAI-compatible model for structured rewrites or clarification requests. Its deterministic companion, `lint`, reports narrow, auditable profile findings.
 
-**Status:** Private development. The embedded default is `software-docs-en@0.4.0`. This repository is not currently cleared for public redistribution.
+**Status:** Private development. The embedded default is `software-docs-en@0.5.0`. This repository is not currently cleared for public redistribution.
 
 ## What WriteTighter does
 
@@ -75,7 +75,7 @@ go build -o writetighter ./cmd/writetighter
 
 ### Current default policy
 
-The embedded `software-docs-en@0.4.0` profile uses these limits:
+The embedded `software-docs-en@0.5.0` profile uses these limits:
 
 | Document kind | Sentence limit |
 |---|---:|
@@ -299,7 +299,7 @@ You can control failure behavior with `--fail-on`:
 
 ### Profiles
 
-WriteTighter uses profiles to define its logic. The embedded default is `software-docs-en@0.4.0`.
+WriteTighter uses profiles to define its logic. The embedded default is `software-docs-en@0.5.0`.
 
 **Manage profiles:**
 ```sh
@@ -307,7 +307,7 @@ WriteTighter uses profiles to define its logic. The embedded default is `softwar
 ./writetighter profile list
 
 # Verify a specific profile or bundle path
-./writetighter profile verify software-docs-en@0.4.0
+./writetighter profile verify software-docs-en@0.5.0
 
 # Install a new profile bundle from a local path
 ./writetighter profile install ./path/to/bundle
@@ -324,7 +324,7 @@ WriteTighter searches upward from the current working directory for
 ```toml
 [profile]
 id = "software-docs-en"
-version = "0.4.0"
+version = "0.5.0"
 
 [[terms]]
 term = "hydrate"

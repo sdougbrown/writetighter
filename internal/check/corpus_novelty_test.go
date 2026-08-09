@@ -15,9 +15,29 @@ func corpusNoveltyProfile() *profile.Resolution {
 	rules := []profile.Rule{
 		{ID: "CORE.CORPUS_NOVELTY", Enabled: true, Enforcement: "candidate", Severity: "info"},
 	}
-	dict := &profile.Dictionary{FormatVersion: 1}
+	wc := testWordClasses()
+	// Ensure the specific stopwords tested by TestCorpusNoveltyExcludesStopwords
+	// are present in the corpus_novelty_stopword class.
+	wc["corpus_novelty_stopword"] = append([]string{}, wc["stopword"]...)
+	extra := []string{"provides", "factory", "keys", "new", "null", "out",
+		"building", "partial", "test", "provides", "factory", "keys"}
+	for _, w := range extra {
+		if !contains(wc["corpus_novelty_stopword"], w) {
+			wc["corpus_novelty_stopword"] = append(wc["corpus_novelty_stopword"], w)
+		}
+	}
+	dict := &profile.Dictionary{FormatVersion: 2, WordClasses: wc}
 	_ = dict.Validate()
 	return &profile.Resolution{Rules: &profile.RulesConfig{Rules: rules}, Dict: dict}
+}
+
+func contains(slice []string, s string) bool {
+	for _, v := range slice {
+		if v == s {
+			return true
+		}
+	}
+	return false
 }
 
 // corpusNoveltyProfileWithDict returns a profile with a dictionary entry for "tagline".
@@ -26,7 +46,9 @@ func corpusNoveltyProfileWithDict() *profile.Resolution {
 		{ID: "CORE.CORPUS_NOVELTY", Enabled: true, Enforcement: "candidate", Severity: "info"},
 	}
 	e := profile.Entry{Term: "tagline", Status: profile.StatusAllowed, PartsOfSpeech: []string{"noun"}}
-	dict := &profile.Dictionary{FormatVersion: 1, Entries: []profile.Entry{e}}
+	wc := testWordClasses()
+	wc["corpus_novelty_stopword"] = append([]string{}, wc["stopword"]...)
+	dict := &profile.Dictionary{FormatVersion: 2, Entries: []profile.Entry{e}, WordClasses: wc}
 	_ = dict.Validate()
 	return &profile.Resolution{Rules: &profile.RulesConfig{Rules: rules}, Dict: dict}
 }

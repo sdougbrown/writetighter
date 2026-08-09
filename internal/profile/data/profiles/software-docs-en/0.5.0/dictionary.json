@@ -445,7 +445,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:aims-to"
+        "review:software-docs-en-0.5.0:aims-to"
       ],
       "parts_of_speech": [
         "phrase"
@@ -535,7 +535,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:allows-you-to"
+        "review:software-docs-en-0.5.0:allows-you-to"
       ],
       "parts_of_speech": [
         "phrase"
@@ -1494,7 +1494,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:blazingly"
+        "review:software-docs-en-0.5.0:blazingly"
       ],
       "parts_of_speech": [
         "adverb"
@@ -2640,7 +2640,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:comprehensive"
+        "review:software-docs-en-0.5.0:comprehensive"
       ],
       "parts_of_speech": [
         "adjective"
@@ -3335,7 +3335,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:crucial"
+        "review:software-docs-en-0.5.0:crucial"
       ],
       "parts_of_speech": [
         "adjective"
@@ -3348,7 +3348,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:crucially"
+        "review:software-docs-en-0.5.0:crucially"
       ],
       "parts_of_speech": [
         "phrase"
@@ -3713,7 +3713,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:delve"
+        "review:software-docs-en-0.5.0:delve"
       ],
       "parts_of_speech": [
         "verb"
@@ -4133,7 +4133,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:dive-into"
+        "review:software-docs-en-0.5.0:dive-into"
       ],
       "parts_of_speech": [
         "phrase"
@@ -4311,7 +4311,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:due-to-the-fact-that"
+        "review:software-docs-en-0.5.0:due-to-the-fact-that"
       ],
       "parts_of_speech": [
         "phrase"
@@ -4368,7 +4368,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:easily"
+        "review:software-docs-en-0.5.0:easily"
       ],
       "parts_of_speech": [
         "adverb"
@@ -4458,7 +4458,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:effortlessly"
+        "review:software-docs-en-0.5.0:effortlessly"
       ],
       "parts_of_speech": [
         "adverb"
@@ -4592,7 +4592,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:enables-you-to"
+        "review:software-docs-en-0.5.0:enables-you-to"
       ],
       "parts_of_speech": [
         "phrase"
@@ -4748,7 +4748,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:ensure"
+        "review:software-docs-en-0.5.0:ensure"
       ],
       "parts_of_speech": [
         "verb"
@@ -5366,7 +5366,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:facilitate"
+        "review:software-docs-en-0.5.0:facilitate"
       ],
       "parts_of_speech": [
         "verb"
@@ -6028,7 +6028,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:functionality"
+        "review:software-docs-en-0.5.0:functionality"
       ],
       "parts_of_speech": [
         "noun"
@@ -6272,7 +6272,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:gracefully-handles"
+        "review:software-docs-en-0.5.0:gracefully-handles"
       ],
       "parts_of_speech": [
         "phrase"
@@ -7037,7 +7037,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:in-the-event-that"
+        "review:software-docs-en-0.5.0:in-the-event-that"
       ],
       "parts_of_speech": [
         "phrase"
@@ -7611,7 +7611,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:is-designed-to"
+        "review:software-docs-en-0.5.0:is-designed-to"
       ],
       "parts_of_speech": [
         "phrase"
@@ -7690,7 +7690,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:its-important-to"
+        "review:software-docs-en-0.5.0:its-important-to"
       ],
       "parts_of_speech": [
         "phrase"
@@ -8169,7 +8169,7 @@
       ],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:leverage"
+        "review:software-docs-en-0.5.0:leverage"
       ],
       "parts_of_speech": [
         "verb"
@@ -9403,7 +9403,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:myriad"
+        "review:software-docs-en-0.5.0:myriad"
       ],
       "parts_of_speech": [
         "noun"
@@ -10153,7 +10153,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:out-of-the-box"
+        "review:software-docs-en-0.5.0:out-of-the-box"
       ],
       "parts_of_speech": [
         "phrase"
@@ -10617,7 +10617,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:performant"
+        "review:software-docs-en-0.5.0:performant"
       ],
       "parts_of_speech": [
         "adjective"
@@ -10795,7 +10795,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:pivotal"
+        "review:software-docs-en-0.5.0:pivotal"
       ],
       "parts_of_speech": [
         "adjective"
@@ -10885,7 +10885,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:plethora"
+        "review:software-docs-en-0.5.0:plethora"
       ],
       "parts_of_speech": [
         "noun"
@@ -11041,7 +11041,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:powerful"
+        "review:software-docs-en-0.5.0:powerful"
       ],
       "parts_of_speech": [
         "adjective"
@@ -11252,7 +11252,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:prior-to"
+        "review:software-docs-en-0.5.0:prior-to"
       ],
       "parts_of_speech": [
         "phrase"
@@ -12882,7 +12882,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:robust"
+        "review:software-docs-en-0.5.0:robust"
       ],
       "parts_of_speech": [
         "adjective"
@@ -13181,7 +13181,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:seamlessly"
+        "review:software-docs-en-0.5.0:seamlessly"
       ],
       "parts_of_speech": [
         "adverb"
@@ -13810,7 +13810,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:simply"
+        "review:software-docs-en-0.5.0:simply"
       ],
       "parts_of_speech": [
         "adverb"
@@ -14296,7 +14296,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:state-of-the-art"
+        "review:software-docs-en-0.5.0:state-of-the-art"
       ],
       "parts_of_speech": [
         "phrase"
@@ -14485,7 +14485,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:streamline"
+        "review:software-docs-en-0.5.0:streamline"
       ],
       "parts_of_speech": [
         "verb"
@@ -15666,7 +15666,7 @@
       "alternatives": [],
       "canonical_case": null,
       "evidence_refs": [
-        "review:software-docs-en-0.4.0:under-the-hood"
+        "review:software-docs-en-0.5.0:under-the-hood"
       ],
       "parts_of_speech": [
         "phrase"

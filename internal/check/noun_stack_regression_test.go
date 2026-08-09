@@ -236,6 +236,96 @@ func TestUnexpandedAbbrevIgnoresIdentifierSubstrings(t *testing.T) {
 	}
 }
 
+func TestNounStackGardenPathAmbiguity(t *testing.T) {
+	// The social-media example: a determiner followed by a verb/noun homograph
+	// at the head of a content-word run should produce an ambiguity finding.
+	findings := runNounStack(t, "Give the prune logic real attention.", "description")
+	if len(findings) == 0 {
+		t.Fatal("expected garden-path noun stack finding")
+	}
+	if !strings.Contains(findings[0].Evidence, "ambiguous noun stack") {
+		t.Fatalf("expected ambiguous noun stack evidence, got %q", findings[0].Evidence)
+	}
+	if !strings.Contains(findings[0].Message, "structurally ambiguous") {
+		t.Fatalf("expected ambiguity message, got %q", findings[0].Message)
+	}
+}
+
+func TestNounStackGardenPathNotFlaggedForKnownNoun(t *testing.T) {
+	// "database" is not a gardenPathHead, so even after a determiner the
+	// stack should be flagged as a regular noun stack, not ambiguous.
+	findings := runNounStack(t, "The database connection pool is configured.", "description")
+	if len(findings) == 0 {
+		t.Fatal("expected noun stack finding")
+	}
+	if strings.Contains(findings[0].Evidence, "ambiguous noun stack") {
+		t.Fatalf("known-noun stack should not be marked ambiguous: %s", findings[0].Evidence)
+	}
+	if !strings.Contains(findings[0].Evidence, "noun stack") {
+		t.Fatalf("expected plain noun stack evidence, got %q", findings[0].Evidence)
+	}
+}
+
+func TestNounStackGardenPathNoDeterminer(t *testing.T) {
+	// A run starting with a gardenPathHead but NOT preceded by a determiner
+	// should be flagged as a regular noun stack, not ambiguous.
+	findings := runNounStack(t, "Build queue size matters.", "description")
+	hasAmbiguous := false
+	for _, f := range findings {
+		if strings.Contains(f.Evidence, "ambiguous noun stack") {
+			hasAmbiguous = true
+			break
+		}
+	}
+	if hasAmbiguous {
+		t.Fatalf("stack without preceding determiner must not be marked ambiguous: %v", findings)
+	}
+}
+
+func TestNounStackGardenPathClauseBoundaryResetsPrecedingToken(t *testing.T) {
+	// A gardenPathHead after a clause boundary should NOT be marked ambiguous
+	// because the preceding token is reset (not a determiner).
+	text := "Run the config check \u2014 build queue size matters."
+	for _, f := range runNounStack(t, text, "description") {
+		if strings.Contains(f.Evidence, "ambiguous noun stack") {
+			t.Fatalf("stack after clause boundary must not be ambiguous: %s", f.Evidence)
+		}
+	}
+}
+
+func TestNounStackGardenPathPrecedingTokenNotDeterminer(t *testing.T) {
+	// A stack where preceding token is a preposition, not a determiner.
+	findings := runNounStack(t, "For build queue size, set the limit.", "description")
+	hasAmbiguous := false
+	for _, f := range findings {
+		if strings.Contains(f.Evidence, "ambiguous noun stack") {
+			hasAmbiguous = true
+			break
+		}
+	}
+	if hasAmbiguous {
+		t.Fatalf("stack preceded by preposition must not be marked ambiguous: %v", findings)
+	}
+}
+
+func TestNounStackGardenPathShortStackNotFlagged(t *testing.T) {
+	// 2-word stacks should never be flagged regardless of ambiguity.
+	findings := runNounStack(t, "The build queue is full.", "description")
+	if len(findings) != 0 {
+		t.Fatalf("2-word stack should not be flagged at threshold 3: %v", findings)
+	}
+}
+
+func TestNounStackGardenPathSendIsInNounRunFinalVerbs(t *testing.T) {
+	// "send" is in nounRunFinalVerbs, so "the data send" would be treated
+	// as a clause, not a noun stack, and should not be flagged at all.
+	findings := runNounStack(t, "The data send is complete.", "description")
+	// "send" is in nounRunFinalVerbs, so the run is rejected entirely.
+	if len(findings) != 0 {
+		t.Fatalf("'send' is a nounRunFinalVerb -- stack should be rejected: %v", findings)
+	}
+}
+
 func TestUnexpandedAbbrevHonorsRulePolicy(t *testing.T) {
 	p := testProfile()
 	for i := range p.Rules.Rules {
