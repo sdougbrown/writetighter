@@ -18,6 +18,19 @@ func testProfile() *profile.Resolution {
 		FormatVersion: 2,
 		Entries:       []profile.Entry{e1, e2, e3, e4},
 		WordClasses:   testWordClasses(),
+		BannedModalSuggestions: map[string]string{
+			"should": "Custom: write 'must' if required.",
+			"would":  "Custom: restructure.",
+			"may":    "Custom: write 'can'.",
+			"might":  "Custom: write 'can'.",
+			"could":  "Custom: write 'can'.",
+		},
+		BannedLatinAbbrevSuggestions: map[string]string{
+			"e.g.": "Custom: write 'for example'.",
+			"i.e.": "Custom: write 'that is'.",
+			"etc":  "Custom: name the items.",
+			"etc.": "Custom: name the items.",
+		},
 	}
 	_ = dict.Validate()
 	rules := []profile.Rule{
@@ -141,7 +154,6 @@ func testWordClasses() map[string][]string {
 			"override", "overrides", "overridden",
 			"trigger", "triggers", "triggered",
 			"need", "needs", "needed",
-			"reads", "keeps", "stays", "sends", "skips",
 		},
 		"irregular_participle": {
 			"taken", "given", "broken", "written", "spoken", "hidden",
@@ -683,6 +695,17 @@ func TestBannedModalHonorsRulePolicy(t *testing.T) {
 	}
 }
 
+func TestBannedModalCustomSuggestion(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("You should verify."), Profile: testProfile()}
+	findings, _ := Get("CORE.BANNED_MODAL").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if !strings.Contains(findings[0].Message, "Custom:") {
+		t.Fatalf("expected custom dictionary suggestion in message, got %q", findings[0].Message)
+	}
+}
+
 func TestLatinAbbrev(t *testing.T) {
 	ctx := &RunContext{Document: testDoc("Use the flag, e.g. --force. See the docs (i.e. README). And more etc."), Profile: testProfile()}
 	findings, _ := Get("CORE.LATIN_ABBREV").Run(ctx)
@@ -736,6 +759,17 @@ func TestLatinAbbrevHonorsRulePolicy(t *testing.T) {
 	}
 	if findings[0].Enforcement != "enforced" || findings[0].Severity != "warning" {
 		t.Fatalf("expected enforced/warning, got %s/%s", findings[0].Enforcement, findings[0].Severity)
+	}
+}
+
+func TestLatinAbbrevCustomSuggestion(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Use e.g. this."), Profile: testProfile()}
+	findings, _ := Get("CORE.LATIN_ABBREV").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if !strings.Contains(findings[0].Message, "Custom:") {
+		t.Fatalf("expected custom dictionary suggestion in message, got %q", findings[0].Message)
 	}
 }
 
