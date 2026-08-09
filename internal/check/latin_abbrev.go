@@ -14,21 +14,14 @@ import (
 var latinAbbrevRe = regexp.MustCompile(`(?i)\b(e\.g\.|i\.e\.|etc\.?)`)
 
 // latinAbbrevSuggestion returns replacement guidance for a Latin abbreviation,
-// reading from the profile dictionary when available.
+// reading from the profile dictionary when available. The embedded profile
+// always provides the suggestions map, so the fallback here is only reached
+// in edge cases (nil dict) and is intentionally generic.
 func latinAbbrevSuggestion(abbrev string, ctx *RunContext) string {
 	if ctx != nil && ctx.Profile != nil && ctx.Profile.Dict != nil {
 		if s, ok := ctx.Profile.Dict.BannedLatinAbbrevSuggestions[abbrev]; ok && s != "" {
 			return s
 		}
-	}
-	// Fallback for v1 profiles without latin_abbrev_suggestions.
-	switch abbrev {
-	case "e.g.":
-		return "Write 'for example'."
-	case "i.e.":
-		return "Write 'that is'."
-	case "etc", "etc.":
-		return "Name the items or write 'and more'."
 	}
 	return "Replace the Latin abbreviation."
 }

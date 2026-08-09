@@ -75,20 +75,10 @@ func (gerundOpenerChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 }
 
 // isGerundDeterminer checks whether word is a determiner that signals a gerund
-// phrase opener. It reads from the profile dictionary's "gerund_determiner"
-// word class, falling back to a minimal hardcoded set for v1 profiles.
+// phrase opener, reading from the profile dictionary's "gerund_determiner"
+// word class. The embedded profile always provides this class.
 func isGerundDeterminer(word string, ctx *RunContext) bool {
-	if ctx.Profile != nil && ctx.Profile.Dict != nil && ctx.Profile.Dict.HasWordClass(word, "gerund_determiner") {
-		return true
-	}
-	// Fallback for v1 profiles without word classes.
-	switch word {
-	case "the", "a", "an", "this", "that", "your", "our", "their",
-		"his", "her", "its", "some", "any", "every", "each",
-		"all", "no", "these", "those":
-		return true
-	}
-	return false
+	return ctx.Profile != nil && ctx.Profile.Dict != nil && ctx.Profile.Dict.HasWordClass(word, "gerund_determiner")
 }
 
 func init() { Register(gerundOpenerChecker{}) }

@@ -274,21 +274,6 @@ func (unexpandedAbbrevChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 		stopwords = ctx.Profile.Dict.WordClassSet("stopword")
 		knownAbbrevs = ctx.Profile.Dict.WordClassSet("known_abbrev")
 	}
-	// v1 fallback: when the profile dictionary lacks the known_abbrev word class,
-	// provide a minimal set of universally-known technical abbreviations.
-	if len(knownAbbrevs) == 0 {
-		knownAbbrevs = map[string]bool{
-			"api": true, "url": true, "uri": true, "uuid": true, "guid": true,
-			"http": true, "https": true, "html": true, "css": true,
-			"js": true, "json": true, "xml": true, "yaml": true, "yml": true,
-			"sql": true, "cli": true, "sdk": true, "ui": true, "ux": true,
-			"id": true, "ids": true, "pdf": true, "png": true, "jpg": true,
-			"svg": true, "txt": true, "zip": true, "tar": true, "gz": true,
-			"tcp": true, "udp": true, "ip": true, "dns": true, "ssh": true,
-			"ssl": true, "tls": true, "aws": true, "gcp": true, "vm": true,
-			"os": true, "db": true, "ram": true, "cpu": true, "gpu": true,
-		}
-	}
 
 	expanded := map[string]bool{}
 	// Pass 1: an expansion anywhere in the document suppresses the

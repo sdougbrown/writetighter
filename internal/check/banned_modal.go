@@ -15,25 +15,14 @@ import (
 var bannedModalRe = regexp.MustCompile(`(?i)\b(should|would|may|might|could)\b`)
 
 // bannedModalSuggestion returns replacement guidance for a banned modal,
-// reading from the profile dictionary when available.
+// reading from the profile dictionary when available. The embedded profile
+// always provides the suggestions map, so the fallback here is only reached
+// in edge cases (nil dict) and is intentionally generic.
 func bannedModalSuggestion(modal string, ctx *RunContext) string {
 	if ctx != nil && ctx.Profile != nil && ctx.Profile.Dict != nil {
 		if s, ok := ctx.Profile.Dict.BannedModalSuggestions[modal]; ok && s != "" {
 			return s
 		}
-	}
-	// Fallback for v1 profiles without banned_modal_suggestions.
-	switch modal {
-	case "should":
-		return "Write 'must' if required, or delete if optional."
-	case "would":
-		return "Restructure: state the fact or write 'If X occurs, Y occurs.'"
-	case "may":
-		return "Write 'can' for possibility or permission."
-	case "might":
-		return "Write 'can' for possibility."
-	case "could":
-		return "Write 'can' for possibility."
 	}
 	return "Replace the unapproved modal."
 }

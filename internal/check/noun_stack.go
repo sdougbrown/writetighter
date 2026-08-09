@@ -280,24 +280,10 @@ func stackHasGardenPathHead(run stackRun, gpHd map[string]bool, dict *profile.Di
 	return gpHd[lower(run.tokens[0])]
 }
 
-// isDeterminerFromDict checks whether s is classified as a determiner.
-// It checks the dictionary's "determiner" word class first; if that class is
-// not present it falls back to a minimal hardcoded set for backward
-// compatibility with v1 profiles that lack word classes.
+// isDeterminerFromDict checks whether s is classified as a determiner in the
+// profile dictionary. The embedded profile always provides the word class.
 func isDeterminerFromDict(s string, dict *profile.Dictionary) bool {
-	if dict != nil && dict.HasWordClass(s, wordClassDeterminer) {
-		return true
-	}
-	// Fallback for v1 profiles without word classes.
-	switch s {
-	case "the", "a", "an", "this", "that", "these", "those",
-		"some", "any", "each", "every", "both", "either", "neither",
-		"all", "few", "many", "much", "more", "most", "less", "least",
-		"no", "another", "other", "same", "such", "what", "which", "whose",
-		"my", "your", "his", "her", "its", "our", "their":
-		return true
-	}
-	return false
+	return dict != nil && dict.HasWordClass(s, wordClassDeterminer)
 }
 
 func init() { Register(nounStackChecker{}) }
