@@ -202,7 +202,8 @@ type ReviseLLMResponse struct {
 
 // ValidateReviseResponse validates the LLM response JSON for revise.
 // It checks for valid structure, size limits, allowed kinds, claim language,
-// known principle IDs (from the fixed allowlist), non-empty trimmed fields,
+// known principle IDs (from the fixed allowlist, with echoed lint rule IDs
+// coerced to their closest revision principle), non-empty trimmed fields,
 // UTF-8 range boundaries, and duplicate/overlapping suggestions.
 func ValidateReviseResponse(raw []byte) (*report.ReviseResponse, error) {
 	if len(raw) > MaxOutputChars {
@@ -249,19 +250,23 @@ func ValidateReviseResponse(raw []byte) (*report.ReviseResponse, error) {
 		}
 
 		// Validate principle IDs: known allowlist, unique, non-empty.
+		// Echoed deterministic lint rule IDs are coerced to their closest
+		// revision principle instead of failing the batch (see
+		// sanitizePrincipleIDs). When a finding ends up with no usable
+		// principle (all IDs were lint rules with no mapping), drop just that
+		// finding and keep the rest of the batch.
 		if len(f.PrincipleIDs) == 0 {
 			return nil, errors.New("missing principle_ids in revision")
 		}
-		seenPrinciple := make(map[string]bool, len(f.PrincipleIDs))
-		for _, id := range f.PrincipleIDs {
-			if !guidance.IsPrincipleID(id) {
-				return nil, fmt.Errorf("unknown principle id: %s", id)
-			}
-			if seenPrinciple[id] {
-				return nil, fmt.Errorf("duplicate principle id: %s", id)
-			}
-			seenPrinciple[id] = true
+		cleaned, err := sanitizePrincipleIDs(f.PrincipleIDs)
+		if err != nil {
+			return nil, err
 		}
+		if len(cleaned) == 0 {
+			out.DiscardedFindings++
+			continue
+		}
+		f.PrincipleIDs = cleaned
 
 		// Validate non-empty reason.
 		if strings.TrimSpace(f.Reason) == "" {
