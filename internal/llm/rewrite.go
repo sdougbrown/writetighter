@@ -29,10 +29,10 @@ var ErrRewriteEmpty = errors.New("rewrite produced empty output")
 
 // BuildRewritePrompt assembles the system prompt and user content for a
 // whole-passage rewrite. It reuses the same guidance package (principles,
-// kind directions, core directions) as revise, but changes the output
-// instruction to "produce the rewritten passage" instead of "return structured
-// findings," and replaces the clarification-asking behavior with a
-// best-effort "preserve ambiguous sections as-is" directive.
+// kind directions, core directions) as revise. The output instruction changes
+// to "produce the rewritten passage" instead of "return structured findings."
+// The clarification-asking behavior is replaced with a best-effort "preserve
+// ambiguous sections as-is" directive.
 func BuildRewritePrompt(doc *document.Document, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry) (systemPrompt, userContent string, err error) {
 	var b strings.Builder
 
@@ -183,9 +183,8 @@ func Rewrite(ctx context.Context, cfg Config, doc *document.Document, res *profi
 		return nil, fmt.Errorf("building rewrite prompt: %w", perr)
 	}
 
-	// Rewrite does not use structured output — the model returns plain text.
-	// Deliberately leave ResponseFormat nil regardless of the configured
-	// response mode, which is for revise's structured JSON schema.
+	// The model returns plain text. Set ResponseFormat to nil to bypass the
+	// structured JSON schema used by the revise function.
 	req := Request{
 		Messages: []Message{
 			{Role: "system", Content: systemPrompt},
@@ -244,8 +243,8 @@ func Rewrite(ctx context.Context, cfg Config, doc *document.Document, res *profi
 }
 
 // sanitizeControlChars strips C0 and C1 control characters (except \n and \t)
-// from model output to prevent terminal escape-sequence injection when the
-// rewritten text is printed to stdout. The JSON output path is safe via
+// from model output. This prevents terminal escape-sequence injection when
+// the rewritten text is printed to stdout. The JSON output path is safe via
 // json.MarshalIndent; this protects the text and human output paths.
 func sanitizeControlChars(s string) string {
 	return strings.Map(func(r rune) rune {
@@ -259,7 +258,7 @@ func sanitizeControlChars(s string) string {
 	}, s)
 }
 
-// injectedTokenPattern matches security-relevant tokens that should not
+// injectedTokenPattern matches security-relevant tokens that must not
 // appear in a rewrite unless they were present in the source: URLs, email
 // addresses, and IP addresses. These are the most likely vectors for
 // prompt-injected content to introduce malicious links or endpoints into
