@@ -594,6 +594,210 @@ func skipQuoted(source []byte, start int, quote byte, limit int, allowNewline bo
 	return 0, fmt.Errorf("unterminated string")
 }
 
+func scanShell(source []byte) ([]commentToken, error) {
+	var tokens []commentToken
+	for i := 0; i < len(source); {
+		c := source[i]
+		if isLineBreakAt(source, i) {
+			i = skipLineBreak(source, i)
+			continue
+		}
+		if isWhitespace(c) {
+			i++
+			continue
+		}
+		if c == '#' && shellHashStartsWord(source, i) {
+			// The leading '#!' of a shebang selects the interpreter; it is not
+			// editable prose, so it is skipped rather than cataloged.
+			if i == 0 && i+2 <= len(source) && source[i+1] == '!' {
+				end := lineEnd(source, i)
+				i = end
+				continue
+			}
+			end := lineEnd(source, i)
+			tokens = append(tokens, commentToken{start: i, end: end, form: LineComment})
+			i = end
+			continue
+		}
+		if c == '\\' {
+			// Backslash-newline continues a line; any other escape travels with
+			// an unquoted word and carries no meaning for comment discovery.
+			i += 2
+			continue
+		}
+		if c == '\'' {
+			end, err := skipShellSingle(source, i)
+			if err != nil {
+				return nil, err
+			}
+			i = end
+			continue
+		}
+		if c == '"' {
+			end, err := skipShellDouble(source, i)
+			if err != nil {
+				return nil, err
+			}
+			i = end
+			continue
+		}
+		if c == '<' && i+2 < len(source) && source[i+1] == '<' && source[i+2] == '<' {
+			// Here-string '<<<' is not a heredoc and contains no shell comments;
+			// consume all three '<' so the later two are never re-treated as a
+			// heredoc opener. The here-string word after it is scanned normally.
+			i += 3
+			continue
+		}
+		if c == '<' && i+1 < len(source) && source[i+1] == '<' {
+			// '<<' redirection (heredoc). A third '<' marks a here-string
+			// '<<<', which is not a heredoc; fall through and keep scanning.
+			end, err := skipShellHeredoc(source, i)
+			if err != nil {
+				return nil, err
+			}
+			i = end
+			continue
+		}
+		i++
+	}
+	return tokens, nil
+}
+
+// shellHashStartsWord reports whether '#' at position i begins a shell word
+// and therefore a comment. A '#' is only a comment when it starts a word (at
+// the start of a statement or after whitespace or a metacharacter), not when
+// it continues one (echo foo#bar, ${var#pattern}, $# positional count).
+func shellHashStartsWord(source []byte, i int) bool {
+	if i == 0 {
+		return true
+	}
+	switch source[i-1] {
+	case ' ', '\t', '\n', '\r', ';', '|', '&', '(', ')', '{', '}':
+		return true
+	default:
+		return false
+	}
+}
+
+// skipShellSingle consumes a single-quoted string. Single quotes permit no
+// escapes, so the string runs to the next matching quote. Real scripts build
+// multi-line strings with the 'foo'\” bar idiom; tolerating newlines here
+// (rather than failing the whole file) keeps comment discovery working. Any '#'
+// inside the quoted region is skipped.
+func skipShellSingle(source []byte, start int) (int, error) {
+	for i := start + 1; i < len(source); i++ {
+		if source[i] == '\'' {
+			return i + 1, nil
+		}
+	}
+	return 0, fmt.Errorf("unterminated single-quoted string")
+}
+
+// skipShellDouble consumes a double-quoted string (or the $'...' / $"..."
+// forms), honoring backslash escapes. Double-quoted strings may span newlines
+// legitimately in shell, so only an EOF without a closing quote is an error.
+func skipShellDouble(source []byte, start int) (int, error) {
+	for i := start + 1; i < len(source); i++ {
+		if source[i] == '\\' {
+			i++
+			continue
+		}
+		if source[i] == '"' {
+			return i + 1, nil
+		}
+	}
+	return 0, fmt.Errorf("unterminated double-quoted string")
+}
+
+// skipShellHeredoc consumes a heredoc ('<<EOF' and its quoted/escaped/- forms),
+// returning just past the delimiter line that terminates the body. Comment
+// characters inside the body belong to the embedded content, not to this
+// source, so the body is skipped wholesale.
+func skipShellHeredoc(source []byte, start int) (int, error) {
+	i := start + 2 // past '<<'
+	stripTabs := false
+	if i < len(source) && source[i] == '-' {
+		stripTabs = true
+		i++
+	}
+	for i < len(source) && (source[i] == ' ' || source[i] == '\t') {
+		i++
+	}
+	if i >= len(source) {
+		return 0, fmt.Errorf("unterminated heredoc opener")
+	}
+	var delim []byte
+	if q := source[i]; q == '\'' || q == '"' {
+		i++
+		for i < len(source) && source[i] != q {
+			delim = append(delim, source[i])
+			i++
+		}
+		if i >= len(source) {
+			return 0, fmt.Errorf("unterminated heredoc delimiter quote")
+		}
+		i++ // past closing quote
+	} else if source[i] == '\\' {
+		i++
+		for i < len(source) && isHeredocWordByte(source[i]) {
+			delim = append(delim, source[i])
+			i++
+		}
+	} else {
+		for i < len(source) && isHeredocWordByte(source[i]) {
+			delim = append(delim, source[i])
+			i++
+		}
+	}
+	if len(delim) == 0 {
+		return 0, fmt.Errorf("missing heredoc delimiter")
+	}
+	// Scan from the current position (past the delimiter token) forward for a
+	// line whose only non-whitespace content is the delimiter itself.
+	body := i
+	for body < len(source) {
+		if !isLineBreakAt(source, body) {
+			body++
+			continue
+		}
+		line := skipLineBreak(source, body)
+		if heredocTerminator(source, line, delim, stripTabs) {
+			return line + len(delim), nil
+		}
+		body = line
+	}
+	return 0, fmt.Errorf("unterminated heredoc")
+}
+
+// heredocTerminator reports whether source[lineStart:] is a heredoc closing
+// line: any leading spaces/tabs, then the delimiter, then only whitespace to
+// end of line. Leading whitespace is accepted for both '<<' and '<<-' to match
+// real-world bash, which is more lenient than POSIX. The delimiter must still
+// appear as the sole token on its line.
+func heredocTerminator(source []byte, lineStart int, delim []byte, _ bool) bool {
+	i := lineStart
+	for i < len(source) && (source[i] == ' ' || source[i] == '\t') {
+		i++
+	}
+	if i+len(delim) > len(source) || string(source[i:i+len(delim)]) != string(delim) {
+		return false
+	}
+	i += len(delim)
+	for i < len(source) && source[i] != '\r' && source[i] != '\n' {
+		if source[i] != ' ' && source[i] != '\t' {
+			return false
+		}
+		i++
+	}
+	return true
+}
+
+// isHeredocWordByte reports characters valid inside a shell heredoc delimiter
+// token. '=' is excluded so '<<EOF=...' differing is not misread as a match.
+func isHeredocWordByte(c byte) bool {
+	return isIdentifierByte(c) || isDigit(c) || c == '-' || c == '.'
+}
+
 func isWhitespace(c byte) bool { return c == ' ' || c == '\t' || c == '\f' || c == '\v' }
 func isIdentifierByte(c byte) bool {
 	return c == '_' || c == '$' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'

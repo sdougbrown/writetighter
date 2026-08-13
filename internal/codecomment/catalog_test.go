@@ -382,6 +382,7 @@ func TestLanguageDetection(t *testing.T) {
 		ok   bool
 	}{
 		{"file.go", Go, true}, {"file.tsx", TypeScript, true}, {"file.js", TypeScript, true}, {"file.rs", Rust, true}, {"file.py", Python, true}, {"file.txt", "", false},
+		{"file.sh", Shell, true}, {"file.bash", Shell, true}, {"file.zsh", Shell, true}, {"file.ksh", Shell, true}, {"file.conf", "", false},
 	} {
 		got, ok := DetectLanguage(test.name)
 		if got != test.want || ok != test.ok {
@@ -417,4 +418,56 @@ func equalStrings(a, b []string) bool {
 		}
 	}
 	return true
+}
+
+func TestExtractShellSkipsQuotesHeredocsAndHereStrings(t *testing.T) {
+	source := []byte("#!/usr/bin/env bash\n" +
+		"echo \"# not a comment '{}`\" '# also not' ${VAR#pattern} $#\n" +
+		"echo foo#bar # a real trailing comment\n" +
+		"# full line comment\n" +
+		"cat <<'EOF'\n# not a comment (heredoc body)\nEOF\n" +
+		"read x <<<\"$out\"\n" +
+		"# after here-string\n")
+	catalog, err := Extract("sample.sh", Shell, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := commentTexts(catalog), []string{"# a real trailing comment", "# full line comment", "# after here-string"}; !equalStrings(got, want) {
+		t.Fatalf("comments = %#v, want %#v", got, want)
+	}
+}
+
+func TestExtractShellHeredocForms(t *testing.T) {
+	source := []byte("cat <<PLAIN\nbody # not comment\nPLAIN\n" +
+		"cat <<'QUOTED'\nbody # not comment\nQUOTED\n" +
+		"cat <<\\ESC\nbody # not comment\nESC\n" +
+		"cat <<-TABBED\n\tbody # not comment\n   TABBED\n")
+	catalog, err := Extract("sample.sh", Shell, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := commentTexts(catalog); len(got) != 0 {
+		t.Fatalf("heredoc bodies leaked as comments: %#v", got)
+	}
+}
+
+func TestExtractShellRejectsUnterminatedLiterals(t *testing.T) {
+	for _, bad := range [][]byte{
+		[]byte("echo \"unterminated"),
+		[]byte("echo 'unterminated"),
+		[]byte("cat <<EOF\nbody"),
+		[]byte("cat <<\"EOF\""),
+	} {
+		if _, err := Extract("bad.sh", Shell, bad); err == nil {
+			t.Fatalf("unterminated shell literal accepted: %q", bad)
+		}
+	}
+	// A well-formed multi-line single-quote idiom ('foo'\'' bar) is accepted.
+	catalog, err := Extract("sample.sh", Shell, []byte("cmd='foo '\\''\nbody\n'\\'' /input'\n# real\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := commentTexts(catalog); !equalStrings(got, []string{"# real"}) {
+		t.Fatalf("comments = %#v", got)
+	}
 }

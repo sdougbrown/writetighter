@@ -161,7 +161,7 @@ For Claude Code and Codex, a packaged plugin wraps this workflow as an installab
 
 `revise` runs independently of `lint` findings because concise text can still omit the subject, transformation, or effect while satisfying deterministic thresholds.
 
-For `revise --kind code-comment`, explicit Go, TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`), Rust, Python, and `.pyi` files use lexer-owned comment IDs. The complete file is read-only model context; only cataloged comments can become findings, and source text and ranges in the report always come from that catalog. The path sends one whole-file request and rejects unsafe, low-confidence suggestions. `--stdin`, `--text`, and unsupported extensions retain the prose-style code-comment path. Code-aware file review currently rejects `--reference` rather than silently omitting that context.
+For `revise --kind code-comment`, explicit Go, TypeScript/JavaScript (`.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`), Rust, Python, and `.pyi` files, plus shell scripts (`.sh`, `.bash`, `.zsh`, `.ksh`), use lexer-owned comment IDs. The complete file is read-only model context; only cataloged comments can become findings, and source text and ranges in the report always come from that catalog. The path sends one whole-file request and rejects unsafe, low-confidence suggestions. `--stdin`, `--text`, and unsupported extensions retain the prose-style code-comment path. Code-aware file review currently rejects `--reference` rather than silently omitting that context.
 
 **Output:** A structured JSON response containing revision suggestions, each with:
 - top-level `sources`: every document selected, including documents with no suggestions
