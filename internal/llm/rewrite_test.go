@@ -20,7 +20,7 @@ func TestBuildRewritePromptContainsKindDirections(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sys, user := BuildRewritePrompt(doc, nil, nil, nil)
+	sys, user, _ := BuildRewritePrompt(doc, nil, nil, nil)
 	if !strings.Contains(sys, "procedure") {
 		t.Fatal("expected kind in system prompt")
 	}
@@ -40,7 +40,7 @@ func TestBuildRewritePromptDoesNotAskForClarifications(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sys, _ := BuildRewritePrompt(doc, nil, nil, nil)
+	sys, _, _ := BuildRewritePrompt(doc, nil, nil, nil)
 	if !strings.Contains(sys, "preserve it as-is") {
 		t.Fatal("expected best-effort 'preserve as-is' directive")
 	}
@@ -57,7 +57,7 @@ func TestBuildRewritePromptIncludesLintFindings(t *testing.T) {
 	findings := []report.Finding{
 		{RuleID: "CORE.SENTENCE_LENGTH", Message: "sentence too long", Range: &report.FindingRange{StartByte: 0, EndByte: 10}},
 	}
-	sys, _ := BuildRewritePrompt(doc, nil, findings, nil)
+	sys, _, _ := BuildRewritePrompt(doc, nil, findings, nil)
 	if !strings.Contains(sys, "lint findings for context") {
 		t.Fatal("expected lint findings in system prompt")
 	}
@@ -74,7 +74,7 @@ func TestBuildRewritePromptIncludesGlossaryTerms(t *testing.T) {
 	terms := []config.TermEntry{
 		{Term: "WidgetProcessor", Definition: "A service that processes widgets."},
 	}
-	sys, _ := BuildRewritePrompt(doc, nil, nil, terms)
+	sys, _, _ := BuildRewritePrompt(doc, nil, nil, terms)
 	if !strings.Contains(sys, "project glossary") {
 		t.Fatal("expected glossary section")
 	}

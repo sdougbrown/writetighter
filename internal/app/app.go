@@ -739,19 +739,20 @@ func (a *App) RunRewrite(params RewriteParams) error {
 		}
 
 		var formatted string
+		var renderErr error
 		switch params.Format {
 		case "json":
-			formatted, err = report.RenderRewriteJSON(resp)
+			formatted, renderErr = report.RenderRewriteJSON(resp)
 		case "human":
-			formatted, err = report.RenderRewriteHuman(resp)
+			formatted, renderErr = report.RenderRewriteHuman(resp)
 		default: // "text"
 			formatted = result.Text
 			if !strings.HasSuffix(formatted, "\n") {
 				formatted += "\n"
 			}
 		}
-		if err != nil {
-			return err
+		if renderErr != nil {
+			return renderErr
 		}
 		_, _ = fmt.Fprint(os.Stdout, formatted)
 	}

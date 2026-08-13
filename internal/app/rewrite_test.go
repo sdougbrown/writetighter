@@ -1,7 +1,6 @@
 package app
 
 import (
-	"bytes"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -371,6 +370,3 @@ func TestRunRewritePassesLintFindingsAsContext(t *testing.T) {
 
 // strPtr returns a pointer to s. Used for *string params.
 func strPtr(s string) *string { return &s }
-
-// silence unused import warning for bytes when captureStdout is used in other files.
-var _ = bytes.NewReader

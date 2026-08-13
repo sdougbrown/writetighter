@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"unicode"
 
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/document"
@@ -30,7 +31,7 @@ var ErrRewriteEmpty = errors.New("rewrite produced empty output")
 // instruction to "produce the rewritten passage" instead of "return structured
 // findings," and replaces the clarification-asking behavior with a
 // best-effort "preserve ambiguous sections as-is" directive.
-func BuildRewritePrompt(doc *document.Document, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry) (systemPrompt, userContent string) {
+func BuildRewritePrompt(doc *document.Document, res *profile.Resolution, findings []report.Finding, terms []config.TermEntry) (systemPrompt, userContent string, err error) {
 	var b strings.Builder
 
 	// Safety preamble.
@@ -41,7 +42,11 @@ func BuildRewritePrompt(doc *document.Document, res *profile.Resolution, finding
 	// Kind-specific objective (same as revise).
 	rubric, err := guidance.ForKind(doc.Kind)
 	if err != nil {
-		rubric, _ = guidance.ForKind(guidance.KindDescription)
+		fallbackRubric, fallbackErr := guidance.ForKind(guidance.KindDescription)
+		if fallbackErr != nil {
+			return "", "", fmt.Errorf("guidance unavailable: %w", fallbackErr)
+		}
+		rubric = fallbackRubric
 	}
 	fmt.Fprintf(&b, "\nPrimary document-kind objective (%s):\n", rubric.Kind)
 	for _, direction := range rubric.KindDirections {
@@ -157,7 +162,7 @@ func BuildRewritePrompt(doc *document.Document, res *profile.Resolution, finding
 	ub.WriteString("</rewrite-text>")
 	userContent = ub.String()
 
-	return systemPrompt, userContent
+	return systemPrompt, userContent, nil
 }
 
 // Rewrite calls the model with the full passage and returns the rewritten text.
@@ -171,7 +176,10 @@ func Rewrite(ctx context.Context, cfg Config, doc *document.Document, res *profi
 		return nil, err
 	}
 
-	systemPrompt, userContent := BuildRewritePrompt(doc, res, findings, terms)
+	systemPrompt, userContent, perr := BuildRewritePrompt(doc, res, findings, terms)
+	if perr != nil {
+		return nil, fmt.Errorf("building rewrite prompt: %w", perr)
+	}
 
 	// Rewrite does not use structured output — the model returns plain text.
 	// Deliberately leave ResponseFormat nil regardless of the configured
@@ -195,6 +203,9 @@ func Rewrite(ctx context.Context, cfg Config, doc *document.Document, res *profi
 	if rewritten == "" {
 		return nil, ErrRewriteEmpty
 	}
+	if len(rewritten) > MaxOutputChars {
+		return nil, fmt.Errorf("%w: rewrite output too large", ErrInvalidModelResponse)
+	}
 
 	// Strip Markdown fences if the model wrapped the output despite instructions.
 	unwrapped := unwrapJSONFence([]byte(rewritten))
@@ -202,6 +213,10 @@ func Rewrite(ctx context.Context, cfg Config, doc *document.Document, res *profi
 	if rewritten == "" {
 		return nil, ErrRewriteEmpty
 	}
+
+	// Sanitize control characters (except \n and \t) to prevent terminal
+	// escape-sequence injection when output is printed to stdout.
+	rewritten = sanitizeControlChars(rewritten)
 
 	// Validate protected content: every protected token in the original must
 	// survive in the rewrite. If validation fails, return the original.
@@ -216,4 +231,20 @@ func Rewrite(ctx context.Context, cfg Config, doc *document.Document, res *profi
 	}
 
 	return &RewriteResult{Text: rewritten, Discarded: false, ModelUsed: cfg.Model}, nil
+}
+
+// sanitizeControlChars strips C0 and C1 control characters (except \n and \t)
+// from model output to prevent terminal escape-sequence injection when the
+// rewritten text is printed to stdout. The JSON output path is safe via
+// json.MarshalIndent; this protects the text and human output paths.
+func sanitizeControlChars(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\t' {
+			return r
+		}
+		if unicode.IsControl(r) {
+			return -1
+		}
+		return r
+	}, s)
 }
