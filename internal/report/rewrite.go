@@ -21,6 +21,7 @@ type RewriteResponse struct {
 	OutputBytes    int    `json:"output_bytes"`
 	RewrittenText  string `json:"rewritten_text"`
 	Discarded      bool   `json:"discarded"`
+	DiscardReason  string `json:"discard_reason,omitempty"`
 	LintFindings   int    `json:"lint_findings"`
 }
 
@@ -46,7 +47,12 @@ func RenderRewriteHuman(r *RewriteResponse) (string, error) {
 	fmt.Fprintf(&b, "source: %s\n", r.SourcePath)
 	fmt.Fprintf(&b, "input: %d bytes → output: %d bytes\n", r.InputBytes, r.OutputBytes)
 	if r.Discarded {
-		fmt.Fprintf(&b, "discarded: rewrite failed protected-content validation; original returned\n")
+		switch r.DiscardReason {
+		case "injected_content":
+			fmt.Fprintf(&b, "discarded: rewrite introduced new security-relevant content (URL, email, or IP) not present in the source; original returned\n")
+		default:
+			fmt.Fprintf(&b, "discarded: rewrite failed protected-content validation; original returned\n")
+		}
 	}
 	if r.LintFindings > 0 {
 		fmt.Fprintf(&b, "lint findings passed as context: %d\n", r.LintFindings)

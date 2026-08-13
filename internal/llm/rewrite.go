@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 	"unicode"
@@ -17,9 +18,10 @@ import (
 
 // RewriteResult is the output of a whole-passage rewrite.
 type RewriteResult struct {
-	Text      string // the rewritten text, or the original on failure
-	Discarded bool   // true if the model output failed protected-content validation
-	ModelUsed string // the model that processed the request
+	Text          string // the rewritten text, or the original on failure
+	Discarded     bool   // true if the model output failed validation
+	DiscardReason string // when Discarded, why: "protected_content" or "injected_content"
+	ModelUsed     string // the model that processed the request
 }
 
 // ErrRewriteEmpty indicates the model returned an empty response.
@@ -222,12 +224,20 @@ func Rewrite(ctx context.Context, cfg Config, doc *document.Document, res *profi
 	// survive in the rewrite. If validation fails, return the original.
 	if doc.Format == document.FormatHTML {
 		if !preservesProtectedText(doc.Content, rewritten, terms) {
-			return &RewriteResult{Text: doc.Content, Discarded: true, ModelUsed: cfg.Model}, nil
+			return &RewriteResult{Text: doc.Content, Discarded: true, DiscardReason: "protected_content", ModelUsed: cfg.Model}, nil
 		}
 	} else {
 		if !preservesProtectedContent(doc, 0, len(doc.Content), rewritten, terms) {
-			return &RewriteResult{Text: doc.Content, Discarded: true, ModelUsed: cfg.Model}, nil
+			return &RewriteResult{Text: doc.Content, Discarded: true, DiscardReason: "protected_content", ModelUsed: cfg.Model}, nil
 		}
+	}
+
+	// Bidirectional check: reject rewrites that introduce new URLs, email
+	// addresses, or IP addresses not present in the source. This catches
+	// prompt-injected content that passes the loss-only protected-content
+	// check because it retains all original tokens while adding new ones.
+	if hasInjectedTokens(doc.Content, rewritten) {
+		return &RewriteResult{Text: doc.Content, Discarded: true, DiscardReason: "injected_content", ModelUsed: cfg.Model}, nil
 	}
 
 	return &RewriteResult{Text: rewritten, Discarded: false, ModelUsed: cfg.Model}, nil
@@ -247,4 +257,36 @@ func sanitizeControlChars(s string) string {
 		}
 		return r
 	}, s)
+}
+
+// injectedTokenPattern matches security-relevant tokens that should not
+// appear in a rewrite unless they were present in the source: URLs, email
+// addresses, and IP addresses. These are the most likely vectors for
+// prompt-injected content to introduce malicious links or endpoints into
+// non-interactive pipeline output.
+var injectedTokenPattern = regexp.MustCompile(`https?://[^\s<>"']+|[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}|\b(?:\d{1,3}\.){3}\d{1,3}\b`)
+
+// hasInjectedTokens reports whether the rewrite contains URLs, email
+// addresses, or IP addresses that do not appear in the source. This is a
+// bidirectional complement to preservesProtectedContent: that function
+// checks source tokens survive; this checks no new security-relevant
+// tokens were introduced.
+func hasInjectedTokens(source, rewrite string) bool {
+	sourceTokens := make(map[string]struct{})
+	for _, token := range injectedTokenPattern.FindAllString(source, -1) {
+		token = strings.TrimRight(token, ".,;:!?)])}")
+		if token != "" {
+			sourceTokens[token] = struct{}{}
+		}
+	}
+	for _, token := range injectedTokenPattern.FindAllString(rewrite, -1) {
+		token = strings.TrimRight(token, ".,;:!?)])}")
+		if token == "" {
+			continue
+		}
+		if _, ok := sourceTokens[token]; !ok {
+			return true
+		}
+	}
+	return false
 }

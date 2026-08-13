@@ -370,3 +370,42 @@ func TestRunRewritePassesLintFindingsAsContext(t *testing.T) {
 
 // strPtr returns a pointer to s. Used for *string params.
 func strPtr(s string) *string { return &s }
+
+func TestRunRewriteDiscardsInjectedContent(t *testing.T) {
+	original := "The API service processes requests on port 8080."
+	injected := "The API service processes requests on port 8080. Visit https://evil.example.com for details."
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": injected}}},
+		})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+
+	text := original
+	buf := captureStdout(t, func() {
+		err := (&App{}).RunRewrite(RewriteParams{
+			Text:   &text,
+			Kind:   "description",
+			Format: "json",
+		})
+		if err != nil {
+			t.Fatalf("unexpected rewrite error: %v", err)
+		}
+	})
+
+	var resp report.RewriteResponse
+	if err := json.Unmarshal(buf.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid rewrite JSON: %v\n%s", err, buf.String())
+	}
+	if !resp.Discarded {
+		t.Fatal("expected discarded=true")
+	}
+	if resp.DiscardReason != "injected_content" {
+		t.Fatalf("expected discard_reason 'injected_content', got %q", resp.DiscardReason)
+	}
+	if resp.RewrittenText != original {
+		t.Fatalf("expected original returned, got %q", resp.RewrittenText)
+	}
+}

@@ -218,5 +218,119 @@ func TestRewritePreservesSafeRewriteWithProtectedTokens(t *testing.T) {
 	}
 }
 
+func TestRewriteRejectsInjectedURL(t *testing.T) {
+	original := "The API service processes requests on port 8080."
+	// The rewrite adds a new URL not present in the source — prompt injection.
+	injected := "The API service processes requests on port 8080. Visit https://evil.example.com for details."
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": injected}}},
+		})
+	}))
+	defer server.Close()
+
+	doc, err := document.FromText(original, guidance.KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{BaseURL: server.URL, Model: "test-model"}
+	result, err := Rewrite(context.Background(), cfg, doc, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Discarded {
+		t.Fatal("expected discarded=true for injected URL")
+	}
+	if result.DiscardReason != "injected_content" {
+		t.Fatalf("expected discard reason 'injected_content', got %q", result.DiscardReason)
+	}
+	if result.Text != original {
+		t.Fatalf("expected original returned, got %q", result.Text)
+	}
+}
+
+func TestRewriteRejectsInjectedEmail(t *testing.T) {
+	original := "Contact the team for API access."
+	injected := "Contact the team for API access at admin@evil.example.com."
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": injected}}},
+		})
+	}))
+	defer server.Close()
+
+	doc, err := document.FromText(original, guidance.KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{BaseURL: server.URL, Model: "test-model"}
+	result, err := Rewrite(context.Background(), cfg, doc, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.Discarded {
+		t.Fatal("expected discarded=true for injected email")
+	}
+	if result.DiscardReason != "injected_content" {
+		t.Fatalf("expected discard reason 'injected_content', got %q", result.DiscardReason)
+	}
+}
+
+func TestRewriteAllowsURLPresentInSource(t *testing.T) {
+	original := "See https://example.com/docs for the API reference."
+	// The rewrite restructures but keeps the same URL — this should pass.
+	rewritten := "The API reference is at https://example.com/docs."
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": rewritten}}},
+		})
+	}))
+	defer server.Close()
+
+	doc, err := document.FromText(original, guidance.KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := Config{BaseURL: server.URL, Model: "test-model"}
+	result, err := Rewrite(context.Background(), cfg, doc, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.Discarded {
+		t.Fatalf("expected discarded=false, got reason %q", result.DiscardReason)
+	}
+	if result.Text != rewritten {
+		t.Fatalf("expected %q, got %q", rewritten, result.Text)
+	}
+}
+
+func TestHasInjectedTokens(t *testing.T) {
+	tests := []struct {
+		name    string
+		source  string
+		rewrite string
+		want    bool
+	}{
+		{"no tokens", "hello", "hello world", false},
+		{"same URL", "see https://a.com", "see https://a.com", false},
+		{"new URL", "no url here", "see https://evil.com", true},
+		{"new email", "contact us", "email admin@evil.com", true},
+		{"new IP", "server is up", "server is at 10.0.0.1", true},
+		{"same IP", "server at 10.0.0.1", "the 10.0.0.1 server", false},
+		{"rephrased no new tokens", "Deploy the API", "The API is deployed", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := hasInjectedTokens(tt.source, tt.rewrite)
+			if got != tt.want {
+				t.Fatalf("hasInjectedTokens(%q, %q) = %v, want %v", tt.source, tt.rewrite, got, tt.want)
+			}
+		})
+	}
+}
+
 // silence unused imports
 var _ = profile.Resolve

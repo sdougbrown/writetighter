@@ -732,6 +732,7 @@ func (a *App) RunRewrite(params RewriteParams) error {
 			OutputBytes:    len(result.Text),
 			RewrittenText:  result.Text,
 			Discarded:      result.Discarded,
+			DiscardReason:  result.DiscardReason,
 			LintFindings:   len(docFindings),
 		}
 		if result.Discarded {
