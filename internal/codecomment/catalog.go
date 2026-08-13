@@ -21,6 +21,7 @@ const (
 	TypeScript Language = "ts"
 	Rust       Language = "rust"
 	Python     Language = "py"
+	Shell      Language = "sh"
 )
 
 // CommentForm identifies the lexical delimiter family of a comment unit.
@@ -66,6 +67,8 @@ func DetectLanguage(filename string) (Language, bool) {
 		return Rust, true
 	case ".py", ".pyi":
 		return Python, true
+	case ".sh", ".bash", ".zsh", ".ksh":
+		return Shell, true
 	default:
 		return "", false
 	}
@@ -126,9 +129,31 @@ func ParseLanguage(value string) (Language, error) {
 		return Rust, nil
 	case "py", "python":
 		return Python, nil
+	case "sh", "bash", "shell", "zsh", "ksh":
+		return Shell, nil
 	default:
 		return "", fmt.Errorf("unsupported comment language %q", value)
 	}
+}
+
+// commentScanner lexes source for comment tokens. Registering a new language
+// requires providing a scanner that returns commentToken spans.
+type commentScanner func(source []byte) ([]commentToken, error)
+
+// scannerRegistry maps each supported language to a factory that builds its
+// scanner. The factory receives the source filename so language scanners can
+// specialize per file (TypeScript enables JSX interpretation only for .tsx/.jsx).
+// Adding a language here plus its DetectLanguage/ParseLanguage entries is all
+// that is needed to extend comment cataloguing.
+var scannerRegistry = map[Language]func(filename string) commentScanner{
+	Go: func(string) commentScanner { return scanGo },
+	TypeScript: func(filename string) commentScanner {
+		jsx := jsxEnabled(filename)
+		return func(source []byte) ([]commentToken, error) { return scanTypeScript(source, jsx) }
+	},
+	Rust:   func(string) commentScanner { return scanRust },
+	Python: func(string) commentScanner { return scanPython },
+	Shell:  func(string) commentScanner { return scanShell },
 }
 
 // Extract produces a catalog for source. filename is metadata only, except
@@ -137,22 +162,11 @@ func Extract(filename string, language Language, source []byte) (Catalog, error)
 	if !utf8.Valid(source) {
 		return Catalog{}, fmt.Errorf("%s: source is not valid UTF-8", filename)
 	}
-	var (
-		tokens []commentToken
-		err    error
-	)
-	switch language {
-	case Go:
-		tokens, err = scanGo(source)
-	case TypeScript:
-		tokens, err = scanTypeScript(source, jsxEnabled(filename))
-	case Rust:
-		tokens, err = scanRust(source)
-	case Python:
-		tokens, err = scanPython(source)
-	default:
+	newScanner, ok := scannerRegistry[language]
+	if !ok {
 		return Catalog{}, fmt.Errorf("%s: unsupported comment language %q", filename, language)
 	}
+	tokens, err := newScanner(filename)(source)
 	if err != nil {
 		return Catalog{}, fmt.Errorf("%s: comment extraction: %w", filename, err)
 	}

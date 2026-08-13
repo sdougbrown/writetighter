@@ -23,7 +23,7 @@ func run(args []string) int {
 		return 2
 	}
 	if flags.NArg() > 1 {
-		fmt.Fprintln(os.Stderr, "usage: comment-catalog [--language go|ts|rust|py] [file]")
+		fmt.Fprintln(os.Stderr, "usage: comment-catalog [--language go|ts|rust|py|sh] [file]")
 		return 2
 	}
 
