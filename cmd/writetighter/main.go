@@ -64,6 +64,8 @@ func run(args []string) int {
 		return runLint(args[1:])
 	case "revise":
 		return runRevise(args[1:])
+	case "rewrite":
+		return runRewrite(args[1:])
 	case "prompt":
 		return runPrompt(args[1:])
 	case "config":
@@ -213,6 +215,73 @@ func runRevise(args []string) int {
 	if err != nil {
 		// Runtime model/response failures => exit 3; configuration/input errors => exit 2.
 		if errors.Is(err, app.ErrReviseFailed) {
+			usageErr(err.Error())
+			return 3
+		}
+		usageErr(err.Error())
+		return 2
+	}
+	return 0
+}
+
+// runRewrite is the whole-passage rewrite command.
+func runRewrite(args []string) int {
+	if wantsHelp(args) {
+		printHelp("rewrite")
+		return 0
+	}
+	fs := flag.NewFlagSet("rewrite", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	stdin := fs.Bool("stdin", false, "")
+	var text optionalStringFlag
+	fs.Var(&text, "text", "")
+	kind := fs.String("kind", "description", "")
+	profile := fs.String("profile", "", "")
+	configPath := fs.String("config", "", "")
+	format := fs.String("format", "text", "")
+	model := fs.String("model", "", "Override the configured model for this run")
+	fs.Usage = func() { printHelp("rewrite") }
+	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
+		return 2
+	}
+	params := app.RewriteParams{
+		Paths:      fs.Args(),
+		Stdin:      *stdin,
+		Kind:       *kind,
+		Profile:    *profile,
+		ConfigPath: *configPath,
+		Format:     *format,
+		Model:      *model,
+	}
+	if text.set {
+		params.Text = &text.value
+	}
+	if (params.Stdin && (len(params.Paths) > 0 || params.Text != nil)) || (params.Text != nil && len(params.Paths) > 0) {
+		fmt.Fprintln(os.Stderr, "paths, --stdin, and --text are mutually exclusive")
+		fmt.Fprintln(os.Stderr, "  Run `writetighter rewrite --help` for usage.")
+		return 2
+	}
+	if !params.Stdin && params.Text == nil && len(params.Paths) == 0 {
+		fmt.Fprintln(os.Stderr, "no input specified")
+		fmt.Fprintln(os.Stderr, "  Run `writetighter rewrite --help` for usage.")
+		return 2
+	}
+	err := app.New().RunRewrite(params)
+	if errors.Is(err, app.ErrLLMConfigRequired) {
+		if !params.Stdin && stdinIsTerminal() {
+			fmt.Fprintf(os.Stderr, "%v\nStarting interactive configuration.\n", err)
+			if code := runConfig(nil); code != 0 {
+				return code
+			}
+			err = app.New().RunRewrite(params)
+		} else {
+			fmt.Fprintln(os.Stderr, err.Error())
+			fmt.Fprintln(os.Stderr, "  Run `writetighter config` to configure, then retry.")
+			return 2
+		}
+	}
+	if err != nil {
+		if errors.Is(err, app.ErrRewriteFailed) {
 			usageErr(err.Error())
 			return 3
 		}
@@ -575,6 +644,7 @@ USAGE
 COMMANDS
   lint      Run deterministic profile rules (no model access)
   revise    Run contextual model-based revision (requires model config)
+  rewrite   Run whole-passage contextual rewrite (requires model config)
   prompt    Export core and kind-specific revision guidance
   config    Show model configuration or run the setup wizard
   explain   Explain a lint rule
@@ -664,6 +734,47 @@ EXAMPLES
   writetighter revise --stdin < README.md
   writetighter revise docs/*.md --format human
   writetighter revise docs/*.md --reference style-guide.md
+`
+
+const rewriteHelp = `writetighter rewrite — run whole-passage contextual rewrite
+
+Sends the full input as one model request and returns the complete rewritten
+passage, not surgical findings. Deterministic lint runs first and its findings
+are passed to the model as context. If the model call fails, the response is
+empty, or protected-content validation fails, the original text is returned.
+
+Unlike "revise", which returns individual suggestions for interactive review,
+"rewrite" produces one coherent tightened passage for non-interactive contexts
+(hooks, CI, piping into other tools). It never asks clarification questions —
+ambiguous sections are preserved as-is rather than guessed.
+
+USAGE
+  writetighter rewrite [flags] [paths...]
+
+FLAGS
+  --stdin              Read input from stdin
+  --text <string>     Rewrite the provided text directly
+  --kind <kind>       Document kind (default: description)
+                      Choices: description, procedure, pr, code-comment, reference,
+                      decision, incident, agent-instruction, status-update
+  --profile <spec>    Profile id@version (default: discovered or user config)
+  --config <path>     Path to .writetighter.toml (default: auto-discovered)
+  --format <format>   Output format: text, json, human (default: text)
+  --model <id>        Override the configured model for this run
+
+INPUT
+  Provide input via file paths, --stdin, or --text (mutually exclusive).
+
+CONFIGURATION
+  Rewrite requires [llm] model settings. Run "writetighter config" to configure.
+  If config is missing and stdin is a terminal, interactive setup is offered
+  automatically; otherwise the command exits with a hint.
+
+EXAMPLES
+  writetighter rewrite --text "Short text." --kind procedure
+  writetighter rewrite --stdin < README.md
+  printf '%s' "$MESSAGE" | writetighter rewrite --stdin --kind description
+  writetighter rewrite docs/intro.md --format json
 `
 
 const promptHelp = `writetighter prompt — export revision guidance
@@ -765,6 +876,7 @@ var helpTexts = map[string]string{
 	"":        mainHelp,
 	"lint":    lintHelp,
 	"revise":  reviseHelp,
+	"rewrite": rewriteHelp,
 	"prompt":  promptHelp,
 	"config":  configHelp,
 	"explain": explainHelp,

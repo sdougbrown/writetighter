@@ -35,6 +35,7 @@ var (
 	ErrFailThreshold     = errors.New("fail threshold reached")
 	ErrLLMConfigRequired = errors.New("model configuration required")
 	ErrReviseFailed      = errors.New("revise failed")
+	ErrRewriteFailed     = errors.New("rewrite failed")
 )
 
 type LintParams struct {
@@ -79,6 +80,22 @@ type ReviseParams struct {
 	// a default is used when a context window is known. When no context
 	// window is known, max_tokens is not sent to the API.
 	OutputTokens int
+}
+
+// RewriteParams holds parameters for the `writetighter rewrite` command.
+// Unlike ReviseParams, rewrite sends the full passage as one model request
+// and returns the complete rewritten text, not surgical findings.
+type RewriteParams struct {
+	Paths      []string
+	Stdin      bool
+	Text       *string
+	Kind       string
+	Profile    string
+	ConfigPath string
+	Format     string
+
+	// Model overrides the configured model for this rewrite run.
+	Model string
 }
 
 // PromptParams selects exported revision guidance without model access.
@@ -510,6 +527,237 @@ func (a *App) RunPrompt(params PromptParams) error {
 	}
 	_, err = fmt.Fprint(os.Stdout, b.String())
 	return err
+}
+
+// RunRewrite runs whole-passage contextual rewrite. It sends the full input
+// as one model request and returns the complete rewritten text, not surgical
+// findings. Lint findings are collected first (deterministic, no model) and
+// passed as context to the rewrite. If the model call fails, the response is
+// empty, or protected-content validation fails, the original text is returned.
+func (a *App) RunRewrite(params RewriteParams) error {
+	if params.Kind == "" {
+		params.Kind = "description"
+	}
+	if !validKind(params.Kind) {
+		return fmt.Errorf("invalid document kind %q", params.Kind)
+	}
+	selectedInputs := 0
+	if len(params.Paths) > 0 {
+		selectedInputs++
+	}
+	if params.Stdin {
+		selectedInputs++
+	}
+	if params.Text != nil {
+		selectedInputs++
+	}
+	if selectedInputs == 0 {
+		return fmt.Errorf("no input specified")
+	}
+	if selectedInputs > 1 {
+		return fmt.Errorf("paths, --stdin, and --text are mutually exclusive")
+	}
+	if params.Format == "" {
+		params.Format = "text" // rewrite defaults to plain text output
+	}
+	if params.Format != "text" && params.Format != "json" && params.Format != "human" {
+		return fmt.Errorf("invalid format %q for rewrite", params.Format)
+	}
+
+	// Load user config (required for model settings).
+	userCfg, err := config.LoadUserConfig()
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("%w: user config could not be loaded", ErrLLMConfigRequired)
+	}
+	if errors.Is(err, os.ErrNotExist) {
+		userCfg = nil
+	}
+
+	// Load project config.
+	var projCfg *config.ProjectConfig
+	if params.ConfigPath != "" {
+		projCfg, err = config.LoadProjectConfig(params.ConfigPath)
+		if err != nil {
+			return err
+		}
+	} else {
+		projCfg, _, err = config.DiscoverProjectConfig()
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+
+	// Merge configs.
+	merged, err := config.MergeConfigs(projCfg, userCfg)
+	if err != nil {
+		return err
+	}
+
+	// Resolve profile.
+	profileSpec := params.Profile
+	if profileSpec == "" && projCfg != nil && projCfg.Profile.ID != "" {
+		profileSpec = projCfg.Profile.ID + "@" + projCfg.Profile.Version
+	}
+	if profileSpec == "" && userCfg != nil && userCfg.Profile.ID != "" {
+		profileSpec = userCfg.Profile.ID + "@" + userCfg.Profile.Version
+	}
+	res, err := profile.Resolve(profileSpec)
+	if err != nil {
+		return err
+	}
+
+	// Extract terms.
+	var terms []config.TermEntry
+	if merged != nil && merged.Project != nil {
+		terms = merged.Project.Terms
+	}
+
+	// Read LLM config from user config.
+	if merged == nil || merged.User == nil || merged.User.LLM.Model == "" {
+		return fmt.Errorf("%w: rewrite requires an [llm] model", ErrLLMConfigRequired)
+	}
+	uc := merged.User.LLM
+
+	llmBaseURL := uc.BaseURL
+	llmModel := uc.Model
+	llmAPIKey := uc.APIKey
+	llmAPIKeyEnv := uc.APIKeyEnv
+	llmTimeout := llm.DefaultTimeout
+	if uc.Timeout != "" {
+		d, e := time.ParseDuration(uc.Timeout)
+		if e != nil {
+			return fmt.Errorf("%w: invalid llm timeout: %v", ErrLLMConfigRequired, e)
+		}
+		llmTimeout = d
+	}
+
+	// Apply runtime model override.
+	if params.Model != "" {
+		llmModel = params.Model
+	}
+
+	llmProvider := uc.Provider
+	if llmProvider == "" {
+		llmProvider = "openai-compatible"
+	}
+	if llmProvider != "openai-compatible" {
+		return fmt.Errorf("%w: unsupported llm provider %q", ErrLLMConfigRequired, llmProvider)
+	}
+	if llmModel == "" || llmBaseURL == "" {
+		return fmt.Errorf("%w: rewrite requires llm model and base_url", ErrLLMConfigRequired)
+	}
+	if llmAPIKey == "" && llmAPIKeyEnv != "" && os.Getenv(llmAPIKeyEnv) == "" {
+		return fmt.Errorf("%w: api_key_env %q is configured but the environment variable is unset", ErrLLMConfigRequired, llmAPIKeyEnv)
+	}
+
+	llmCfg := llm.Config{
+		BaseURL:   llmBaseURL,
+		Model:     llmModel,
+		APIKey:    llmAPIKey,
+		APIKeyEnv: llmAPIKeyEnv,
+		Timeout:   llmTimeout,
+		// ResponseMode is intentionally not set — rewrite uses plain text
+		// output, not structured JSON. The model returns the rewritten
+		// passage as the assistant message content.
+	}
+
+	// Validate LLM config.
+	if _, err := llm.NewClient(llmCfg); err != nil {
+		return fmt.Errorf("%w: %v", ErrLLMConfigRequired, err)
+	}
+
+	// Collect input documents.
+	docs, err := collectInputs(params.Paths, params.Stdin, params.Text, params.Kind)
+	if err != nil {
+		return err
+	}
+
+	for _, doc := range docs {
+		if params.Kind != "" {
+			doc.Kind = params.Kind
+		}
+	}
+
+	// Validate terms against profile.
+	if len(terms) > 0 && res != nil && res.Dict != nil {
+		if verr := profile.ValidateAgainstProfile(terms, res.Dict); verr != nil {
+			return verr
+		}
+	}
+
+	// Run deterministic lint first — findings are passed to the model as context.
+	enabled := check.Enabled(res)
+	findings := []report.Finding{}
+	for _, doc := range docs {
+		ctx := &check.RunContext{Document: doc, Profile: res, Terms: terms}
+		for _, c := range enabled {
+			more, err := c.Run(ctx)
+			if err != nil {
+				return err
+			}
+			findings = append(findings, more...)
+		}
+	}
+
+	// Process each document: one rewrite request per document.
+	for _, doc := range docs {
+		docFindings := make([]report.Finding, 0)
+		for _, f := range findings {
+			if f.Path == nil || *f.Path == doc.Source {
+				docFindings = append(docFindings, f)
+			}
+		}
+
+		result, rerr := llm.Rewrite(context.Background(), llmCfg, doc, res, docFindings, terms)
+		if rerr != nil {
+			// Model failure — return the original text and report the error.
+			if errors.Is(rerr, llm.ErrRewriteEmpty) {
+				// Empty output is a soft failure: return the original.
+				result = &llm.RewriteResult{Text: doc.Content, Discarded: false, ModelUsed: llmModel}
+			} else {
+				return fmt.Errorf("%w: %s: %v", ErrRewriteFailed, doc.Source, rerr)
+			}
+		}
+
+		resp := &report.RewriteResponse{
+			SchemaVersion:  1,
+			ToolVersion:    Version,
+			Status:         "ok",
+			ProfileID:      string(res.ID),
+			ProfileVersion: string(res.Version),
+			LLMModel:       result.ModelUsed,
+			LLMProvider:    llmProvider,
+			SourcePath:     doc.Source,
+			InputBytes:     len(doc.Content),
+			OutputBytes:    len(result.Text),
+			RewrittenText:  result.Text,
+			Discarded:      result.Discarded,
+			DiscardReason:  result.DiscardReason,
+			LintFindings:   len(docFindings),
+		}
+		if result.Discarded {
+			resp.Status = "discarded"
+		}
+
+		var formatted string
+		var renderErr error
+		switch params.Format {
+		case "json":
+			formatted, renderErr = report.RenderRewriteJSON(resp)
+		case "human":
+			formatted, renderErr = report.RenderRewriteHuman(resp)
+		default: // "text"
+			formatted = result.Text
+			if !strings.HasSuffix(formatted, "\n") {
+				formatted += "\n"
+			}
+		}
+		if renderErr != nil {
+			return renderErr
+		}
+		_, _ = fmt.Fprint(os.Stdout, formatted)
+	}
+	return nil
 }
 
 // RunRevise runs contextual model revision. It reads LLM config from the
