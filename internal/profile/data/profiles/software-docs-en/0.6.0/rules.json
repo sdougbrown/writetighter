@@ -1,0 +1,168 @@
+{
+  "format_version": 1,
+  "rules": [
+    {
+      "enabled": true,
+      "enforcement": "enforced",
+      "id": "CORE.SENTENCE_LENGTH",
+      "parameters": {
+        "description_max_words": 25,
+        "pr_max_words": 20,
+        "procedure_max_words": 20
+      },
+      "severity": "warning",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.DENSE_PARAGRAPH",
+      "parameters": {
+        "max_sentences": 3,
+        "max_words": 80
+      },
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.NOUN_STACK",
+      "parameters": {
+        "min_stack_length": 3
+      },
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.GERUND_OPENER",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.TERM_DISCOURAGED",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.CONTRACTION",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.BANNED_MODAL",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.LATIN_ABBREV",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.UNEXPANDED_ABBREV",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.TIME_ANCHOR",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.EXCLAMATION",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.ORDINAL_NUMERAL",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.PERCENT_STYLE",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.AMBIGUOUS_DATE",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.HEADING_CASE",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.GERUND_HEADING",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.HEADING_SKIP",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.HEADING_PUNCTUATION",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.SINGLE_ITEM_LIST",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
+      "id": "CORE.SEQUENTIAL_BULLET",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": false,
+      "enforcement": "candidate",
+      "id": "CORE.CORPUS_NOVELTY",
+      "parameters": {
+        "min_repetition": 2
+      },
+      "severity": "info",
+      "version": 1
+    }
+  ],
+  "unknown_term_policy": "candidate"
+}

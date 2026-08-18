@@ -82,3 +82,46 @@ func TestInvalidKind(t *testing.T) {
 		t.Fatal("unsupported kind returned guidance")
 	}
 }
+
+func TestCoreDirectionsCoverStyleGuidePractices(t *testing.T) {
+	set, err := ForKind(KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, direction := range set.CoreDirections {
+		joined += direction + "\n"
+	}
+	for _, phrase := range []string{
+		"sentence case",
+		"bare infinitive",
+		"numbered lists for sequences",
+		"ordinal numbers as words",
+		"percent sign",
+		"second person",
+		"exclamation points",
+	} {
+		if !strings.Contains(joined, phrase) {
+			t.Fatalf("core directions missing %q: %s", phrase, joined)
+		}
+	}
+}
+
+func TestTimelessProsePrincipleExists(t *testing.T) {
+	set, err := ForKind(KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range set.Principles {
+		if p.ID == "CORE.TIMELESS_PROSE" {
+			found = true
+			if p.Direction == "" {
+				t.Fatal("TIMELESS_PROSE has empty direction")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("CORE.TIMELESS_PROSE principle missing")
+	}
+}

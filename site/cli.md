@@ -96,7 +96,7 @@ Optional `[llm] code_model` in the config file specifies a different model for c
 
 ```sh
 writetighter profile list
-writetighter profile verify software-docs-en@0.5.0
+writetighter profile verify software-docs-en@0.6.0
 writetighter profile install ./path/to/bundle
 ```
 

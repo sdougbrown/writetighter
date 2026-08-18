@@ -1,6 +1,6 @@
 # Data provenance and rights
 
-Last updated: 2026-07-19
+Last updated: 2026-08-18
 
 This file records every data source that informed the `software-docs-en` profile dictionary. Each row describes the exact revision/release, source URL, license, which fields were copied or derived, any attribution requirement, and the current redistribution decision.
 
@@ -13,6 +13,7 @@ This file records every data source that informed the `software-docs-en` profile
 | 3 | Ruby on Rails documentation corpus | v7.1 | https://github.com/rails/rails | MIT | Derived word frequency counts from processed sentences | Not required | Not reviewed; all entries are `observed` only |
 | 4 | Stripe documentation corpus | Current as of 2026-Q1 | https://docs.stripe.com | Proprietary/unknown | Derived word frequency counts from processed sentences | TBD | Not cleared. Exclude from any public release unless separately cleared. |
 | 5 | OpenSTE | vX.Y | https://github.com/OpenSTE/open-ste | MIT | Used during comparison and construction of the dictionary | Recommended | Not reviewed; comparison-only use |
+| 6 | Google developer documentation style guide | snapshot-2026-08-18 | https://developers.google.com/style | CC-BY-4.0 | Informed the 0.6.0 review: discouraged-term additions (placeholder/filler phrases) and the candidate rules CORE.TIME_ANCHOR, CORE.EXCLAMATION, CORE.ORDINAL_NUMERAL, CORE.PERCENT_STYLE, CORE.AMBIGUOUS_DATE, CORE.HEADING_CASE, CORE.GERUND_HEADING, CORE.HEADING_SKIP, CORE.HEADING_PUNCTUATION, CORE.SINGLE_ITEM_LIST, CORE.SEQUENTIAL_BULLET. No wording was copied. | Required as CC-BY-4.0 upstream | Not cleared. Rule logic and term entries are original; attribution recommended for any public release. |
 
 ## Conversion gap
 

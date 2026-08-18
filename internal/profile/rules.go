@@ -45,6 +45,17 @@ var knownRuleParams = map[string]map[string]bool{
 	"CORE.BANNED_MODAL":           {},
 	"CORE.LATIN_ABBREV":           {},
 	"CORE.UNEXPANDED_ABBREV":      {},
+	"CORE.TIME_ANCHOR":            {},
+	"CORE.EXCLAMATION":            {},
+	"CORE.ORDINAL_NUMERAL":        {},
+	"CORE.PERCENT_STYLE":          {},
+	"CORE.AMBIGUOUS_DATE":         {},
+	"CORE.HEADING_CASE":           {},
+	"CORE.GERUND_HEADING":         {},
+	"CORE.HEADING_SKIP":           {},
+	"CORE.HEADING_PUNCTUATION":    {},
+	"CORE.SINGLE_ITEM_LIST":       {},
+	"CORE.SEQUENTIAL_BULLET":      {},
 	"CORE.CORPUS_NOVELTY":        {"min_repetition": true},
 }
 
@@ -53,6 +64,9 @@ var knownRules = map[string]bool{
 	"CORE.TERM_CASE": true, "CORE.TERM_UNKNOWN": true, "CORE.TERM_CONSISTENCY": true, "CORE.PROCEDURE_MULTI_ACTION": true,
 	"CORE.NOUN_STACK": true, "CORE.GERUND_OPENER": true,
 	"CORE.CONTRACTION": true, "CORE.BANNED_MODAL": true, "CORE.LATIN_ABBREV": true, "CORE.UNEXPANDED_ABBREV": true,
+	"CORE.TIME_ANCHOR": true, "CORE.EXCLAMATION": true, "CORE.ORDINAL_NUMERAL": true, "CORE.PERCENT_STYLE": true,
+	"CORE.AMBIGUOUS_DATE": true, "CORE.HEADING_CASE": true, "CORE.GERUND_HEADING": true, "CORE.HEADING_SKIP": true,
+	"CORE.HEADING_PUNCTUATION": true, "CORE.SINGLE_ITEM_LIST": true, "CORE.SEQUENTIAL_BULLET": true,
 	"CORE.CORPUS_NOVELTY": true,
 }
 

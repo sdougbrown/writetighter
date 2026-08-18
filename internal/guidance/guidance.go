@@ -42,6 +42,7 @@ var principles = []Principle{
 	{ID: "CORE.CAUSAL_ORDER", Direction: "When the source establishes the relationships, order context or cause before its implication, resulting action or decision, and effect. Preserve every fact."},
 	{ID: "CORE.PLAIN_MECHANISM", Direction: "Replace clever, figurative, or compressed framing with the literal technical mechanism when the source establishes that mechanism. Do not treat individual words as violations."},
 	{ID: "CORE.RELEVANT_DETAIL", Direction: "Use enough detail to transfer mechanical understanding, not the fewest words. Remove repetition or tangents only when no fact or protected technical detail is lost."},
+	{ID: "CORE.TIMELESS_PROSE", Direction: "State the current behavior without time anchors (currently, now, as of this writing) and do not pre-announce planned or future features; document what the product does, not how it has changed or might change."},
 }
 
 var coreDirections = []string{
@@ -52,6 +53,11 @@ var coreDirections = []string{
 	"Propose a rewrite only when the supplied prose or glossary establishes enough meaning to improve it without guessing. Otherwise ask a concrete clarification question.",
 	"Safe rewrite directions include reordering established statements into a causal sequence, replacing compressed framing with an established literal mechanism, and removing redundant prose while preserving every claim and protected token.",
 	"Do not add a rationale just because one seems likely. If a load-bearing claim needs a reason that the source does not provide, ask for that reason.",
+	"Use sentence case for headings and titles; start task headings with a bare infinitive and conceptual headings with a noun phrase. Do not open a heading with an -ing verb form, skip a heading level, or end one with a period.",
+	"Use numbered lists for sequences and bulleted lists for unordered sets; keep list items parallel and introduce a list with a complete sentence ending in a colon.",
+	"Use numerals for 10 and greater, spell out one through nine in general prose, write ordinal numbers as words (first, second), and pair numerals with the percent sign (40%). Prefer unambiguous dates (March 4, 2025 or 2025-03-04) over numeric forms that could be read two ways.",
+	"Address the reader in the second person; avoid first-person plural ('we', 'our') standing in for the product or team.",
+	"Remove exclamation points and filler or placeholder phrases (please, note that, as mentioned above, at this time) without losing information.",
 	"Treat suggestions as advisory. Do not claim to modify the source.",
 }
 
