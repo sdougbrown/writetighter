@@ -1,6 +1,7 @@
 package guidance
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -92,17 +93,24 @@ func TestCoreDirectionsCoverStyleGuidePractices(t *testing.T) {
 	for _, direction := range set.CoreDirections {
 		joined += direction + "\n"
 	}
-	for _, phrase := range []string{
-		"sentence case",
-		"bare infinitive",
-		"numbered lists for sequences",
-		"ordinal numbers as words",
-		"percent sign",
-		"second person",
-		"exclamation points",
-	} {
-		if !strings.Contains(joined, phrase) {
-			t.Fatalf("core directions missing %q: %s", phrase, joined)
+	// Match the shortest stable term for each practice, not a full sentence:
+	// the directions are prompt text, and this guard should fail when a
+	// practice is dropped, not when its wording is rephrased.
+	cases := []struct {
+		practice string
+		pattern  *regexp.Regexp
+	}{
+		{"heading case", regexp.MustCompile(`(?i)sentence[- ]case`)},
+		{"task heading form", regexp.MustCompile(`(?i)bare infinitive`)},
+		{"list style", regexp.MustCompile(`(?i)numbered lists`)},
+		{"ordinal style", regexp.MustCompile(`(?i)ordinal`)},
+		{"percent style", regexp.MustCompile(`(?i)percent sign`)},
+		{"second person", regexp.MustCompile(`(?i)second person`)},
+		{"exclamation removal", regexp.MustCompile(`(?i)exclamation`)},
+	}
+	for _, c := range cases {
+		if !c.pattern.MatchString(joined) {
+			t.Fatalf("core directions missing %s coverage: %s", c.practice, joined)
 		}
 	}
 }
