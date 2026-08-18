@@ -47,6 +47,17 @@ func testProfile() *profile.Resolution {
 		{ID: "CORE.BANNED_MODAL", Enabled: true},
 		{ID: "CORE.LATIN_ABBREV", Enabled: true},
 		{ID: "CORE.UNEXPANDED_ABBREV", Enabled: true},
+		{ID: "CORE.TIME_ANCHOR", Enabled: true},
+		{ID: "CORE.EXCLAMATION", Enabled: true},
+		{ID: "CORE.ORDINAL_NUMERAL", Enabled: true},
+		{ID: "CORE.PERCENT_STYLE", Enabled: true},
+		{ID: "CORE.AMBIGUOUS_DATE", Enabled: true},
+		{ID: "CORE.HEADING_CASE", Enabled: true},
+		{ID: "CORE.GERUND_HEADING", Enabled: true},
+		{ID: "CORE.HEADING_SKIP", Enabled: true},
+		{ID: "CORE.HEADING_PUNCTUATION", Enabled: true},
+		{ID: "CORE.SINGLE_ITEM_LIST", Enabled: true},
+		{ID: "CORE.SEQUENTIAL_BULLET", Enabled: true},
 	}
 	return &profile.Resolution{Rules: &profile.RulesConfig{UnknownTermPolicy: "candidate", Rules: rules}, Dict: dict}
 }
@@ -788,5 +799,226 @@ func TestNounStackSkipsListItems(t *testing.T) {
 	findings, _ := Get("CORE.NOUN_STACK").Run(ctx)
 	if len(findings) != 0 {
 		t.Fatalf("noun stack should not flag list items, got %d: %v", len(findings), findings)
+	}
+}
+
+// --- CORE.TIME_ANCHOR -------------------------------------------------
+
+func TestTimeAnchor(t *testing.T) {
+	doc := "The cache is currently limited to 1 GB.\n\nSupport arrives in the near future. The feature is now supported on macOS.\n"
+	ctx := &RunContext{Document: testDoc(doc), Profile: testProfile()}
+	findings, _ := Get("CORE.TIME_ANCHOR").Run(ctx)
+	if len(findings) != 3 {
+		t.Fatalf("expected 3 time anchor findings, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestTimeAnchorNestedPhraseIsOneFinding(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Support for replication in the near future."), Profile: testProfile()}
+	findings, _ := Get("CORE.TIME_ANCHOR").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding for nested phrase, got %d: %v", len(findings), findings)
+	}
+	for _, f := range findings {
+		if strings.Contains(f.Evidence, "in the future") && !strings.Contains(f.Evidence, "near") {
+			t.Fatalf("short phrase reported inside longer phrase: %s", f.Evidence)
+		}
+	}
+}
+
+func TestTimeAnchorLegitUsesNotFlagged(t *testing.T) {
+	doc := "Create a new instance. Install the latest release. The existing config remains.\n\nRun `git status` now.\n"
+	ctx := &RunContext{Document: testDoc(doc), Profile: testProfile()}
+	findings, _ := Get("CORE.TIME_ANCHOR").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("legitimate uses were flagged: %v", findings)
+	}
+}
+
+func TestTimeAnchorNotInCodeSpan(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Set `--flag=currently` and the build passes."), Profile: testProfile()}
+	findings, _ := Get("CORE.TIME_ANCHOR").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("time anchor in code span was flagged: %v", findings)
+	}
+}
+
+// --- CORE.EXCLAMATION -------------------------------------------------
+
+func TestExclamation(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("The deploy succeeded!\n\nGreat work! Really!"), Profile: testProfile()}
+	findings, _ := Get("CORE.EXCLAMATION").Run(ctx)
+	if len(findings) != 3 {
+		t.Fatalf("expected 3 exclamation findings, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestExclamationNotInCodeSpan(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Run `echo \"hi!\"` to test the output."), Profile: testProfile()}
+	findings, _ := Get("CORE.EXCLAMATION").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("exclamation in code span was flagged: %v", findings)
+	}
+}
+
+// --- CORE.ORDINAL_NUMERAL ----------------------------------------------
+
+func TestOrdinalNumeral(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("The 1st attempt failed. Retry on the 2nd try; the 12th is last."), Profile: testProfile()}
+	findings, _ := Get("CORE.ORDINAL_NUMERAL").Run(ctx)
+	if len(findings) != 3 {
+		t.Fatalf("expected 3 ordinal findings, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestOrdinalNumeralNotInCodeSpan(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("Set `--count=2nd` in the config file."), Profile: testProfile()}
+	findings, _ := Get("CORE.ORDINAL_NUMERAL").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("ordinal in code span was flagged: %v", findings)
+	}
+}
+
+// --- CORE.PERCENT_STYLE ------------------------------------------------
+
+func TestPercentStyle(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("The error rate is 50 percent. Latency dropped 12.5 percent."), Profile: testProfile()}
+	findings, _ := Get("CORE.PERCENT_STYLE").Run(ctx)
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 percent findings, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestPercentSignNotFlagged(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("The error rate is 50%."), Profile: testProfile()}
+	findings, _ := Get("CORE.PERCENT_STYLE").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("percent sign form was flagged: %v", findings)
+	}
+}
+
+// --- CORE.AMBIGUOUS_DATE -----------------------------------------------
+
+func TestAmbiguousDate(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("The incident began 03/04/2025."), Profile: testProfile()}
+	findings, _ := Get("CORE.AMBIGUOUS_DATE").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 ambiguous date finding, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestUnambiguousDateNotFlagged(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("The deploy ran on 03/14/2025."), Profile: testProfile()}
+	findings, _ := Get("CORE.AMBIGUOUS_DATE").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("unambiguous date was flagged: %v", findings)
+	}
+}
+
+func TestAmbiguousDateInPathNotFlagged(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("See the log at /var/log/03/04/2025 for details."), Profile: testProfile()}
+	findings, _ := Get("CORE.AMBIGUOUS_DATE").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("date-like path segment was flagged: %v", findings)
+	}
+}
+
+// --- CORE.HEADING_CASE ---------------------------------------------------
+
+func TestHeadingCase(t *testing.T) {
+	doc := "# Configuring the Backup and Restore Schedule\n\n## Configuring the backup and restore schedule\n\n### Fix the Kubernetes pod and deployment\n"
+	ctx := &RunContext{Document: testDoc(doc), Profile: testProfile()}
+	findings, _ := Get("CORE.HEADING_CASE").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 heading case finding, got %d: %v", len(findings), findings)
+	}
+}
+
+// --- CORE.GERUND_HEADING -------------------------------------------------
+
+func TestGerundHeading(t *testing.T) {
+	doc := "# Migrating to the Cloud\n\n## Migration to the Cloud\n\n### Billing\n"
+	ctx := &RunContext{Document: testDoc(doc), Profile: testProfile()}
+	findings, _ := Get("CORE.GERUND_HEADING").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 gerund heading finding, got %d: %v", len(findings), findings)
+	}
+}
+
+// --- CORE.HEADING_SKIP ---------------------------------------------------
+
+func TestHeadingSkip(t *testing.T) {
+	doc := "# Top\n\n### Skipped\n\n## Normal\n"
+	ctx := &RunContext{Document: testDoc(doc), Profile: testProfile()}
+	findings, _ := Get("CORE.HEADING_SKIP").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 heading skip finding, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestHeadingSkipNoFalsePositive(t *testing.T) {
+	doc := "## One\n\n### Two\n"
+	ctx := &RunContext{Document: testDoc(doc), Profile: testProfile()}
+	findings, _ := Get("CORE.HEADING_SKIP").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("sequential levels were flagged: %v", findings)
+	}
+}
+
+// --- CORE.HEADING_PUNCTUATION --------------------------------------------
+
+func TestHeadingPunctuation(t *testing.T) {
+	doc := "## Setup.\n\n## Cleanup\n"
+	ctx := &RunContext{Document: testDoc(doc), Profile: testProfile()}
+	findings, _ := Get("CORE.HEADING_PUNCTUATION").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 heading punctuation finding, got %d: %v", len(findings), findings)
+	}
+}
+
+// --- CORE.SINGLE_ITEM_LIST ------------------------------------------------
+
+func TestSingleItemList(t *testing.T) {
+	doc := "Only one option is available:\n\n- The premium plan\n"
+	ctx := &RunContext{Document: testDoc(doc), Profile: testProfile()}
+	findings, _ := Get("CORE.SINGLE_ITEM_LIST").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 single-item list finding, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestSingleItemListNumbered(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("1. The only step\n"), Profile: testProfile()}
+	findings, _ := Get("CORE.SINGLE_ITEM_LIST").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 single-item list finding, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestMultiItemListNotFlagged(t *testing.T) {
+	ctx := &RunContext{Document: testDoc("- One\n- Two\n"), Profile: testProfile()}
+	findings, _ := Get("CORE.SINGLE_ITEM_LIST").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("multi-item list was flagged: %v", findings)
+	}
+}
+
+// --- CORE.SEQUENTIAL_BULLET -----------------------------------------------
+
+func TestSequentialBullet(t *testing.T) {
+	doc := "- First, build the image.\n- Second, push it.\n- A plain item.\n"
+	ctx := &RunContext{Document: testDoc(doc), Profile: testProfile()}
+	findings, _ := Get("CORE.SEQUENTIAL_BULLET").Run(ctx)
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 sequential bullet findings, got %d: %v", len(findings), findings)
+	}
+}
+
+func TestSequentialBulletNumberedListNotFlagged(t *testing.T) {
+	doc := "1. First, build the image.\n2. Second, push it.\n"
+	ctx := &RunContext{Document: testDoc(doc), Profile: testProfile()}
+	findings, _ := Get("CORE.SEQUENTIAL_BULLET").Run(ctx)
+	if len(findings) != 0 {
+		t.Fatalf("numbered list steps were flagged: %v", findings)
 	}
 }

@@ -105,3 +105,35 @@ func TestValidateReviseResponseDropsUnmappedOnlyFinding(t *testing.T) {
 		t.Fatalf("expected 1 discarded finding, got %d", resp.DiscardedFindings)
 	}
 }
+
+// TestSanitizePrincipleIDsCoercesStyleRules asserts that the style-guide lint
+// rules introduced in software-docs-en@0.6.0 coerce to their mapped
+// principles instead of failing the batch.
+func TestSanitizePrincipleIDsCoercesStyleRules(t *testing.T) {
+	cases := []struct{ rule, want string }{
+		{"CORE.TIME_ANCHOR", "CORE.TIMELESS_PROSE"},
+		{"CORE.GERUND_HEADING", "CORE.ACTIVE_DIRECT_VOICE"},
+		{"CORE.SEQUENTIAL_BULLET", "CORE.CAUSAL_ORDER"},
+	}
+	for _, c := range cases {
+		got, err := sanitizePrincipleIDs([]string{c.rule})
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", c.rule, err)
+		}
+		if len(got) != 1 || got[0] != c.want {
+			t.Fatalf("%s: expected coerce to %s, got %v", c.rule, c.want, got)
+		}
+	}
+}
+
+// TestSanitizePrincipleIDSDropsStyleRulesWithoutMapping asserts that style
+// rules without a semantic principle mapping are dropped, not rejected.
+func TestSanitizePrincipleIDSDropsStyleRulesWithoutMapping(t *testing.T) {
+	got, err := sanitizePrincipleIDs([]string{"CORE.EXCLAMATION", "CORE.HEADING_CASE", "CORE.SHORT_SENTENCE"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0] != "CORE.SHORT_SENTENCE" {
+		t.Fatalf("expected only SHORT_SENTENCE to survive, got %v", got)
+	}
+}

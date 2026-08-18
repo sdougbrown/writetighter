@@ -6,15 +6,15 @@ import (
 	"fmt"
 )
 
-//go:embed data/profiles/software-docs-en/0.5.0/manifest.json
-//go:embed data/profiles/software-docs-en/0.5.0/dictionary.json
-//go:embed data/profiles/software-docs-en/0.5.0/rules.json
+//go:embed data/profiles/software-docs-en/0.6.0/manifest.json
+//go:embed data/profiles/software-docs-en/0.6.0/dictionary.json
+//go:embed data/profiles/software-docs-en/0.6.0/rules.json
 var embeddedFiles embed.FS
 
 func loadEmbeddedBundle() (*Resolution, error) {
-	m, _ := embeddedFiles.ReadFile("data/profiles/software-docs-en/0.5.0/manifest.json")
-	d, _ := embeddedFiles.ReadFile("data/profiles/software-docs-en/0.5.0/dictionary.json")
-	r, _ := embeddedFiles.ReadFile("data/profiles/software-docs-en/0.5.0/rules.json")
+	m, _ := embeddedFiles.ReadFile("data/profiles/software-docs-en/0.6.0/manifest.json")
+	d, _ := embeddedFiles.ReadFile("data/profiles/software-docs-en/0.6.0/dictionary.json")
+	r, _ := embeddedFiles.ReadFile("data/profiles/software-docs-en/0.6.0/rules.json")
 	return loadBundleFromBytes("embedded", m, d, r)
 }
 

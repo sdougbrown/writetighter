@@ -83,3 +83,83 @@ func insensitiveMatches(text, term string) [][2]int {
 func codePointColumn(segment string, byteOffset, initial int) int {
 	return initial + len([]rune(segment[:byteOffset]))
 }
+
+// isHeadingMarker reports whether marker is an ATX heading run ("#" through
+// "######"). Heading blocks from document.AnalyzeProse carry exactly this
+// marker; the run length is the heading level.
+func isHeadingMarker(marker string) bool {
+	if marker == "" {
+		return false
+	}
+	for i := 0; i < len(marker); i++ {
+		if marker[i] != '#' {
+			return false
+		}
+	}
+	return true
+}
+
+func headingLevel(marker string) int { return len(marker) }
+
+// isUnorderedItemMarker reports whether marker is a bulleted list item marker
+// ("- ", "* ", "+ ").
+func isUnorderedItemMarker(marker string) bool {
+	return marker == "- " || marker == "* " || marker == "+ "
+}
+
+// isOrderedItemMarker reports whether marker is a numbered list item marker
+// ("1.", "12)").
+func isOrderedItemMarker(marker string) bool {
+	if len(marker) < 2 {
+		return false
+	}
+	last := marker[len(marker)-1]
+	if last != '.' && last != ')' {
+		return false
+	}
+	for i := 0; i < len(marker)-1; i++ {
+		if marker[i] < '0' || marker[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// headingStopwords are the function words that carry no information about a
+// heading's casing: title case and sentence case treat them identically.
+var headingStopwords = map[string]bool{
+	"a": true, "an": true, "the": true, "and": true, "or": true,
+	"but": true, "nor": true, "for": true, "as": true, "at": true,
+	"by": true, "in": true, "of": true, "on": true, "to": true,
+	"with": true, "vs": true, "is": true, "are": true, "was": true,
+	"were": true, "be": true, "it": true, "its": true,
+}
+
+// headingWords splits heading text into whitespace-delimited words containing
+// at least one letter, with surrounding punctuation stripped.
+func headingWords(text string) []string {
+	var words []string
+	for _, raw := range strings.Fields(text) {
+		word := strings.Trim(raw, ",.;:!?\"'`()[]{}\t ")
+		if word == "" {
+			continue
+		}
+		for _, r := range word {
+			if unicode.IsLetter(r) {
+				words = append(words, word)
+				break
+			}
+		}
+	}
+	return words
+}
+
+// isCapitalized reports whether the word's first letter rune is uppercase.
+func isCapitalized(word string) bool {
+	for _, r := range word {
+		if unicode.IsLetter(r) {
+			return unicode.IsUpper(r)
+		}
+	}
+	return false
+}

@@ -2,7 +2,7 @@
 
 WriteTighter is a local technical-writing revision harness for Markdown. Its primary command, `revise`, asks a configured OpenAI-compatible model for structured rewrites or clarification requests. Its deterministic companion, `lint`, reports narrow, auditable profile findings.
 
-**Status:** Private development. The embedded default is `software-docs-en@0.5.0`. This repository is not currently cleared for public redistribution.
+**Status:** Private development. The embedded default is `software-docs-en@0.6.0`. This repository is not currently cleared for public redistribution.
 
 ## What WriteTighter does
 
@@ -27,6 +27,12 @@ Passage-matching profile policy and project glossary definitions provide termino
 - **Contractions:** Flags common English contractions (n't, 'll, 're, 've, 'd, it's) in prose.
 - **Banned modals:** Flags STE-unapproved modal verbs (should, would, may, might, could).
 - **Latin abbreviations:** Flags e.g., i.e., and etc. in prose.
+- **Time anchors:** Flags time-anchored language (currently, as of this writing, in the future, now supports) that goes stale; derived from timeless-documentation guidance.
+- **Exclamation points:** Flags ! in prose.
+- **Number style:** Flags ordinal numerals (1st, 2nd) and spelled-out percents (50 percent) in prose.
+- **Ambiguous dates:** Flags numeric dates readable two ways (03/04/2025); unambiguous dates (03/14/2025) and path segments are excluded.
+- **Heading style:** Flags title-case headings, headings opening with an -ing verb form, skipped heading levels, and trailing periods; derived from the Google developer documentation style guide.
+- **List style:** Flags single-item lists and bulleted items that open with sequence words (First, Then, Finally) where a numbered list belongs.
 - **Term policy:** Supports discouraged terms, canonical case, unknown terms, and project term bases when the selected profile enables those rules.
 
 ## Safety boundaries
@@ -75,7 +81,7 @@ go build -o writetighter ./cmd/writetighter
 
 ### Current default policy
 
-The embedded `software-docs-en@0.5.0` profile uses these limits:
+The embedded `software-docs-en@0.6.0` profile uses these limits:
 
 | Document kind | Sentence limit |
 |---|---:|
@@ -93,6 +99,11 @@ It also emits an informational candidate when a paragraph has more than three
 sentences or more than 80 words. The profile carries a reviewed dictionary
 with discouraged-term policies for common filler and AI-slop vocabulary,
 enabled as a non-enforcing `candidate`/`info` rule.
+
+Additional non-enforcing `candidate`/`info` rules cover time-anchored
+language, exclamation points, number and date formatting, heading style, and
+list style, all derived from the Google developer documentation style
+guide.
 
 Two non-enforcing `candidate`/`info` rules keep jargon checks precise. `lint` reports a short all-caps abbreviation (`EI`, `NPE`) only when
 it first appears with no parenthetical expansion anywhere in the document
@@ -299,7 +310,7 @@ You can control failure behavior with `--fail-on`:
 
 ### Profiles
 
-WriteTighter uses profiles to define its logic. The embedded default is `software-docs-en@0.5.0`.
+WriteTighter uses profiles to define its logic. The embedded default is `software-docs-en@0.6.0`.
 
 **Manage profiles:**
 ```sh
@@ -307,7 +318,7 @@ WriteTighter uses profiles to define its logic. The embedded default is `softwar
 ./writetighter profile list
 
 # Verify a specific profile or bundle path
-./writetighter profile verify software-docs-en@0.5.0
+./writetighter profile verify software-docs-en@0.6.0
 
 # Install a new profile bundle from a local path
 ./writetighter profile install ./path/to/bundle
@@ -324,7 +335,7 @@ WriteTighter searches upward from the current working directory for
 ```toml
 [profile]
 id = "software-docs-en"
-version = "0.5.0"
+version = "0.6.0"
 
 [[terms]]
 term = "hydrate"

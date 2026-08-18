@@ -31,6 +31,9 @@ var lintPrincipleFallback = map[string]string{
 	"CORE.UNEXPANDED_ABBREV":      "CORE.EXPLICIT_RELATIONSHIPS",
 	"CORE.CORPUS_NOVELTY":         "CORE.APPROVED_WORDS",
 	"CORE.PROCEDURE_MULTI_ACTION": "CORE.EXPLICIT_RELATIONSHIPS",
+	"CORE.TIME_ANCHOR":            "CORE.TIMELESS_PROSE",
+	"CORE.GERUND_HEADING":         "CORE.ACTIVE_DIRECT_VOICE",
+	"CORE.SEQUENTIAL_BULLET":      "CORE.CAUSAL_ORDER",
 }
 
 // sanitizePrincipleIDs reduces a model-supplied principle_ids list to the set

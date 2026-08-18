@@ -1,6 +1,7 @@
 package guidance
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -80,5 +81,55 @@ func TestInvalidKind(t *testing.T) {
 	}
 	if _, err := ForKind("message"); err == nil {
 		t.Fatal("unsupported kind returned guidance")
+	}
+}
+
+func TestCoreDirectionsCoverStyleGuidePractices(t *testing.T) {
+	set, err := ForKind(KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, direction := range set.CoreDirections {
+		joined += direction + "\n"
+	}
+	// Match the shortest stable term for each practice, not a full sentence:
+	// the directions are prompt text, and this guard should fail when a
+	// practice is dropped, not when its wording is rephrased.
+	cases := []struct {
+		practice string
+		pattern  *regexp.Regexp
+	}{
+		{"heading case", regexp.MustCompile(`(?i)sentence[- ]case`)},
+		{"task heading form", regexp.MustCompile(`(?i)bare infinitive`)},
+		{"list style", regexp.MustCompile(`(?i)numbered lists`)},
+		{"ordinal style", regexp.MustCompile(`(?i)ordinal`)},
+		{"percent style", regexp.MustCompile(`(?i)percent sign`)},
+		{"second person", regexp.MustCompile(`(?i)second person`)},
+		{"exclamation removal", regexp.MustCompile(`(?i)exclamation`)},
+	}
+	for _, c := range cases {
+		if !c.pattern.MatchString(joined) {
+			t.Fatalf("core directions missing %s coverage: %s", c.practice, joined)
+		}
+	}
+}
+
+func TestTimelessProsePrincipleExists(t *testing.T) {
+	set, err := ForKind(KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, p := range set.Principles {
+		if p.ID == "CORE.TIMELESS_PROSE" {
+			found = true
+			if p.Direction == "" {
+				t.Fatal("TIMELESS_PROSE has empty direction")
+			}
+		}
+	}
+	if !found {
+		t.Fatal("CORE.TIMELESS_PROSE principle missing")
 	}
 }
