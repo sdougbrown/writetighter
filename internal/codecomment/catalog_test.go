@@ -3,8 +3,11 @@ package codecomment
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"fmt"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestExtractAssignsStableUTF8SpansAndCoalescesFullLines(t *testing.T) {
@@ -200,6 +203,144 @@ const value = useMemo<number>(() => 0, [])
 	}
 }
 
+// TestExtractTSXFindsCommentsBetweenJSXAttributes covers comments written in
+// the attribute list of an open tag, a position React codebases use to explain
+// a prop. Their prose carries apostrophes and slashes, which must not be read
+// as attribute strings or regex literals.
+func TestExtractTSXFindsCommentsBetweenJSXAttributes(t *testing.T) {
+	source := []byte("export default function VendorName({ vendor }: Props) {\n" +
+		"  return (\n" +
+		"    <StyledVendorNameLink\n" +
+		"      to={`../vendors/${vendor.vendorId}`}\n" +
+		"      // The row opens the drawer; the name navigates to the\n" +
+		"      // Vendors page. Stop the click so it doesn't also open.\n" +
+		"      onClick={(event) => event.stopPropagation()}\n" +
+		"      /* Truncation is handled by the styled wrapper. */\n" +
+		"      title=\"Vendor detail\"\n" +
+		"    >\n" +
+		"      {vendor.name}\n" +
+		"    </StyledVendorNameLink>\n" +
+		"  )\n" +
+		"}\n")
+	catalog, err := Extract("sample.tsx", TypeScript, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"// The row opens the drawer; the name navigates to the\n      // Vendors page. Stop the click so it doesn't also open.",
+		"/* Truncation is handled by the styled wrapper. */",
+	}
+	if got := commentTexts(catalog); !equalStrings(got, want) {
+		t.Fatalf("comments = %#v, want %#v", got, want)
+	}
+}
+
+// TestExtractTSXSkipsExplicitTypeArgumentsOnJSXTags covers tags that pass type
+// arguments, as in `<DataGridPremium<Row> ... />`. The argument list is type
+// syntax rather than markup, so its closing '>' must not be mistaken for the
+// end of the open tag; treating it as markup desynchronizes the rest of the file.
+func TestExtractTSXSkipsExplicitTypeArgumentsOnJSXTags(t *testing.T) {
+	source := []byte("export default function Grid({ rows }: Props) {\n" +
+		"  return (\n" +
+		"    <Panel>\n" +
+		"      <DataGridPremium<Row>\n" +
+		"        rows={rows}\n" +
+		"        // Column definitions are memoized by the caller.\n" +
+		"        columns={columns}\n" +
+		"        disableColumnMenu\n" +
+		"      />\n" +
+		"    </Panel>\n" +
+		"  )\n" +
+		"}\n" +
+		"// trailing comment\n")
+	catalog, err := Extract("sample.tsx", TypeScript, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"// Column definitions are memoized by the caller.",
+		"// trailing comment",
+	}
+	if got := commentTexts(catalog); !equalStrings(got, want) {
+		t.Fatalf("comments = %#v, want %#v", got, want)
+	}
+}
+
+// TestSkipTSTypeArguments pins the argument-list forms a JSX tag can carry:
+// nested lists whose '>>' must not close early, member and namespace tags,
+// function types whose '=>' is not a closing bracket, and quoted literal types.
+func TestSkipTSTypeArguments(t *testing.T) {
+	for _, tc := range []struct {
+		source string
+		want   int
+	}{
+		{"<Row> rest", len("<Row>")},
+		{"<Option, true> rest", len("<Option, true>")},
+		{"<Map<string, number>> rest", len("<Map<string, number>>")},
+		{"<(value: number) => string> rest", len("<(value: number) => string>")},
+		{"<{ id: string; label: 'a>b' }> rest", len("<{ id: string; label: 'a>b' }>")},
+		{"<`col-${string}`> rest", len("<`col-${string}`>")},
+	} {
+		source := []byte(tc.source)
+		got, err := skipTSTypeArguments(source, 0, len(source))
+		if err != nil {
+			t.Errorf("skipTSTypeArguments(%q) returned %v", tc.source, err)
+			continue
+		}
+		if got != tc.want {
+			t.Errorf("skipTSTypeArguments(%q) = %d, want %d", tc.source, got, tc.want)
+		}
+	}
+	for _, source := range []string{"<Row", "<Map<string", "<'unterminated>"} {
+		if _, err := skipTSTypeArguments([]byte(source), 0, len(source)); !errors.Is(err, errUnterminatedJSX) {
+			t.Errorf("skipTSTypeArguments(%q) error = %v, want errUnterminatedJSX", source, err)
+		}
+	}
+}
+
+// TestExtractTSXRejectsCandidatesCarryingBareAngleBrackets covers '<' at an
+// expression position that opens a comparison rather than an element. An open
+// tag admits only names, quoted values, and '{...}' containers, so a second
+// bare '<' proves the candidate is not markup and the scan resumes as code.
+func TestExtractTSXRejectsCandidatesCarryingBareAngleBrackets(t *testing.T) {
+	source := []byte("const inRange = low < value && value < high\n" +
+		"const shifted = base < mask << 2\n" +
+		"// range comment\n")
+	catalog, err := Extract("sample.tsx", TypeScript, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := commentTexts(catalog); !equalStrings(got, []string{"// range comment"}) {
+		t.Fatalf("comments = %#v", got)
+	}
+}
+
+// TestExtractScalesOnDenseJSXCandidates guards the cost of rejecting JSX
+// candidates. Each rejected '<' once re-scanned the rest of the region, so a
+// large generated file of non-JSX source cost minutes. Rejection is now bounded
+// by the candidate's own open tag, and repeat attempts replay a recorded
+// failure, which keeps the scan linear.
+func TestExtractScalesOnDenseJSXCandidates(t *testing.T) {
+	source := []byte(strings.Repeat("value = <candidate; ", 20000) + "\n// trailing comment\n")
+	done := make(chan []string, 1)
+	go func() {
+		catalog, err := Extract("dense.tsx", TypeScript, source)
+		if err != nil {
+			done <- nil
+			return
+		}
+		done <- commentTexts(catalog)
+	}()
+	select {
+	case got := <-done:
+		if !equalStrings(got, []string{"// trailing comment"}) {
+			t.Fatalf("comments = %#v", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("scanning %d bytes of dense JSX candidates exceeded 5s", len(source))
+	}
+}
+
 func TestExtractTSXFailsClosedOnMalformedInput(t *testing.T) {
 	for _, source := range [][]byte{
 		[]byte("const x = {/* unterminated"),
@@ -207,6 +348,7 @@ func TestExtractTSXFailsClosedOnMalformedInput(t *testing.T) {
 		[]byte("const x = /unterminated\n"),
 		[]byte("return (<> <div>{/* unterminated </div>"),
 		[]byte("const x = <div></ invalid>"),
+		[]byte("const x = <div\n  /* unterminated\n/>"),
 	} {
 		if _, err := Extract("bad.tsx", TypeScript, source); err == nil {
 			t.Fatalf("malformed TSX accepted: %q", source)
@@ -248,11 +390,39 @@ func TestJSXEnabled(t *testing.T) {
 	}{
 		{"sample.tsx", true},
 		{"sample.jsx", true},
+		{"sample.js", true},
+		{"sample.mjs", true},
+		{"sample.cjs", true},
 		{"sample.ts", false},
 	} {
 		got := jsxEnabled(tc.filename)
 		if got != tc.want {
 			t.Errorf("jsxEnabled(%q) = %t; want %t", tc.filename, got, tc.want)
+		}
+	}
+}
+
+// TestExtractJavaScriptInterpretsJSX covers React sources that keep JSX in a
+// plain '.js' file, which every major toolchain accepts and which no pragma
+// reliably marks. Only '.ts' is excluded, where '<' opens a type assertion.
+func TestExtractJavaScriptInterpretsJSX(t *testing.T) {
+	source := []byte("export default function Panel({ items }) {\n" +
+		"  return (\n" +
+		"    <section className=\"panel\">\n" +
+		"      {/* Counts are formatted upstream. */}\n" +
+		"      <p>Showing 1/2 of the vendor's items.</p>\n" +
+		"    </section>\n" +
+		"  )\n" +
+		"}\n" +
+		"// trailing comment\n")
+	for _, filename := range []string{"sample.js", "sample.mjs", "sample.cjs"} {
+		catalog, err := Extract(filename, TypeScript, source)
+		if err != nil {
+			t.Fatalf("%s: %v", filename, err)
+		}
+		want := []string{"/* Counts are formatted upstream. */", "// trailing comment"}
+		if got := commentTexts(catalog); !equalStrings(got, want) {
+			t.Errorf("%s comments = %#v, want %#v", filename, got, want)
 		}
 	}
 }

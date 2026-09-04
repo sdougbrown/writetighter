@@ -59,19 +59,34 @@ func commentEnd(source []byte, start int) (int, CommentForm, error) {
 }
 
 func scanTypeScript(source []byte, jsxMode bool) ([]commentToken, error) {
-	var tokens []commentToken
-	if _, err := scanTSCode(source, 0, len(source), false, jsxMode, &tokens); err != nil {
+	state := &tsScan{failedJSX: map[int]int{}}
+	if _, err := scanTSCode(source, 0, len(source), false, jsxMode, state); err != nil {
 		return nil, err
 	}
-	return tokens, nil
+	return state.tokens, nil
 }
+
+// tsScan carries the mutable state of one TypeScript scan: the comments found
+// so far, and the offsets already proven not to open a JSX element.
+type tsScan struct {
+	tokens []commentToken
+	// failedJSX maps a '<' offset to the largest limit at which it failed to
+	// scan as a JSX element. A '<' that found no closing tag before some limit
+	// cannot find one before a smaller limit either, so the failure replays.
+	// Without this, every rolled-back candidate is retried from scratch as the
+	// scan advances, which is quadratic in the number of candidates: a large
+	// generated bundle of non-JSX source takes minutes rather than milliseconds.
+	failedJSX map[int]int
+}
+
+func (s *tsScan) add(token commentToken) { s.tokens = append(s.tokens, token) }
 
 // scanTSCode scans a code region. When untilBrace is true it returns just after
 // the matching right brace that closes a template ${...} expression or JSX
 // expression container. When jsxMode is true, `<` at an expression position is
 // interpreted as a JSX element when it looks like one; otherwise it is treated
 // as a comparison or generic operator exactly as in plain TypeScript.
-func scanTSCode(source []byte, start, limit int, untilBrace, jsxMode bool, tokens *[]commentToken) (int, error) {
+func scanTSCode(source []byte, start, limit int, untilBrace, jsxMode bool, state *tsScan) (int, error) {
 	i := start
 	braceDepth := 0
 	controlParens := []bool{}
@@ -89,7 +104,7 @@ func scanTSCode(source []byte, start, limit int, untilBrace, jsxMode bool, token
 		}
 		if c == '/' && i+1 < limit && source[i+1] == '/' {
 			end := lineEnd(source, i)
-			*tokens = append(*tokens, commentToken{start: i, end: end, form: LineComment})
+			state.add(commentToken{start: i, end: end, form: LineComment})
 			i = end
 			continue
 		}
@@ -98,7 +113,7 @@ func scanTSCode(source []byte, start, limit int, untilBrace, jsxMode bool, token
 			if err != nil {
 				return 0, err
 			}
-			*tokens = append(*tokens, commentToken{start: i, end: end, form: BlockComment})
+			state.add(commentToken{start: i, end: end, form: BlockComment})
 			i = end
 			continue
 		}
@@ -113,7 +128,7 @@ func scanTSCode(source []byte, start, limit int, untilBrace, jsxMode bool, token
 			continue
 		case '`':
 			pendingControlParen = false
-			end, err := skipTSTemplate(source, i, limit, jsxMode, tokens)
+			end, err := skipTSTemplate(source, i, limit, jsxMode, state)
 			if err != nil {
 				return 0, err
 			}
@@ -159,13 +174,13 @@ func scanTSCode(source []byte, start, limit int, untilBrace, jsxMode bool, token
 		case '<':
 			pendingControlParen = false
 			if jsxMode && canStartRegex && looksLikeJSXOpen(source, i, limit) {
-				checkpoint := len(*tokens)
-				end, err := scanJSXElement(source, i, limit, jsxMode, tokens)
+				checkpoint := len(state.tokens)
+				end, err := scanJSXElement(source, i, limit, jsxMode, state)
 				if err == nil {
 					i, canStartRegex = end, false
 					continue
 				}
-				*tokens = (*tokens)[:checkpoint]
+				state.tokens = state.tokens[:checkpoint]
 				if !errors.Is(err, errUnterminatedJSX) {
 					return 0, err
 				}
@@ -240,7 +255,7 @@ func tsKeywordStartsExpression(word []byte) bool {
 	}
 }
 
-func skipTSTemplate(source []byte, start, limit int, jsxMode bool, tokens *[]commentToken) (int, error) {
+func skipTSTemplate(source []byte, start, limit int, jsxMode bool, state *tsScan) (int, error) {
 	for i := start + 1; i < limit; {
 		switch source[i] {
 		case '\\':
@@ -252,7 +267,7 @@ func skipTSTemplate(source []byte, start, limit int, jsxMode bool, tokens *[]com
 			return i + 1, nil
 		case '$':
 			if i+1 < limit && source[i+1] == '{' {
-				end, err := scanTSCode(source, i+2, limit, true, jsxMode, tokens)
+				end, err := scanTSCode(source, i+2, limit, true, jsxMode, state)
 				if err != nil {
 					return 0, err
 				}
@@ -312,16 +327,111 @@ func looksLikeJSXOpen(source []byte, i, limit int) bool {
 	return source[i+1] == '>' || isIdentifierByte(source[i+1])
 }
 
+// isJSXNameByte reports characters valid inside a JSX tag name, including the
+// member ('Panel.Body'), namespace ('svg:rect'), and hyphenated ('my-widget')
+// forms. Consuming the whole name in one pass is what lets the scanner tell an
+// abutting '<' (type arguments) from an attribute.
+func isJSXNameByte(c byte) bool {
+	return isIdentifierByte(c) || isDigit(c) || c == '.' || c == ':' || c == '-'
+}
+
+// skipTSTypeArguments consumes a balanced type-argument list beginning at '<'
+// and returns the offset just past its matching '>'. Nested lists, quoted
+// literal types, and template literal types are tracked so only a '>' at depth
+// zero closes the list, and '=>' is consumed whole so a function type's arrow
+// does not close it early. An unbalanced list reports errUnterminatedJSX so the
+// caller degrades to ordinary operator scanning.
+func skipTSTypeArguments(source []byte, start, limit int) (int, error) {
+	depth := 0
+	for i := start; i < limit; {
+		switch source[i] {
+		case '<':
+			depth++
+			i++
+		case '>':
+			depth--
+			i++
+			if depth == 0 {
+				return i, nil
+			}
+		case '=':
+			if i+1 < limit && source[i+1] == '>' {
+				i += 2 // arrow of a function type, not a closing bracket
+				continue
+			}
+			i++
+		case '"', '\'':
+			end, err := skipQuoted(source, i, source[i], limit, false)
+			if err != nil {
+				return 0, errUnterminatedJSX
+			}
+			i = end
+		case '`':
+			end, err := skipTemplateLiteralType(source, i, limit)
+			if err != nil {
+				return 0, errUnterminatedJSX
+			}
+			i = end
+		default:
+			i++
+		}
+	}
+	return 0, errUnterminatedJSX
+}
+
+// skipTemplateLiteralType consumes a template literal type such as
+// `prefix-${string}`. Its '${...}' holes contain types rather than executable
+// code, so the whole literal is skipped without scanning for comments.
+func skipTemplateLiteralType(source []byte, start, limit int) (int, error) {
+	for i := start + 1; i < limit; {
+		switch source[i] {
+		case '\\':
+			i += 2
+		case '`':
+			return i + 1, nil
+		default:
+			i++
+		}
+	}
+	return 0, fmt.Errorf("unterminated template literal type")
+}
+
 // scanJSXElement consumes a JSX element starting at '<' including attributes,
 // children, and its matching closing tag. Tag and attribute text is skipped so
 // slash-like text (closing tags, self-closing tags, URLs, and prose) and quoted
-// attribute strings are never mistaken for comments or regex literals. Only
-// expression containers '{...}' are scanned for comments, so children like
-// '{/* real */}' and '{"/* not a comment */"}' behave like TypeScript code.
-func scanJSXElement(source []byte, start, limit int, jsxMode bool, tokens *[]commentToken) (int, error) {
+// attribute strings are never mistaken for comments or regex literals. Comments
+// written between attributes are cataloged, as are expression containers
+// '{...}', so children like '{/* real */}' and '{"/* not a comment */"}'
+// behave like TypeScript code.
+func scanJSXElement(source []byte, start, limit int, jsxMode bool, state *tsScan) (int, error) {
+	if failedLimit, seen := state.failedJSX[start]; seen && limit <= failedLimit {
+		return 0, errUnterminatedJSX
+	}
+	end, err := scanJSXElementBody(source, start, limit, jsxMode, state)
+	if errors.Is(err, errUnterminatedJSX) && limit > state.failedJSX[start] {
+		// Nested candidates fail before their parent does, so one descent
+		// records every '<' along it. Later attempts at those offsets, whether
+		// from a rolled-back parent or from the resumed operator scan, are
+		// answered from the map instead of walking the rest of the region.
+		state.failedJSX[start] = limit
+	}
+	return end, err
+}
+
+func scanJSXElementBody(source []byte, start, limit int, jsxMode bool, state *tsScan) (int, error) {
 	i := start + 1 // consume '<'
-	for i < limit && (isIdentifierByte(source[i]) || isDigit(source[i])) {
+	for i < limit && isJSXNameByte(source[i]) {
 		i++ // tag name (empty for fragments)
+	}
+	if i < limit && source[i] == '<' {
+		// A '<' abutting the tag name opens explicit type arguments, as in
+		// '<DataGridPremium<Row> ... />'. That list is type syntax, not markup,
+		// so its closing '>' must not be read as the end of the open tag.
+		end, err := skipTSTypeArguments(source, i, limit)
+		if err != nil {
+			return 0, err
+		}
+		i = end
 	}
 	for i < limit {
 		switch source[i] {
@@ -329,12 +439,33 @@ func scanJSXElement(source []byte, start, limit int, jsxMode bool, tokens *[]com
 			if i+1 < limit && source[i+1] == '>' {
 				return i + 2, nil // self-closing tag
 			}
+			if i+1 < limit && source[i+1] == '/' {
+				end := lineEnd(source, i)
+				state.add(commentToken{start: i, end: end, form: LineComment})
+				i = end
+				continue
+			}
+			if i+1 < limit && source[i+1] == '*' {
+				end, _, err := commentEnd(source, i)
+				if err != nil {
+					return 0, err
+				}
+				state.add(commentToken{start: i, end: end, form: BlockComment})
+				i = end
+				continue
+			}
 			i++
+		case '<':
+			// Attributes are bare names, quoted values, or '{...}' containers,
+			// and the type-argument list was already consumed above. A bare '<'
+			// here means the candidate was never an element, so it is rejected
+			// now rather than after walking the rest of the region.
+			return 0, errUnterminatedJSX
 		case '>':
 			i++
-			return scanJSXChildren(source, i, limit, jsxMode, tokens)
+			return scanJSXChildren(source, i, limit, jsxMode, state)
 		case '{':
-			end, err := scanTSCode(source, i+1, limit, true, jsxMode, tokens)
+			end, err := scanTSCode(source, i+1, limit, true, jsxMode, state)
 			if err != nil {
 				return 0, err
 			}
@@ -358,11 +489,11 @@ func scanJSXElement(source []byte, start, limit int, jsxMode bool, tokens *[]com
 // scanJSXChildren consumes element text until the matching closing tag,
 // recursing into child elements and '{...}' expression containers. In
 // children, only '<' and '{' are significant; slashes are plain text.
-func scanJSXChildren(source []byte, i, limit int, jsxMode bool, tokens *[]commentToken) (int, error) {
+func scanJSXChildren(source []byte, i, limit int, jsxMode bool, state *tsScan) (int, error) {
 	for i < limit {
 		switch source[i] {
 		case '{':
-			end, err := scanTSCode(source, i+1, limit, true, jsxMode, tokens)
+			end, err := scanTSCode(source, i+1, limit, true, jsxMode, state)
 			if err != nil {
 				return 0, err
 			}
@@ -385,7 +516,7 @@ func scanJSXChildren(source []byte, i, limit int, jsxMode bool, tokens *[]commen
 				return j + 1, nil
 			}
 			if i+1 < limit && (isIdentifierByte(source[i+1]) || source[i+1] == '>') {
-				end, err := scanJSXElement(source, i, limit, jsxMode, tokens)
+				end, err := scanJSXElement(source, i, limit, jsxMode, state)
 				if err != nil {
 					return 0, err
 				}
