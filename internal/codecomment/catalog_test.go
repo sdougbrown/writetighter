@@ -239,6 +239,11 @@ func TestExtractTSXFindsCommentsBetweenJSXAttributes(t *testing.T) {
 // arguments, as in `<DataGridPremium<Row> ... />`. The argument list is type
 // syntax rather than markup, so its closing '>' must not be mistaken for the
 // end of the open tag; treating it as markup desynchronizes the rest of the file.
+// The member, namespace, and hyphenated forms (`<Panel.Body<Row>`,
+// `<ns:Grid<Row>`, `<my-grid<Row>`) pin the tag-name characters that must still
+// be accepted for the abutting '<' to be recognized as type arguments. Their
+// children carry a URL so that a degraded, non-JSX scan would lex its '//' as
+// a line comment and fail the assertion.
 func TestExtractTSXSkipsExplicitTypeArgumentsOnJSXTags(t *testing.T) {
 	source := []byte("export default function Grid({ rows }: Props) {\n" +
 		"  return (\n" +
@@ -249,6 +254,24 @@ func TestExtractTSXSkipsExplicitTypeArgumentsOnJSXTags(t *testing.T) {
 		"        columns={columns}\n" +
 		"        disableColumnMenu\n" +
 		"      />\n" +
+		"      <Panel.Body<Row>\n" +
+		"        // Member tags carry the same argument syntax.\n" +
+		"        rows={rows}\n" +
+		"      >\n" +
+		"        see https://example.test/docs\n" +
+		"      </Panel.Body>\n" +
+		"      <ns:Grid<Row>\n" +
+		"        // Namespace tags do too.\n" +
+		"        rows={rows}\n" +
+		"      >\n" +
+		"        see https://example.test/ns\n" +
+		"      </ns:Grid>\n" +
+		"      <my-grid<Row>\n" +
+		"        // Hyphenated tags do too.\n" +
+		"        rows={rows}\n" +
+		"      >\n" +
+		"        see https://example.test/hyphen\n" +
+		"      </my-grid>\n" +
 		"    </Panel>\n" +
 		"  )\n" +
 		"}\n" +
@@ -259,6 +282,36 @@ func TestExtractTSXSkipsExplicitTypeArgumentsOnJSXTags(t *testing.T) {
 	}
 	want := []string{
 		"// Column definitions are memoized by the caller.",
+		"// Member tags carry the same argument syntax.",
+		"// Namespace tags do too.",
+		"// Hyphenated tags do too.",
+		"// trailing comment",
+	}
+	if got := commentTexts(catalog); !equalStrings(got, want) {
+		t.Fatalf("comments = %#v, want %#v", got, want)
+	}
+}
+
+// TestExtractTSXCatalogsCommentsInsideTypeArguments covers comments written
+// within a tag's type-argument list. A '>' inside such a comment must not close
+// the list, which would desynchronize the rest of the file.
+func TestExtractTSXCatalogsCommentsInsideTypeArguments(t *testing.T) {
+	source := []byte("export default function Grid({ rows }: Props) {\n" +
+		"  return (\n" +
+		"    <Grid<Row, /* a > b */ Col, // narrower than the parent\n" +
+		"      Deep>\n" +
+		"      {rows}\n" +
+		"    </Grid>\n" +
+		"  )\n" +
+		"}\n" +
+		"// trailing comment\n")
+	catalog, err := Extract("sample.tsx", TypeScript, source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"/* a > b */",
+		"// narrower than the parent",
 		"// trailing comment",
 	}
 	if got := commentTexts(catalog); !equalStrings(got, want) {
@@ -268,7 +321,8 @@ func TestExtractTSXSkipsExplicitTypeArgumentsOnJSXTags(t *testing.T) {
 
 // TestSkipTSTypeArguments pins the argument-list forms a JSX tag can carry:
 // nested lists whose '>>' must not close early, member and namespace tags,
-// function types whose '=>' is not a closing bracket, and quoted literal types.
+// function types whose '=>' is not a closing bracket, quoted literal types,
+// and comments whose '//' or '/*...*/' is skipped without ending the list.
 func TestSkipTSTypeArguments(t *testing.T) {
 	for _, tc := range []struct {
 		source string
@@ -280,9 +334,12 @@ func TestSkipTSTypeArguments(t *testing.T) {
 		{"<(value: number) => string> rest", len("<(value: number) => string>")},
 		{"<{ id: string; label: 'a>b' }> rest", len("<{ id: string; label: 'a>b' }>")},
 		{"<`col-${string}`> rest", len("<`col-${string}`>")},
+		{"<Row, /* a > b */ Col> rest", len("<Row, /* a > b */ Col>")},
+		{"<Row, // spans\n Col> rest", len("<Row, // spans\n Col>")},
 	} {
 		source := []byte(tc.source)
-		got, err := skipTSTypeArguments(source, 0, len(source))
+		state := &tsScan{failedJSX: map[int]int{}}
+		got, err := skipTSTypeArguments(source, 0, len(source), state)
 		if err != nil {
 			t.Errorf("skipTSTypeArguments(%q) returned %v", tc.source, err)
 			continue
@@ -292,7 +349,8 @@ func TestSkipTSTypeArguments(t *testing.T) {
 		}
 	}
 	for _, source := range []string{"<Row", "<Map<string", "<'unterminated>"} {
-		if _, err := skipTSTypeArguments([]byte(source), 0, len(source)); !errors.Is(err, errUnterminatedJSX) {
+		state := &tsScan{failedJSX: map[int]int{}}
+		if _, err := skipTSTypeArguments([]byte(source), 0, len(source), state); !errors.Is(err, errUnterminatedJSX) {
 			t.Errorf("skipTSTypeArguments(%q) error = %v, want errUnterminatedJSX", source, err)
 		}
 	}
@@ -302,9 +360,10 @@ func TestSkipTSTypeArguments(t *testing.T) {
 // expression position that opens a comparison rather than an element. An open
 // tag admits only names, quoted values, and '{...}' containers, so a second
 // bare '<' proves the candidate is not markup and the scan resumes as code.
+// 'typeof' precedes the candidate so the JSX gate is consulted at all.
 func TestExtractTSXRejectsCandidatesCarryingBareAngleBrackets(t *testing.T) {
 	source := []byte("const inRange = low < value && value < high\n" +
-		"const shifted = base < mask << 2\n" +
+		"const parsed = typeof <a b < c\n" +
 		"// range comment\n")
 	catalog, err := Extract("sample.tsx", TypeScript, source)
 	if err != nil {
@@ -318,10 +377,10 @@ func TestExtractTSXRejectsCandidatesCarryingBareAngleBrackets(t *testing.T) {
 // TestExtractScalesOnDenseJSXCandidates guards the cost of rejecting JSX
 // candidates. Each rejected '<' once re-scanned the rest of the region, so a
 // large generated file of non-JSX source cost minutes. Rejection is now bounded
-// by the candidate's own open tag, and repeat attempts replay a recorded
-// failure, which keeps the scan linear.
+// by the candidate's own open tag, which ends at its second bare '<', keeping
+// the scan linear in the number of candidates.
 func TestExtractScalesOnDenseJSXCandidates(t *testing.T) {
-	source := []byte(strings.Repeat("value = <candidate; ", 20000) + "\n// trailing comment\n")
+	source := []byte(strings.Repeat("value = <candidate; ", 100000) + "\n// trailing comment\n")
 	done := make(chan []string, 1)
 	go func() {
 		catalog, err := Extract("dense.tsx", TypeScript, source)

@@ -335,13 +335,28 @@ func isJSXNameByte(c byte) bool {
 	return isIdentifierByte(c) || isDigit(c) || c == '.' || c == ':' || c == '-'
 }
 
+// isJSXSpreadAttr reports whether '{' at i opens a '{...spread}' attribute
+// rather than an expression child, which decides whether an open tag that
+// ended with its type-argument list continues with attributes or has children.
+func isJSXSpreadAttr(source []byte, i, limit int) bool {
+	if i >= limit || source[i] != '{' {
+		return false
+	}
+	j := i + 1
+	for j < limit && isWhitespace(source[j]) {
+		j++
+	}
+	return j+2 < limit && source[j] == '.' && source[j+1] == '.' && source[j+2] == '.'
+}
+
 // skipTSTypeArguments consumes a balanced type-argument list beginning at '<'
 // and returns the offset just past its matching '>'. Nested lists, quoted
-// literal types, and template literal types are tracked so only a '>' at depth
-// zero closes the list, and '=>' is consumed whole so a function type's arrow
-// does not close it early. An unbalanced list reports errUnterminatedJSX so the
-// caller degrades to ordinary operator scanning.
-func skipTSTypeArguments(source []byte, start, limit int) (int, error) {
+// literal types, template literal types, and comments are tracked so only a '>'
+// at depth zero closes the list — a '>' inside a comment must not close it —
+// and '=>' is consumed whole so a function type's arrow does not close it early.
+// Comments in the list are cataloged. An unbalanced list reports
+// errUnterminatedJSX so the caller degrades to ordinary operator scanning.
+func skipTSTypeArguments(source []byte, start, limit int, state *tsScan) (int, error) {
 	depth := 0
 	for i := start; i < limit; {
 		switch source[i] {
@@ -357,6 +372,23 @@ func skipTSTypeArguments(source []byte, start, limit int) (int, error) {
 		case '=':
 			if i+1 < limit && source[i+1] == '>' {
 				i += 2 // arrow of a function type, not a closing bracket
+				continue
+			}
+			i++
+		case '/':
+			if i+1 < limit && source[i+1] == '/' {
+				end := lineEnd(source, i)
+				state.add(commentToken{start: i, end: end, form: LineComment})
+				i = end
+				continue
+			}
+			if i+1 < limit && source[i+1] == '*' {
+				end, _, err := commentEnd(source, i)
+				if err != nil {
+					return 0, err
+				}
+				state.add(commentToken{start: i, end: end, form: BlockComment})
+				i = end
 				continue
 			}
 			i++
@@ -427,11 +459,29 @@ func scanJSXElementBody(source []byte, start, limit int, jsxMode bool, state *ts
 		// A '<' abutting the tag name opens explicit type arguments, as in
 		// '<DataGridPremium<Row> ... />'. That list is type syntax, not markup,
 		// so its closing '>' must not be read as the end of the open tag.
-		end, err := skipTSTypeArguments(source, i, limit)
+		end, err := skipTSTypeArguments(source, i, limit, state)
 		if err != nil {
 			return 0, err
 		}
 		i = end
+		// The list's closing '>' can also terminate the open tag, as in
+		// '<Grid<Row></Grid>' or '<Grid<Row> {child} </Grid>'. A following '<'
+		// is a closing tag or child element, and a '{' that is not a spread
+		// attribute starts an expression child; either way the tag ended with
+		// the list and the children scanner takes over.
+		j := i
+		for j < limit {
+			if isWhitespace(source[j]) {
+				j++
+			} else if isLineBreakAt(source, j) {
+				j = skipLineBreak(source, j)
+			} else {
+				break
+			}
+		}
+		if j < limit && (source[j] == '<' || source[j] == '{') && !isJSXSpreadAttr(source, j, limit) {
+			return scanJSXChildren(source, j, limit, jsxMode, state)
+		}
 	}
 	for i < limit {
 		switch source[i] {
