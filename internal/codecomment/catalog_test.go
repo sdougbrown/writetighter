@@ -319,6 +319,25 @@ func TestExtractTSXCatalogsCommentsInsideTypeArguments(t *testing.T) {
 	}
 }
 
+// TestExtractTSXSpreadAttributeAfterTypeArguments covers a '{...spread}'
+// attribute following a type-argument list, on the same line and with the
+// dots on a later line. Either form must extract without error and without
+// comments fabricated from the URL in the child text.
+func TestExtractTSXSpreadAttributeAfterTypeArguments(t *testing.T) {
+	for _, source := range []string{
+		"const x = <Grid<Row> {...props}\n    cols={cols}>\n  see https://example.test\n</Grid>\n",
+		"const x = <Grid<Row> {\n    ...props}\n    cols={cols}>\n  see https://example.test\n</Grid>\n",
+	} {
+		catalog, err := Extract("sample.tsx", TypeScript, []byte(source))
+		if err != nil {
+			t.Fatalf("sample.tsx: %v", err)
+		}
+		if got := commentTexts(catalog); len(got) != 0 {
+			t.Fatalf("comments = %#v, want none", got)
+		}
+	}
+}
+
 // TestSkipTSTypeArguments pins the argument-list forms a JSX tag can carry:
 // nested lists whose '>>' must not close early, member and namespace tags,
 // function types whose '=>' is not a closing bracket, quoted literal types,
