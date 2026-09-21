@@ -107,11 +107,13 @@ func ReplacementIsSafe(language Language, source []byte, original Comment, repla
 }
 
 // jsxEnabled reports whether source is a JSX-bearing file, whose lexer treats
-// '<' at expression positions as JSX elements. Plain .ts/.js files keep the
-// exact TypeScript behavior with no JSX interpretation.
+// '<' at expression positions as JSX elements. Every JavaScript extension
+// qualifies: React toolchains accept JSX in plain .js, and the @jsx pragma that
+// might have gated it is absent from ordinary React sources. Only .ts is
+// excluded, where '<' at an expression position opens a type assertion.
 func jsxEnabled(filename string) bool {
 	switch strings.ToLower(filepath.Ext(filename)) {
-	case ".tsx", ".jsx":
+	case ".tsx", ".jsx", ".js", ".mjs", ".cjs":
 		return true
 	default:
 		return false
