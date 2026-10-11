@@ -272,8 +272,10 @@ func TestReviseCodeCommentsRejectsResponseBeyondSalvageCeiling(t *testing.T) {
 	defer srv.Close()
 	doc := codeCommentDocument(t, source, "sample.go")
 	_, err = ReviseCodeComments(context.Background(), Config{BaseURL: srv.URL, Model: "test", Timeout: time.Second}, doc, &profile.Resolution{})
-	if err == nil || !strings.Contains(err.Error(), "too large") {
-		t.Fatalf("expected too large error beyond salvage ceiling, got: %v", err)
+	// Assert the error came from the hard ceiling, not from a salvage attempt:
+	// "salvage" in the message would mean the ceiling gate regressed.
+	if err == nil || !strings.Contains(err.Error(), "too large") || strings.Contains(err.Error(), "salvage") {
+		t.Fatalf("expected hard-ceiling too large error beyond salvage ceiling, got: %v", err)
 	}
 }
 
@@ -282,7 +284,9 @@ func TestReviseCodeCommentsOversizedInvalidResponseStillFails(t *testing.T) {
 	defer srv.Close()
 	doc := codeCommentDocument(t, "package p\n\t// café old\nfunc f() {}\n", "sample.go")
 	_, err := ReviseCodeComments(context.Background(), Config{BaseURL: srv.URL, Model: "test", Timeout: time.Second}, doc, &profile.Resolution{})
-	if err == nil || !strings.Contains(err.Error(), "too large") {
-		t.Fatalf("expected too large error for oversized non-JSON response, got: %v", err)
+	// The non-JSON response is inside the salvage band, so the failure must be
+	// a salvage validation failure, not the hard ceiling gate.
+	if err == nil || !strings.Contains(err.Error(), "salvage validation failed") {
+		t.Fatalf("expected salvage validation failure for oversized non-JSON response, got: %v", err)
 	}
 }
