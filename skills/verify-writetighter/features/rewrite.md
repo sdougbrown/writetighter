@@ -3,6 +3,10 @@
 ## Sub-features
 
 - `rewrite` rewrites one passage in context (model-backed); requires config.
+- Oversized-but-parseable rewrites are accepted up to the salvage ceiling
+  (4x the normal output cap); beyond it the request fails as too large
+  (exit 3). Protected-content and injected-token validation still run on
+  oversized passages.
 - Flags: `--stdin`, `--text`, `--kind` (default `description`), `--profile`,
   `--config`, `--format` (default `text`), `--model` (override for this run).
 - Model failure surfaces as exit code 3.

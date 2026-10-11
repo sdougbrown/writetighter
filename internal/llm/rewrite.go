@@ -204,7 +204,10 @@ func Rewrite(ctx context.Context, cfg Config, doc *document.Document, res *profi
 	if rewritten == "" {
 		return nil, ErrRewriteEmpty
 	}
-	if len(rewritten) > MaxOutputChars {
+	if len(rewritten) > MaxSalvageOutputChars {
+		// Same salvage policy as the revise path (issue #33/#36): an oversized
+		// passage is accepted up to the salvage ceiling; the full validation
+		// suite below still guards protected and injected content.
 		return nil, fmt.Errorf("%w: rewrite output too large", ErrInvalidModelResponse)
 	}
 

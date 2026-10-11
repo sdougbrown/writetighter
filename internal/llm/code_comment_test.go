@@ -91,7 +91,7 @@ func TestValidateCodeCommentResponseRejectsUnsafeAndInvalidFindings(t *testing.T
 		{"comment_id":"c0001","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"x","replacement":null,"question":"What?","confidence":0.9},
 		{"comment_id":"c0003","action":"rewrite","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"x","replacement":"// third","question":"What?","confidence":0.9}
 	]}`)
-	response, err := validateCodeCommentResponse(raw, catalog, []byte(source), doc.Source)
+	response, err := validateCodeCommentResponse(raw, MaxOutputChars, catalog, []byte(source), doc.Source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestValidateCodeCommentResponseRejectsEveryDuplicateRegardlessOfOrder(t *te
 	valid := `{"comment_id":"c0001","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"x","replacement":null,"question":"What?","confidence":0.9}`
 	lowConfidence := `{"comment_id":"c0001","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"x","replacement":null,"question":"What?","confidence":0.7}`
 	for _, findings := range []string{valid + "," + lowConfidence, lowConfidence + "," + valid} {
-		response, err := validateCodeCommentResponse([]byte(`{"findings":[`+findings+`]}`), catalog, []byte(doc.Content), doc.Source)
+		response, err := validateCodeCommentResponse([]byte(`{"findings":[`+findings+`]}`), MaxOutputChars, catalog, []byte(doc.Content), doc.Source)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +125,7 @@ func TestValidateCodeCommentResponseCannotTargetPythonDocstrings(t *testing.T) {
 	if len(catalog.Comments) != 1 || catalog.Comments[0].Text != "# real" {
 		t.Fatalf("docstring entered catalog: %#v", catalog.Comments)
 	}
-	response, err := validateCodeCommentResponse([]byte(`{"findings":[{"comment_id":"c0002","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"x","replacement":null,"question":"What?","confidence":0.9}]}`), catalog, []byte(doc.Content), doc.Source)
+	response, err := validateCodeCommentResponse([]byte(`{"findings":[{"comment_id":"c0002","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"x","replacement":null,"question":"What?","confidence":0.9}]}`), MaxOutputChars, catalog, []byte(doc.Content), doc.Source)
 	if err != nil || len(response.Revisions) != 0 || response.DiscardedFindings != 1 {
 		t.Fatalf("docstring-like target was not rejected: %#v, err=%v", response, err)
 	}
@@ -134,7 +134,7 @@ func TestValidateCodeCommentResponseCannotTargetPythonDocstrings(t *testing.T) {
 func TestValidateCodeCommentResponseRejectsLowConfidence(t *testing.T) {
 	doc := codeCommentDocument(t, "# real\n", "sample.py")
 	catalog := codeCommentCatalog(t, doc)
-	response, err := validateCodeCommentResponse([]byte(`{"findings":[{"comment_id":"c0001","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"x","replacement":null,"question":"What?","confidence":0.7}]}`), catalog, []byte(doc.Content), doc.Source)
+	response, err := validateCodeCommentResponse([]byte(`{"findings":[{"comment_id":"c0001","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"x","replacement":null,"question":"What?","confidence":0.7}]}`), MaxOutputChars, catalog, []byte(doc.Content), doc.Source)
 	if err != nil || len(response.Revisions) != 0 || response.DiscardedRewrites != 0 || response.DiscardedFindings != 1 {
 		t.Fatalf("low-confidence finding was not discarded: %#v, err=%v", response, err)
 	}
@@ -148,7 +148,7 @@ func TestValidateCodeCommentResponseKeepsValidSiblingAndMultilineIndentation(t *
 		{"comment_id":"c0001","action":"rewrite","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"Clearer rationale.","replacement":"// current\n\t// rationale","question":null,"confidence":0.9},
 		{"comment_id":"unknown","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"x","replacement":null,"question":"What?","confidence":0.9}
 	]}`)
-	response, err := validateCodeCommentResponse(raw, catalog, []byte(source), doc.Source)
+	response, err := validateCodeCommentResponse(raw, MaxOutputChars, catalog, []byte(source), doc.Source)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -161,7 +161,7 @@ func TestCodeCommentResponseRejectsMalformedTopLevel(t *testing.T) {
 	doc := codeCommentDocument(t, "# real\n", "sample.py")
 	catalog := codeCommentCatalog(t, doc)
 	for _, raw := range [][]byte{[]byte(`{}`), []byte(`{"findings":{},"extra":true}`), []byte(`{"findings":null}`)} {
-		_, err := validateCodeCommentResponse(raw, catalog, []byte(doc.Content), doc.Source)
+		_, err := validateCodeCommentResponse(raw, MaxOutputChars, catalog, []byte(doc.Content), doc.Source)
 		if err == nil {
 			t.Fatalf("malformed top-level response accepted: %s", raw)
 		}
@@ -222,4 +222,71 @@ func TestCodeCommentSchemaIsStrictWhenConfigured(t *testing.T) {
 func responseString(value any) string {
 	encoded, _ := json.Marshal(value)
 	return string(encoded)
+}
+
+// Issue #36: oversized-but-parseable code-comment responses must be salvaged
+// under the same policy the revise prose path gained in PR #35.
+func TestReviseCodeCommentsSalvagesOversizedValidResponse(t *testing.T) {
+	source := "package p\n\t// café old\nfunc f() {}\n"
+	pad := strings.Repeat("stale rationale padding. ", 500) // ~12.5KB
+	content, err := json.Marshal(map[string]any{"findings": []map[string]any{{
+		"comment_id": "c0001", "action": "rewrite",
+		"principle_ids": []string{"CORE.EXPLICIT_RELATIONSHIPS"},
+		"reason":        pad + "The comment is stale.", "replacement": "// café current",
+		"question": nil, "confidence": 0.9,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) <= MaxOutputChars || len(content) > MaxSalvageOutputChars {
+		t.Fatalf("fixture not in the salvage band: %d bytes", len(content))
+	}
+	srv := newFakeContentServer(string(content))
+	defer srv.Close()
+	doc := codeCommentDocument(t, source, "sample.go")
+	response, err := ReviseCodeComments(context.Background(), Config{BaseURL: srv.URL, Model: "test", Timeout: time.Second}, doc, &profile.Resolution{})
+	if err != nil {
+		t.Fatalf("expected oversized-but-valid response to be salvaged, got: %v", err)
+	}
+	if len(response.Revisions) != 1 || response.Revisions[0].SourceText != "// café old" {
+		t.Fatalf("expected the catalog finding to survive, got %#v", response.Revisions)
+	}
+}
+
+func TestReviseCodeCommentsRejectsResponseBeyondSalvageCeiling(t *testing.T) {
+	source := "package p\n\t// café old\nfunc f() {}\n"
+	pad := strings.Repeat("stale rationale padding. ", 1650) // ~41KB
+	content, err := json.Marshal(map[string]any{"findings": []map[string]any{{
+		"comment_id": "c0001", "action": "rewrite",
+		"principle_ids": []string{"CORE.EXPLICIT_RELATIONSHIPS"},
+		"reason":        pad + "The comment is stale.", "replacement": "// café current",
+		"question": nil, "confidence": 0.9,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(content) <= MaxSalvageOutputChars || len(content) > MaxEnvelopeChars-1024 {
+		t.Fatalf("fixture outside the beyond-ceiling band: %d bytes", len(content))
+	}
+	srv := newFakeContentServer(string(content))
+	defer srv.Close()
+	doc := codeCommentDocument(t, source, "sample.go")
+	_, err = ReviseCodeComments(context.Background(), Config{BaseURL: srv.URL, Model: "test", Timeout: time.Second}, doc, &profile.Resolution{})
+	// Assert the error came from the hard ceiling, not from a salvage attempt:
+	// "salvage" in the message would mean the ceiling gate regressed.
+	if err == nil || !strings.Contains(err.Error(), "too large") || strings.Contains(err.Error(), "salvage") {
+		t.Fatalf("expected hard-ceiling too large error beyond salvage ceiling, got: %v", err)
+	}
+}
+
+func TestReviseCodeCommentsOversizedInvalidResponseStillFails(t *testing.T) {
+	srv := newFakeContentServer(strings.Repeat("x", MaxOutputChars+100))
+	defer srv.Close()
+	doc := codeCommentDocument(t, "package p\n\t// café old\nfunc f() {}\n", "sample.go")
+	_, err := ReviseCodeComments(context.Background(), Config{BaseURL: srv.URL, Model: "test", Timeout: time.Second}, doc, &profile.Resolution{})
+	// The non-JSON response is inside the salvage band, so the failure must be
+	// a salvage validation failure, not the hard ceiling gate.
+	if err == nil || !strings.Contains(err.Error(), "salvage validation failed") {
+		t.Fatalf("expected salvage validation failure for oversized non-JSON response, got: %v", err)
+	}
 }

@@ -12,7 +12,8 @@
 - `rewrite` is the whole-passage variant (also model-backed).
 - Protected technical content: rewrites that lose commands/paths/numbers are
   discarded (`discarded_rewrites` / `discarded_findings` counters).
-- Oversized-but-parseable model responses are salvaged: responses over the
+- Oversized-but-parseable model responses are salvaged (revise prose,
+  code-comment, and rewrite paths): responses over the
   normal output cap are still validated (up to a salvage ceiling) and valid
   revisions are kept; revisions whose `source_text` cannot be resolved are
   dropped and counted in `discarded_findings`. The chunk fails only when
