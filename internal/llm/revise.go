@@ -191,6 +191,7 @@ func reviseExcerpt(ctx context.Context, config Config, doc *document.Document, r
 		startOrig := excerpt.OrigOffset(rev.Range.StartByte)
 		endOrig := excerpt.OrigOffset(rev.Range.EndByte)
 		if startOrig < 0 || endOrig < 0 {
+			drop(fmt.Sprintf("range [%d, %d) does not map into the original document", rev.Range.StartByte, rev.Range.EndByte))
 			continue
 		}
 		rev.Range.StartByte = startOrig
@@ -496,30 +497,37 @@ func summarizeText(text string, max int) string {
 
 // closestFuzzyCandidate reports the excerpt span that overlaps the claimed
 // source_text's words most, for use in diagnostics only; it never produces
-// revision ranges. The span covers every excerpt word that also appears in
-// the claimed text, so paraphrased or reordered claims still yield a hint.
+// revision ranges. The span covers distinct claimed words that also appear in
+// the excerpt, so paraphrased or reordered claims still yield a hint. Both
+// sides tokenize on Unicode whitespace so non-ASCII spaces do not split words
+// differently on one side of the comparison.
 func closestFuzzyCandidate(text, source string) (start, end int, similarity float64, ok bool) {
-	sourceWords := make(map[string]struct{})
+	pending := make(map[string]struct{})
 	for _, w := range strings.Fields(source) {
-		sourceWords[w] = struct{}{}
+		pending[w] = struct{}{}
 	}
-	if len(sourceWords) == 0 {
+	if len(pending) == 0 {
 		return 0, 0, 0, false
 	}
+	total := len(pending)
 	matched := 0
 	start, end = -1, -1
 	for i := 0; i < len(text); {
-		for i < len(text) && isSpaceByte(text[i]) {
-			i++
-		}
-		if i >= len(text) {
-			break
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if unicode.IsSpace(r) {
+			i += size
+			continue
 		}
 		j := i
-		for j < len(text) && !isSpaceByte(text[j]) {
-			j++
+		for j < len(text) {
+			r, size = utf8.DecodeRuneInString(text[j:])
+			if unicode.IsSpace(r) {
+				break
+			}
+			j += size
 		}
-		if _, hit := sourceWords[text[i:j]]; hit {
+		if _, hit := pending[text[i:j]]; hit {
+			delete(pending, text[i:j])
 			matched++
 			if start < 0 {
 				start = i
@@ -531,19 +539,7 @@ func closestFuzzyCandidate(text, source string) (start, end int, similarity floa
 	if matched == 0 {
 		return 0, 0, 0, false
 	}
-	similarity = float64(matched) / float64(len(sourceWords))
-	if similarity > 1 {
-		similarity = 1
-	}
-	return start, end, similarity, true
-}
-
-func isSpaceByte(b byte) bool {
-	switch b {
-	case ' ', '\t', '\n', '\v', '\f', '\r':
-		return true
-	}
-	return false
+	return start, end, float64(matched) / float64(total), true
 }
 
 // findSourceTextNormalized finds source in text by comparing

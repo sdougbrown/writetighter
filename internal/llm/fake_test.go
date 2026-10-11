@@ -99,7 +99,7 @@ func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
 			if mode == "wrong-range" {
 				finding.SourceText = "term"
 			}
-			if mode == "mixed-source-text" || mode == "bad-source-text" || mode == "out-of-bounds-range" {
+			if mode == "mixed-source-text" || mode == "bad-source-text" || mode == "out-of-bounds-range" || mode == "ungrounded-source-text" {
 				type richFinding struct {
 					Kind         string      `json:"kind"`
 					SourceText   string      `json:"source_text"`
@@ -127,8 +127,11 @@ func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
 					bad.SourceText = "deprecated"
 					bad.SourceRange = SourceRange{Start: 0, End: 100000}
 				}
+				if mode == "ungrounded-source-text" {
+					bad.SourceText = "zzzyy xqqq wvvv"
+				}
 				findings := []richFinding{good, bad}
-				if mode == "bad-source-text" {
+				if mode == "bad-source-text" || mode == "ungrounded-source-text" {
 					findings = []richFinding{bad}
 				}
 				respContent, _ := json.Marshal(map[string]any{"findings": findings})

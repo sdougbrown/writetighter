@@ -1008,3 +1008,17 @@ func TestDescribeSourceTextMismatchNoCandidate(t *testing.T) {
 		t.Fatalf("expected no-candidate fallback message, got: %q", diag)
 	}
 }
+
+// End-to-end: a fully non-overlapping source_text must produce the
+// no-candidate diagnostic through the full chunk path, not just the helper.
+func TestReviseUngroundedSourceTextFailsWithNoCandidateDiagnostic(t *testing.T) {
+	srv := newFakeReviseServer(false, "ungrounded-source-text")
+	defer srv.Close()
+	_, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	if !errors.Is(err, ErrInvalidModelResponse) {
+		t.Fatalf("expected ErrInvalidModelResponse, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "claimed text has no similar content in the excerpt") {
+		t.Fatalf("expected no-candidate fallback diagnostic, got: %v", err)
+	}
+}
