@@ -693,6 +693,16 @@ func TestRunPromptRejectsInvalidOptions(t *testing.T) {
 	}
 }
 
+// isolateUserConfig points XDG_CONFIG_HOME and HOME at one empty scratch dir
+// so user-config lookup cannot see the developer's real ~/.config/writetighter
+// (LoadUserConfig falls back to $HOME when the XDG path is absent).
+func isolateUserConfig(t *testing.T) {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+}
+
 func TestRunReviseNoInput(t *testing.T) {
 	err := (&App{}).RunRevise(ReviseParams{})
 	if err == nil {
@@ -1009,6 +1019,7 @@ func TestRunReviseRejectsConfiguredUnsetAPIKey(t *testing.T) {
 }
 
 func TestRunReviseUnsupportedProvider(t *testing.T) {
+	isolateUserConfig(t)
 	path := writeTempFile(t, "test content.")
 	err := (&App{}).RunRevise(ReviseParams{
 		Paths:  []string{path},
@@ -1020,6 +1031,7 @@ func TestRunReviseUnsupportedProvider(t *testing.T) {
 }
 
 func TestReviseAcceptsInputFlags(t *testing.T) {
+	isolateUserConfig(t)
 	// Verify that revise accepts valid flag combinations (config error is about
 	// missing LLM config, not bad flag parsing).
 	path := writeTempFile(t, "test content.")
