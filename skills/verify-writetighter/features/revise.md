@@ -54,9 +54,10 @@ byte-identical before/after. Failure path: exit 3 with `errors` populated.
 
 ## Gotchas
 
-- `revise --stdin` cannot run interactive configuration: without valid model
-  config it fails (exit 2) with a `writetighter config` hint instead of
-  prompting. Use `--text` if a non-interactive unconfigured run is needed.
+- Unconfigured non-interactive runs fail (exit 2) with a `writetighter
+  config` hint. Only a run on a real terminal auto-starts the wizard (the
+  gate is `stdinIsTerminal()`); `--stdin`, `--text`, and scripted/pipe runs
+  never prompt.
 - The stub's canned `source_text` must appear verbatim in the fixture;
   mismatch relies on nearest-occurrence fallback and can produce zero
   findings rather than an error.

@@ -2,7 +2,11 @@
 
 ## Sub-features
 
-- `config` (no args): prints the current model configuration.
+- `config` (no args): prints the current model configuration; when no usable
+  config exists it starts the interactive wizard (in a terminal). With a
+  missing scratch config it can fall back to and print the real
+  `~/.config/writetighter/config.toml` — always seed the scratch config
+  first (see `../SKILL.md` Launch).
 - `config --wizard`: interactive setup — URL/port, auth choice, model
   selection, structured-output preflight, atomic write with 0600 permissions.
 - Auth choices: no key, key in config (0600), key via environment variable.
@@ -36,7 +40,7 @@ def rd(t=0.8):
     except OSError: pass
     return out.decode(errors="replace")
 assert "OpenAI-compatible API URL" in rd()          # banner + URL prompt
-os.write(fd, b"127.0.0.1:8731\n"); assert "Authentication [1]:" in rd()
+os.write(fd, b"127.0.0.1:8731\n"); assert "Authentication" in rd()
 os.write(fd, b"1\n")                                # 1 = No API key
 assert "Select a model" in rd(1.2)                  # stub-model listed
 os.write(fd, b"\n")                                 # accept first model

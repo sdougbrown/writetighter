@@ -13,9 +13,13 @@ driving steps.
 
 - This is a single-user CLI. Every invocation reads config from
   `$XDG_CONFIG_HOME/writetighter/config.toml` (default `~/.config/writetighter/`).
-  **Always export `XDG_CONFIG_HOME` to a per-run scratch dir** so a
-  verification run never reads or overwrites the user's real model config,
-  and the interactive wizard never writes there.
+  **Always export `XDG_CONFIG_HOME` to a per-run scratch dir AND create
+  `$XDG_CONFIG_HOME/writetighter/config.toml` (even an empty file) before the
+  first invocation** — a missing scratch config makes writetighter fall back to
+  the real `~/.config/writetighter/config.toml`.
+- `profile install` writes profile bundles under
+  `$XDG_DATA_HOME/writetighter/profiles`; set a scratch `XDG_DATA_HOME`
+  when driving profile installs.
 - `lint`, `prompt`, `explain`, `profile`, `version` never touch the network.
 - `revise`/`rewrite` call an OpenAI-compatible endpoint. For offline proof,
   run `helpers/llm_stub.py` on a scratch localhost port and point the scratch
@@ -37,8 +41,10 @@ an `embedded profile: software-docs-en@<version>` line, exit 0.
 There is no daemon. For feature proofs that need the model stub:
 
 ```sh
-python3 skills/verify-writetighter/helpers/llm_stub.py 8731 &   # record $!
+python3 skills/verify-writetighter/helpers/llm_stub.py 8731 &   STUB_PID=$!
+kill -0 "$STUB_PID" 2>/dev/null || { echo "stub failed to start (port taken?)"; exit 1; }
 export XDG_CONFIG_HOME="$WT/cfg"
+export WT_BIN="$WT/writetighter" WT_CFG="$XDG_CONFIG_HOME"
 mkdir -p "$XDG_CONFIG_HOME/writetighter"
 sed 's/PORT_STUB/8731/' <<'TOML' > "$XDG_CONFIG_HOME/writetighter/config.toml"
 [llm]
@@ -47,6 +53,7 @@ base_url = "http://127.0.0.1:PORT_STUB/v1"
 model = "stub-model"
 response_mode = "prompt_json"
 TOML
+touch "$XDG_CONFIG_HOME/writetighter/config.toml"   # non-stub flows: empty file suppresses the real-config fallback
 ```
 
 ## Doctor
@@ -123,7 +130,8 @@ Capture to `skills/verify-writetighter/evidence/<run-id>/` (gitignored):
 - for `revise`: a checksum of the fixture before and after (`revise` must
   never modify its target);
 - for `config`: the PTY transcript and the written config file (`stat -c %a`
-  must print `600`).
+  must print `600`). Redact any `api_key` line before copying `config.toml`
+  into evidence, and `chmod 600` copied evidence files.
 
 Proof standard: the action and the resulting state, not just the final
 screen. A `revise` proof shows the suggestion AND the untouched fixture; a

@@ -16,6 +16,7 @@ installs a new profile bundle from a local path.
 ## Driving it with CLI
 
 ```sh
+export XDG_DATA_HOME="$WT/data"   # profile install writes to $XDG_DATA_HOME/writetighter/profiles
 "$WT/writetighter" profile list
 echo exit=$?   # expect 0; line contains "embedded" and "software-docs-en@0.6.0"
 "$WT/writetighter" profile verify software-docs-en@0.6.0
@@ -34,7 +35,9 @@ Observable end state: `list` shows the embedded profile with a stable sha256;
 - The embedded profile sha256 is content-addressed: if the profile source
   changed, the sha256 in `profile list` output changes — update map/proof
   expectations in the same change.
-- `profile install` writes into the config area, so always run with the
-  scratch `XDG_CONFIG_HOME` (see `../SKILL.md` isolation rules).
+- `profile install` writes into `$XDG_DATA_HOME/writetighter/profiles`
+  (`internal/profile/resolve.go` `profileRoot`), not the config area — set a
+  scratch `XDG_DATA_HOME` too (see `../SKILL.md` isolation rules). Always
+  run with scratch `XDG_CONFIG_HOME` as well.
 - Lint results are pinned to the profile; a verification recipe that asserts
   finding wording must pin `ID@VERSION` semantics of the embedded profile.

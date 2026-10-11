@@ -8,6 +8,7 @@ lists others.
 |---|---|---|
 | Deterministic lint | `lint.md` | no |
 | Contextual revision (`revise`/`rewrite`) | `revise.md` | stub |
+| Whole-passage rewrite (rewrite) | `rewrite.md` | stub |
 | Revision guidance export (`prompt`) | `prompt.md` | no |
 | Model configuration (`config`) | `config.md` | stub (preflight) |
 | Profile management (`profile`) | `profile.md` | no |
