@@ -53,7 +53,8 @@ base_url = "http://127.0.0.1:PORT_STUB/v1"
 model = "stub-model"
 response_mode = "prompt_json"
 TOML
-touch "$XDG_CONFIG_HOME/writetighter/config.toml"   # non-stub flows: empty file suppresses the real-config fallback
+# the heredoc-created config.toml above suppresses the real-config fallback;
+# for non-stub flows, write any scratch config.toml (even empty) before the first command
 ```
 
 ## Doctor
