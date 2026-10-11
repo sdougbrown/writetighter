@@ -12,3 +12,6 @@ evals/.pytest_cache/
 evals/**/__pycache__/
 evals/dist/
 evals/*.egg-info/
+
+# Verification skill evidence artifacts
+skills/verify-writetighter/evidence/
