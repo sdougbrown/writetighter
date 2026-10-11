@@ -1020,24 +1020,10 @@ func TestRunReviseRejectsConfiguredUnsetAPIKey(t *testing.T) {
 	}
 }
 
-// TestRunReviseWithoutConfigFails: with no user config at all, revise must
-// fail on the missing-model check. The provider-specific branch is covered by
-// TestRunReviseUnsupportedProvider below.
-func TestRunReviseWithoutConfigFails(t *testing.T) {
-	isolateUserConfig(t)
-	path := writeTempFile(t, "test content.")
-	err := (&App{}).RunRevise(ReviseParams{
-		Paths:  []string{path},
-		Format: "json",
-	})
-	if err == nil {
-		t.Fatal("expected error for missing LLM config")
-	}
-}
-
 // TestRunReviseUnsupportedProvider: a config with a valid model and base URL
 // but a non-openai-compatible provider must reach the provider branch and fail
 // with the unsupported-provider error (the missing-model check comes first).
+// The no-config path is covered by TestRunReviseMissingLLMConfig.
 func TestRunReviseUnsupportedProvider(t *testing.T) {
 	root := isolateUserConfig(t)
 	dir := filepath.Join(root, "writetighter")
@@ -1053,8 +1039,10 @@ func TestRunReviseUnsupportedProvider(t *testing.T) {
 		Paths:  []string{path},
 		Format: "json",
 	})
-	if err == nil || !strings.Contains(err.Error(), "unsupported llm provider") {
-		t.Fatalf("expected unsupported llm provider error, got: %v", err)
+	// main.go branches on ErrLLMConfigRequired for exit-code handling, so the
+	// error must keep wrapping the sentinel, not just carry the message.
+	if err == nil || !errors.Is(err, ErrLLMConfigRequired) || !strings.Contains(err.Error(), "unsupported llm provider") {
+		t.Fatalf("expected ErrLLMConfigRequired with unsupported llm provider error, got: %v", err)
 	}
 }
 
