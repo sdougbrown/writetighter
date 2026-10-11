@@ -71,13 +71,13 @@ assertions (recipes in `features/lint.md`, `features/prompt.md`,
 ```sh
 "$WT/writetighter" lint --text "Restart the service after changing the file." \
   --kind pr --fail-on warning
-echo exit=$?   # 1: the 9-word sentence is fine, but run the fixture below for a real finding
+echo exit=$?   # expect 0: the 9-word sentence is within limits; the fixture below trips a real finding
 ```
 
 For a real finding, use a fixture with an over-long sentence:
 
 ```sh
-printf 'This single sentence deliberately packs far more words than the profile permits and keeps going well past twenty tokens.\n' > "$WT/fixture.md"
+printf 'This single overly long demonstration sentence deliberately packs far more words than the description profile permits because it keeps going well past the twenty-five word threshold with clause after clause appended.\n' > "$WT/fixture.md"
 "$WT/writetighter" lint "$WT/fixture.md" --kind description --format json --fail-on warning
 echo exit=$?   # expect 1, JSON contains CORE.SENTENCE_LENGTH
 ```

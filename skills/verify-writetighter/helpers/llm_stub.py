@@ -26,7 +26,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/v1/models":
             self._send({"object": "list", "data": [
                 {"id": "stub-model", "object": "model",
-                 "context_window_tokens": 8192}]})
+                 "context_length": 8192}]})
         else:
             self.send_error(404)
 
