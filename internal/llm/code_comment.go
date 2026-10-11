@@ -70,12 +70,28 @@ func ReviseCodeComments(ctx context.Context, cfg Config, doc *document.Document,
 	if len(resp.Choices) == 0 {
 		return nil, fmt.Errorf("%w: empty response", ErrInvalidModelResponse)
 	}
-	raw := unwrapJSONFence([]byte(resp.Choices[0].Message.Content))
+	content := []byte(resp.Choices[0].Message.Content)
+	maxOutputChars := MaxOutputChars
+	if len(content) > MaxSalvageOutputChars {
+		return nil, fmt.Errorf("%w: response too large", ErrInvalidModelResponse)
+	}
+	if len(content) > MaxOutputChars {
+		// Salvage: the response exceeded the normal output cap but may still
+		// carry valid findings. Validate against the salvage ceiling instead of
+		// failing the request (same policy as the revise path, issue #33).
+		maxOutputChars = MaxSalvageOutputChars
+	}
+	raw := unwrapJSONFence(content)
 	if modelErr := parseModelReportedError(raw); modelErr != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidModelResponse, modelErr)
 	}
-	result, err := validateCodeCommentResponse(raw, catalog, []byte(doc.Content), doc.Source)
+	result, err := validateCodeCommentResponse(raw, maxOutputChars, catalog, []byte(doc.Content), doc.Source)
 	if err != nil {
+		if maxOutputChars != MaxOutputChars {
+			// The oversized response could not be salvaged; report the size
+			// failure, keeping the validation detail for diagnosis.
+			return nil, fmt.Errorf("%w: response too large; salvage validation failed: %v", ErrInvalidModelResponse, err)
+		}
 		return nil, fmt.Errorf("%w: %v", ErrInvalidModelResponse, err)
 	}
 	return result, nil
@@ -206,8 +222,8 @@ type codeCommentFinding struct {
 	Confidence   *float64 `json:"confidence"`
 }
 
-func validateCodeCommentResponse(raw []byte, catalog codecomment.Catalog, source []byte, sourcePath string) (*report.ReviseResponse, error) {
-	if len(raw) > MaxOutputChars {
+func validateCodeCommentResponse(raw []byte, maxChars int, catalog codecomment.Catalog, source []byte, sourcePath string) (*report.ReviseResponse, error) {
+	if len(raw) > maxChars {
 		return nil, errors.New("llm response too large")
 	}
 	var envelope map[string]json.RawMessage

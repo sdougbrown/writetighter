@@ -334,3 +334,58 @@ func TestHasInjectedTokens(t *testing.T) {
 
 // silence unused imports
 var _ = profile.Resolve
+
+// Issue #36: oversized-but-parseable rewrites must be accepted up to the
+// salvage ceiling under the same policy the revise path gained in PR #35.
+// The existing validation suite (protected content, injected tokens,
+// control-character sanitization) still runs on the oversized passage.
+func TestRewriteSalvagesOversizedRewrite(t *testing.T) {
+	original := "The component leverages synergies."
+	rewritten := strings.TrimRight(strings.Repeat("The component uses synergies every sprint. ", 260), " ") // ~13KB
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": rewritten}}},
+		})
+	}))
+	defer server.Close()
+
+	doc, err := document.FromText(original, guidance.KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rewritten) <= MaxOutputChars || len(rewritten) > MaxSalvageOutputChars {
+		t.Fatalf("fixture not in the salvage band: %d bytes", len(rewritten))
+	}
+	result, err := Rewrite(context.Background(), Config{BaseURL: server.URL, Model: "test-model"}, doc, nil, nil, nil)
+	if err != nil {
+		t.Fatalf("expected oversized-but-valid rewrite to be salvaged, got: %v", err)
+	}
+	if result.Text != rewritten || result.Discarded {
+		t.Fatalf("expected the full rewrite to survive, got discarded=%t text len=%d", result.Discarded, len(result.Text))
+	}
+}
+
+func TestRewriteRejectsRewriteBeyondSalvageCeiling(t *testing.T) {
+	original := "The component leverages synergies."
+	rewritten := strings.Repeat("The component uses synergies every sprint. ", 1100) // ~55KB
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"choices": []map[string]any{{"message": map[string]string{"role": "assistant", "content": rewritten}}},
+		})
+	}))
+	defer server.Close()
+
+	doc, err := document.FromText(original, guidance.KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rewritten) <= MaxSalvageOutputChars || len(rewritten) > MaxEnvelopeChars-1024 {
+		t.Fatalf("fixture outside the beyond-ceiling band: %d bytes", len(rewritten))
+	}
+	_, err = Rewrite(context.Background(), Config{BaseURL: server.URL, Model: "test-model"}, doc, nil, nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected too large error beyond salvage ceiling, got: %v", err)
+	}
+}
