@@ -695,12 +695,14 @@ func TestRunPromptRejectsInvalidOptions(t *testing.T) {
 
 // isolateUserConfig points XDG_CONFIG_HOME and HOME at one empty scratch dir
 // so user-config lookup cannot see the developer's real ~/.config/writetighter
-// (LoadUserConfig falls back to $HOME when the XDG path is absent).
-func isolateUserConfig(t *testing.T) {
+// (LoadUserConfig falls back to $HOME when the XDG path is absent). Returns the
+// scratch root for tests that need to write a fixture config into it.
+func isolateUserConfig(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", root)
 	t.Setenv("HOME", root)
+	return root
 }
 
 func TestRunReviseNoInput(t *testing.T) {
@@ -1018,7 +1020,10 @@ func TestRunReviseRejectsConfiguredUnsetAPIKey(t *testing.T) {
 	}
 }
 
-func TestRunReviseUnsupportedProvider(t *testing.T) {
+// TestRunReviseWithoutConfigFails: with no user config at all, revise must
+// fail on the missing-model check. The provider-specific branch is covered by
+// TestRunReviseUnsupportedProvider below.
+func TestRunReviseWithoutConfigFails(t *testing.T) {
 	isolateUserConfig(t)
 	path := writeTempFile(t, "test content.")
 	err := (&App{}).RunRevise(ReviseParams{
@@ -1027,6 +1032,29 @@ func TestRunReviseUnsupportedProvider(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for missing LLM config")
+	}
+}
+
+// TestRunReviseUnsupportedProvider: a config with a valid model and base URL
+// but a non-openai-compatible provider must reach the provider branch and fail
+// with the unsupported-provider error (the missing-model check comes first).
+func TestRunReviseUnsupportedProvider(t *testing.T) {
+	root := isolateUserConfig(t)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "[llm]\nprovider = \"ollama\"\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"test-model\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	path := writeTempFile(t, "test content.")
+	err := (&App{}).RunRevise(ReviseParams{
+		Paths:  []string{path},
+		Format: "json",
+	})
+	if err == nil || !strings.Contains(err.Error(), "unsupported llm provider") {
+		t.Fatalf("expected unsupported llm provider error, got: %v", err)
 	}
 }
 
