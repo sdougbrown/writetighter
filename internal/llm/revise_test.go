@@ -856,3 +856,68 @@ func TestFindSourceTextNormalizedLeadingWhitespaceInSource(t *testing.T) {
 		t.Fatalf("expected quick brown, got %q at [%d,%d)", text[start:end], start, end)
 	}
 }
+
+// Issue #33 regression: one oversized model response must not fail the whole
+// chunk when the payload is still parseable and contains valid revisions.
+func TestReviseSalvagesOversizedValidResponse(t *testing.T) {
+	srv := newFakeReviseServer(false, "oversized-valid")
+	defer srv.Close()
+	response, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	if err != nil {
+		t.Fatalf("expected oversized-but-valid response to be salvaged, got: %v", err)
+	}
+	if len(response.Revisions) != 2 {
+		t.Fatalf("expected 2 salvaged revisions, got %d", len(response.Revisions))
+	}
+}
+
+func TestReviseRejectsResponseBeyondSalvageCeiling(t *testing.T) {
+	srv := newFakeReviseServer(false, "oversized-huge")
+	defer srv.Close()
+	_, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected too large error beyond salvage ceiling, got: %v", err)
+	}
+}
+
+func TestReviseOversizedInvalidResponseStillFails(t *testing.T) {
+	// Non-JSON oversized content must keep failing; salvage is only for
+	// parseable responses.
+	srv := newFakeContentServer(strings.Repeat("x", MaxOutputChars+100))
+	defer srv.Close()
+	_, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("expected too large error for oversized non-JSON response, got: %v", err)
+	}
+}
+
+// Issue #33 regression: one revision whose source_text cannot be resolved must
+// not fail the chunk when other revisions are valid.
+func TestReviseDropsUnresolvableSourceTextAndKeepsRest(t *testing.T) {
+	srv := newFakeReviseServer(false, "mixed-source-text")
+	defer srv.Close()
+	response, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	if err != nil {
+		t.Fatalf("expected chunk to survive one bad revision, got: %v", err)
+	}
+	if len(response.Revisions) != 1 || response.Revisions[0].SourceText != "deprecated" {
+		t.Fatalf("expected the valid revision to survive, got %#v", response.Revisions)
+	}
+	if response.DiscardedFindings != 1 {
+		t.Fatalf("expected 1 discarded finding, got %d", response.DiscardedFindings)
+	}
+}
+
+// When every revision fails validation the chunk still fails, but the error
+// must carry actionable diagnostics (issue #33: unactionable source_text error).
+func TestReviseAllInvalidSourceTextFailsWithDiagnostic(t *testing.T) {
+	srv := newFakeReviseServer(false, "bad-source-text")
+	defer srv.Close()
+	_, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	if !errors.Is(err, ErrInvalidModelResponse) {
+		t.Fatalf("expected ErrInvalidModelResponse, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "closest") {
+		t.Fatalf("expected diagnostic with closest candidate in error, got: %v", err)
+	}
+}

@@ -12,6 +12,12 @@
 - `rewrite` is the whole-passage variant (also model-backed).
 - Protected technical content: rewrites that lose commands/paths/numbers are
   discarded (`discarded_rewrites` / `discarded_findings` counters).
+- Oversized-but-parseable model responses are salvaged: responses over the
+  normal output cap are still validated (up to a salvage ceiling) and valid
+  revisions are kept; revisions whose `source_text` cannot be resolved are
+  dropped and counted in `discarded_findings`. The chunk fails only when
+  every revision is invalid, and the error names the claimed text plus the
+  closest candidate (issue #33).
 - Model failure surfaces as exit code 3 with per-document `errors`.
 
 ## How to get to it (user POV)
