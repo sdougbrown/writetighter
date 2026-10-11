@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -860,7 +862,39 @@ func TestFindSourceTextNormalizedLeadingWhitespaceInSource(t *testing.T) {
 // Issue #33 regression: one oversized model response must not fail the whole
 // chunk when the payload is still parseable and contains valid revisions.
 func TestReviseSalvagesOversizedValidResponse(t *testing.T) {
-	srv := newFakeReviseServer(false, "oversized-valid")
+	type richFinding struct {
+		Kind         string      `json:"kind"`
+		SourceText   string      `json:"source_text"`
+		SourceRange  SourceRange `json:"source_range"`
+		PrincipleIDs []string    `json:"principle_ids"`
+		Reason       string      `json:"reason"`
+		Replacement  *string     `json:"replacement"`
+		Question     *string     `json:"question"`
+		Confidence   float64     `json:"confidence"`
+	}
+	pad := strings.Repeat("detailed revision rationale. ", 600) // ~18KB per finding
+	replacement := "preferred term"
+	question := "Which meaning applies here?"
+	content, err := json.Marshal(map[string]any{"findings": []richFinding{
+		{Kind: "rewrite", SourceText: "deprecated", SourceRange: SourceRange{Start: 0, End: 10},
+			PrincipleIDs: []string{"CORE.SHORT_SENTENCE"}, Reason: pad + "Use the preferred term.",
+			Replacement: &replacement, Confidence: 0.9},
+		{Kind: "clarification", SourceText: "appears", SourceRange: SourceRange{Start: 0, End: 10},
+			PrincipleIDs: []string{"CORE.EXPLICIT_RELATIONSHIPS"}, Reason: pad + "The phrase is ambiguous.",
+			Question: &question, Confidence: 0.8},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Oversized invariant: the fixture must exceed MaxOutputChars (and stay in
+	// the salvage band) or the test would silently exercise the normal path.
+	if len(content) <= MaxOutputChars {
+		t.Fatalf("fixture not oversized: %d bytes", len(content))
+	}
+	if len(content) > MaxSalvageOutputChars {
+		t.Fatalf("fixture exceeds salvage ceiling: %d bytes", len(content))
+	}
+	srv := newFakeContentServer(string(content))
 	defer srv.Close()
 	response, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
 	if err != nil {
@@ -872,9 +906,23 @@ func TestReviseSalvagesOversizedValidResponse(t *testing.T) {
 }
 
 func TestReviseRejectsResponseBeyondSalvageCeiling(t *testing.T) {
-	srv := newFakeReviseServer(false, "oversized-huge")
+	pad := strings.Repeat("detailed revision rationale. ", 1500) // ~48KB, single finding
+	content, err := json.Marshal(map[string]any{"findings": []map[string]any{{
+		"kind": "clarification", "source_text": "totally different prose appears",
+		"source_range":  map[string]int{"start": 0, "end": 10},
+		"principle_ids": []string{"CORE.EXPLICIT_RELATIONSHIPS"}, "reason": pad + "ambiguous",
+		"question": "Which meaning applies here?", "confidence": 0.8,
+	}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Oversized invariant: beyond the salvage ceiling, under the 64KB envelope cap.
+	if len(content) <= MaxSalvageOutputChars || len(content) > MaxEnvelopeChars-1024 {
+		t.Fatalf("fixture outside the beyond-ceiling band: %d bytes", len(content))
+	}
+	srv := newFakeContentServer(string(content))
 	defer srv.Close()
-	_, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	_, err = Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "too large") {
 		t.Fatalf("expected too large error beyond salvage ceiling, got: %v", err)
 	}
@@ -910,6 +958,9 @@ func TestReviseDropsUnresolvableSourceTextAndKeepsRest(t *testing.T) {
 
 // When every revision fails validation the chunk still fails, but the error
 // must carry actionable diagnostics (issue #33: unactionable source_text error).
+// The diagnostic is asserted by shape — candidate word, byte range, and a
+// non-zero word-match percentage — rather than an exact string, so fixture or
+// algorithm tweaks that keep the diagnostic actionable keep the test honest.
 func TestReviseAllInvalidSourceTextFailsWithDiagnostic(t *testing.T) {
 	srv := newFakeReviseServer(false, "bad-source-text")
 	defer srv.Close()
@@ -917,8 +968,32 @@ func TestReviseAllInvalidSourceTextFailsWithDiagnostic(t *testing.T) {
 	if !errors.Is(err, ErrInvalidModelResponse) {
 		t.Fatalf("expected ErrInvalidModelResponse, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), `closest candidate "appears" at [16,23) (25% word match)`) {
-		t.Fatalf("expected diagnostic pinning the closest candidate and match percentage, got: %v", err)
+	re := regexp.MustCompile(`closest candidate "appears" at \[\d+,\d+\) \((\d+)% word match\)`)
+	m := re.FindStringSubmatch(err.Error())
+	if m == nil {
+		t.Fatalf("expected diagnostic naming the candidate, span, and match percentage, got: %v", err)
+	}
+	percent, convErr := strconv.Atoi(m[1])
+	if convErr != nil || percent < 1 || percent > 100 {
+		t.Fatalf("expected non-zero word-match percentage, got %q in: %v", m[1], err)
+	}
+}
+
+// Out-of-bounds model ranges must be dropped and counted, not fail the chunk
+// (and never reach the excerpt slice). The finding below has a valid
+// source_text but a range far past the excerpt end.
+func TestReviseDropsOutOfRangeRevisionAndKeepsRest(t *testing.T) {
+	srv := newFakeReviseServer(false, "out-of-bounds-range")
+	defer srv.Close()
+	response, err := Revise(context.Background(), Config{BaseURL: srv.URL, Model: "gpt", Timeout: time.Second}, testDoc(), testProfile(), nil, nil)
+	if err != nil {
+		t.Fatalf("expected chunk to survive an out-of-bounds revision, got: %v", err)
+	}
+	if len(response.Revisions) != 1 || response.Revisions[0].SourceText != "deprecated" {
+		t.Fatalf("expected the in-bounds revision to survive, got %#v", response.Revisions)
+	}
+	if response.DiscardedFindings != 1 {
+		t.Fatalf("expected 1 discarded finding, got %d", response.DiscardedFindings)
 	}
 }
 

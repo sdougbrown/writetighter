@@ -99,7 +99,7 @@ func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
 			if mode == "wrong-range" {
 				finding.SourceText = "term"
 			}
-			if mode == "oversized-valid" || mode == "oversized-huge" || mode == "mixed-source-text" || mode == "bad-source-text" {
+			if mode == "mixed-source-text" || mode == "bad-source-text" || mode == "out-of-bounds-range" {
 				type richFinding struct {
 					Kind         string      `json:"kind"`
 					SourceText   string      `json:"source_text"`
@@ -111,12 +111,6 @@ func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
 					Confidence   float64     `json:"confidence"`
 				}
 				pad := "detailed revision rationale. "
-				if mode == "oversized-valid" {
-					pad = strings.Repeat(pad, 600) // ~18KB per finding: over MaxOutputChars, under the salvage ceiling
-				}
-				if mode == "oversized-huge" {
-					pad = strings.Repeat(pad, 1500) // ~48KB: over the salvage ceiling, under the 64KB envelope cap
-				}
 				replacement := "preferred term"
 				question := "Which meaning applies here?"
 				good := richFinding{
@@ -129,11 +123,12 @@ func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
 					PrincipleIDs: []string{"CORE.EXPLICIT_RELATIONSHIPS"}, Reason: pad + "The phrase is ambiguous.",
 					Question: &question, Confidence: 0.8,
 				}
-				if mode == "oversized-valid" {
-					bad.SourceText = "appears"
+				if mode == "out-of-bounds-range" {
+					bad.SourceText = "deprecated"
+					bad.SourceRange = SourceRange{Start: 0, End: 100000}
 				}
 				findings := []richFinding{good, bad}
-				if mode == "bad-source-text" || mode == "oversized-huge" {
+				if mode == "bad-source-text" {
 					findings = []richFinding{bad}
 				}
 				respContent, _ := json.Marshal(map[string]any{"findings": findings})
