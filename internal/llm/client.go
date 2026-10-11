@@ -19,10 +19,14 @@ import (
 )
 
 const (
-	DefaultTimeout         = 45 * time.Second
-	MaxInputChars          = 32000
-	MaxSuggestions         = 20
-	MaxOutputChars         = 10000
+	DefaultTimeout = 45 * time.Second
+	MaxInputChars  = 32000
+	MaxSuggestions = 20
+	MaxOutputChars = 10000
+	// MaxSalvageOutputChars bounds salvage attempts for responses that exceed
+	// MaxOutputChars but may still contain valid revisions. Beyond this ceiling
+	// the response is rejected as too large without parsing.
+	MaxSalvageOutputChars  = 4 * MaxOutputChars
 	MaxEnvelopeChars       = 64 * 1024
 	EstimatedBytesPerToken = 4
 	chatPath               = "/chat/completions"

@@ -99,43 +99,71 @@ func reviseExcerpt(ctx context.Context, config Config, doc *document.Document, r
 	}
 
 	assistantRaw := []byte(resp.Choices[0].Message.Content)
-	if len(assistantRaw) > MaxOutputChars {
+	maxOutputChars := MaxOutputChars
+	if len(assistantRaw) > MaxSalvageOutputChars {
 		return nil, fmt.Errorf("%w: response too large", ErrInvalidModelResponse)
+	}
+	if len(assistantRaw) > MaxOutputChars {
+		// The response exceeded the normal output cap but may still carry valid
+		// revisions (dense chunks with small local models produce long annotated
+		// JSON). Validate against the salvage ceiling instead of failing the
+		// whole chunk; validation still rejects malformed content.
+		maxOutputChars = MaxSalvageOutputChars
 	}
 	raw := unwrapJSONFence(assistantRaw)
 	if modelErr := parseModelReportedError(raw); modelErr != nil {
 		return nil, fmt.Errorf("%w: %v", ErrInvalidModelResponse, modelErr)
 	}
-	reviseResp, err := ValidateReviseResponse(raw)
+	reviseResp, err := validateReviseResponse(raw, maxOutputChars)
 	if err != nil {
+		if maxOutputChars != MaxOutputChars {
+			// The oversized response could not be salvaged; report the size
+			// failure, keeping the validation detail for diagnosis.
+			return nil, fmt.Errorf("%w: response too large; salvage validation failed: %v", ErrInvalidModelResponse, err)
+		}
 		return nil, fmt.Errorf("%w: %v", ErrInvalidModelResponse, err)
 	}
 
 	// Remap ranges from excerpt-relative to original-file-relative.
 	// Compute line/column positions. For rewrites, check protected content.
+	// Revisions that fail validation are dropped and counted instead of failing
+	// the whole chunk; the chunk only fails when every revision was dropped.
 	validated := reviseResp.Revisions[:0]
 	discardedRewrites := 0
+	dropped := 0
+	dropReason := ""
+	drop := func(reason string) {
+		dropped++
+		if dropReason == "" {
+			dropReason = reason
+		}
+	}
 	for _, rev := range reviseResp.Revisions {
 		if rev.Range.StartByte < 0 || rev.Range.EndByte < rev.Range.StartByte || rev.Range.EndByte > len(excerpt.Text) {
-			return nil, fmt.Errorf("%w: range [%d, %d) is out of excerpt bounds", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
+			drop(fmt.Sprintf("range [%d, %d) is out of excerpt bounds", rev.Range.StartByte, rev.Range.EndByte))
+			continue
 		}
 		if excerpt.Text[rev.Range.StartByte:rev.Range.EndByte] != rev.SourceText {
-			start, end, ok := resolveSourceText(excerpt.Text, rev.SourceText, rev.Range.StartByte)
+			start, end, ok, diag := resolveSourceText(excerpt.Text, rev.SourceText, rev.Range.StartByte)
 			if !ok {
-				return nil, fmt.Errorf("%w: source_text does not identify a nearest occurrence", ErrInvalidModelResponse)
+				drop(fmt.Sprintf("source_text %q does not identify a nearest occurrence%s", summarizeText(rev.SourceText, 60), diag))
+				continue
 			}
 			rev.Range.StartByte = start
 			rev.Range.EndByte = end
 		}
 		if rev.Range.StartByte < 0 || rev.Range.EndByte < rev.Range.StartByte || rev.Range.EndByte > len(excerpt.Text) {
-			return nil, fmt.Errorf("%w: range [%d, %d) is out of excerpt bounds", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
+			drop(fmt.Sprintf("range [%d, %d) is out of excerpt bounds", rev.Range.StartByte, rev.Range.EndByte))
+			continue
 		}
 		if (rev.Range.StartByte > 0 && !utf8.RuneStart(excerpt.Text[rev.Range.StartByte])) ||
 			(rev.Range.EndByte < len(excerpt.Text) && !utf8.RuneStart(excerpt.Text[rev.Range.EndByte])) {
-			return nil, fmt.Errorf("%w: range [%d, %d) splits UTF-8 text", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
+			drop(fmt.Sprintf("range [%d, %d) splits UTF-8 text", rev.Range.StartByte, rev.Range.EndByte))
+			continue
 		}
 		if !excerpt.validExcerptRange(rev.Range.StartByte, rev.Range.EndByte) {
-			return nil, fmt.Errorf("%w: range [%d, %d) crosses excerpt gap or noncontiguous region", ErrInvalidModelResponse, rev.Range.StartByte, rev.Range.EndByte)
+			drop(fmt.Sprintf("range [%d, %d) crosses excerpt gap or noncontiguous region", rev.Range.StartByte, rev.Range.EndByte))
+			continue
 		}
 
 		rev.SourcePath = doc.Source
@@ -163,6 +191,7 @@ func reviseExcerpt(ctx context.Context, config Config, doc *document.Document, r
 		startOrig := excerpt.OrigOffset(rev.Range.StartByte)
 		endOrig := excerpt.OrigOffset(rev.Range.EndByte)
 		if startOrig < 0 || endOrig < 0 {
+			drop(fmt.Sprintf("range [%d, %d) does not map into the original document", rev.Range.StartByte, rev.Range.EndByte))
 			continue
 		}
 		rev.Range.StartByte = startOrig
@@ -175,7 +204,11 @@ func reviseExcerpt(ctx context.Context, config Config, doc *document.Document, r
 		}
 		validated = append(validated, rev)
 	}
+	if len(validated) == 0 && dropped > 0 {
+		return nil, fmt.Errorf("%w: all %d revisions failed validation; first failure: %s", ErrInvalidModelResponse, dropped, dropReason)
+	}
 	reviseResp.Revisions = validated
+	reviseResp.DiscardedFindings += dropped
 	reviseResp.DiscardedRewrites = discardedRewrites
 	return reviseResp, nil
 }
@@ -206,7 +239,14 @@ type ReviseLLMResponse struct {
 // coerced to their closest revision principle), non-empty trimmed fields,
 // UTF-8 range boundaries, and duplicate/overlapping suggestions.
 func ValidateReviseResponse(raw []byte) (*report.ReviseResponse, error) {
-	if len(raw) > MaxOutputChars {
+	return validateReviseResponse(raw, MaxOutputChars)
+}
+
+// validateReviseResponse validates against a caller-supplied output ceiling.
+// The salvage path passes the larger salvage ceiling for oversized-but
+// parseable responses.
+func validateReviseResponse(raw []byte, maxChars int) (*report.ReviseResponse, error) {
+	if len(raw) > maxChars {
 		return nil, errors.New("llm response too large")
 	}
 	// Decode leniently first. Models may include extra top-level fields
@@ -415,17 +455,91 @@ func nearestSourceOccurrence(text, source string, preferred int) (int, bool) {
 
 // resolveSourceText finds source text in the document excerpt by trying
 // exact matching first and falling back to whitespace-insensitive matching.
-// Returns the corrected start and end byte offsets in the excerpt.
-func resolveSourceText(text, source string, preferred int) (start, end int, ok bool) {
+// Returns the corrected start and end byte offsets in the excerpt. When no
+// match is found, diag carries actionable diagnostics about the mismatch.
+func resolveSourceText(text, source string, preferred int) (start, end int, ok bool, diag string) {
 	s, ok := nearestSourceOccurrence(text, source, preferred)
 	if ok {
-		return s, s + len(source), true
+		return s, s + len(source), true, ""
 	}
 	// Some models normalize whitespace (e.g. collapsing newlines to spaces)
 	// in source_text. Try whitespace-insensitive matching as a fallback.
 	// Note: this does not handle models that add/remove content words;
-	// those findings will still fail source_text validation.
-	return findSourceTextNormalized(text, source, preferred)
+	// those findings are dropped with mismatch diagnostics.
+	start, end, ok = findSourceTextNormalized(text, source, preferred)
+	if ok {
+		return start, end, true, ""
+	}
+	return 0, 0, false, describeSourceTextMismatch(text, source)
+}
+
+// describeSourceTextMismatch builds a diagnostic for an unresolvable
+// source_text: the claimed text plus the closest candidate found in the
+// excerpt and how much of it matched, so the mismatch (paraphrase, whitespace,
+// unicode) is actionable.
+func describeSourceTextMismatch(text, source string) string {
+	cStart, cEnd, similarity, found := closestFuzzyCandidate(text, source)
+	if !found {
+		return "; claimed text has no similar content in the excerpt"
+	}
+	return fmt.Sprintf("; closest candidate %q at [%d,%d) (%d%% word match)",
+		summarizeText(text[cStart:cEnd], 60), cStart, cEnd, int(similarity*100))
+}
+
+// summarizeText collapses whitespace and truncates text for error messages.
+func summarizeText(text string, max int) string {
+	collapsed := strings.Join(strings.Fields(text), " ")
+	if len(collapsed) <= max {
+		return collapsed
+	}
+	return collapsed[:utf8ValidPrefixLen(collapsed, max)] + "…"
+}
+
+// closestFuzzyCandidate reports the excerpt span that overlaps the claimed
+// source_text's words most, for use in diagnostics only; it never produces
+// revision ranges. The span covers distinct claimed words that also appear in
+// the excerpt, so paraphrased or reordered claims still yield a hint. Both
+// sides tokenize on Unicode whitespace so non-ASCII spaces do not split words
+// differently on one side of the comparison.
+func closestFuzzyCandidate(text, source string) (start, end int, similarity float64, ok bool) {
+	pending := make(map[string]struct{})
+	for _, w := range strings.Fields(source) {
+		pending[w] = struct{}{}
+	}
+	if len(pending) == 0 {
+		return 0, 0, 0, false
+	}
+	total := len(pending)
+	matched := 0
+	start, end = -1, -1
+	for i := 0; i < len(text); {
+		r, size := utf8.DecodeRuneInString(text[i:])
+		if unicode.IsSpace(r) {
+			i += size
+			continue
+		}
+		j := i
+		for j < len(text) {
+			r, size = utf8.DecodeRuneInString(text[j:])
+			if unicode.IsSpace(r) {
+				break
+			}
+			j += size
+		}
+		if _, hit := pending[text[i:j]]; hit {
+			delete(pending, text[i:j])
+			matched++
+			if start < 0 {
+				start = i
+			}
+			end = j
+		}
+		i = j
+	}
+	if matched == 0 {
+		return 0, 0, 0, false
+	}
+	return start, end, float64(matched) / float64(total), true
 }
 
 // findSourceTextNormalized finds source in text by comparing

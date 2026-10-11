@@ -47,6 +47,21 @@ func newFakeServer(requireKey bool, mode string) *fakeLLMServer {
 
 func (f *fakeLLMServer) Close() { f.server.Close() }
 
+// newFakeContentServer returns an assistant message with the given raw content.
+func newFakeContentServer(content string) *fakeLLMServer {
+	f := &fakeLLMServer{}
+	f.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":      "chatcmpl-test",
+			"model":   "test-model",
+			"choices": []Choice{{Message: Message{Role: "assistant", Content: content}}},
+			"usage":   map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+		})
+	}))
+	f.URL = f.server.URL
+	return f
+}
+
 // newFakeReviseServer returns responses matching the revision schema.
 func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
 	f := &fakeLLMServer{}
@@ -83,6 +98,49 @@ func newFakeReviseServer(requireKey bool, mode string) *fakeLLMServer {
 			}
 			if mode == "wrong-range" {
 				finding.SourceText = "term"
+			}
+			if mode == "mixed-source-text" || mode == "bad-source-text" || mode == "out-of-bounds-range" || mode == "ungrounded-source-text" {
+				type richFinding struct {
+					Kind         string      `json:"kind"`
+					SourceText   string      `json:"source_text"`
+					SourceRange  SourceRange `json:"source_range"`
+					PrincipleIDs []string    `json:"principle_ids"`
+					Reason       string      `json:"reason"`
+					Replacement  *string     `json:"replacement"`
+					Question     *string     `json:"question"`
+					Confidence   float64     `json:"confidence"`
+				}
+				pad := "detailed revision rationale. "
+				replacement := "preferred term"
+				question := "Which meaning applies here?"
+				good := richFinding{
+					Kind: "rewrite", SourceText: "deprecated", SourceRange: SourceRange{Start: 0, End: 10},
+					PrincipleIDs: []string{"CORE.SHORT_SENTENCE"}, Reason: pad + "Use the preferred term.",
+					Replacement: &replacement, Confidence: 0.9,
+				}
+				bad := richFinding{
+					Kind: "clarification", SourceText: "totally different prose appears", SourceRange: SourceRange{Start: 0, End: 10},
+					PrincipleIDs: []string{"CORE.EXPLICIT_RELATIONSHIPS"}, Reason: pad + "The phrase is ambiguous.",
+					Question: &question, Confidence: 0.8,
+				}
+				if mode == "out-of-bounds-range" {
+					bad.SourceText = "deprecated"
+					bad.SourceRange = SourceRange{Start: 0, End: 100000}
+				}
+				if mode == "ungrounded-source-text" {
+					bad.SourceText = "zzzyy xqqq wvvv"
+				}
+				findings := []richFinding{good, bad}
+				if mode == "bad-source-text" || mode == "ungrounded-source-text" {
+					findings = []richFinding{bad}
+				}
+				respContent, _ := json.Marshal(map[string]any{"findings": findings})
+				json.NewEncoder(w).Encode(map[string]any{
+					"id": "chatcmpl-test", "model": "test-model",
+					"choices": []Choice{{Message: Message{Role: "assistant", Content: string(respContent)}}},
+					"usage":   map[string]int{"prompt_tokens": 1, "completion_tokens": 1},
+				})
+				return
 			}
 			respContent, _ := json.Marshal(map[string]any{"findings": []frev{finding}})
 			if mode == "model-error" {
