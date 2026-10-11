@@ -917,7 +917,19 @@ func TestReviseAllInvalidSourceTextFailsWithDiagnostic(t *testing.T) {
 	if !errors.Is(err, ErrInvalidModelResponse) {
 		t.Fatalf("expected ErrInvalidModelResponse, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "closest") {
-		t.Fatalf("expected diagnostic with closest candidate in error, got: %v", err)
+	if !strings.Contains(err.Error(), `closest candidate "appears" at [16,23) (25% word match)`) {
+		t.Fatalf("expected diagnostic pinning the closest candidate and match percentage, got: %v", err)
+	}
+}
+
+// The no-candidate fallback must fire when the claimed source_text shares no
+// words with the excerpt (a realistic model output for ungrounded claims).
+func TestDescribeSourceTextMismatchNoCandidate(t *testing.T) {
+	if _, _, _, found := closestFuzzyCandidate("deprecated term appears here.", "zzzyy xqqq wvvv"); found {
+		t.Fatal("expected no candidate for fully non-overlapping source text")
+	}
+	diag := describeSourceTextMismatch("deprecated term appears here.", "zzzyy xqqq wvvv")
+	if !strings.Contains(diag, "claimed text has no similar content in the excerpt") {
+		t.Fatalf("expected no-candidate fallback message, got: %q", diag)
 	}
 }
