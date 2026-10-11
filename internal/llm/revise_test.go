@@ -427,12 +427,11 @@ func TestReviseWithFakeServer(t *testing.T) {
 	if resp == nil {
 		t.Fatal("expected non-nil response")
 	}
-	// Response must include metadata and a caller-filled revision. Status is
-	// not asserted here: it is hardcoded "ok" in validateReviseResponse, and
-	// ok/partial/failed transitions live in internal/app where they are computed.
-	if resp.SchemaVersion != 1 {
-		t.Fatalf("expected schema version 1, got %d", resp.SchemaVersion)
-	}
+	// Response must include the caller-filled revision. Status and schema
+	// version are not asserted here: both are hardcoded in
+	// validateReviseResponse ("ok" and 1), so asserting them re-tests
+	// constants. ok/partial/failed transitions live in internal/app where
+	// they are computed.
 	if len(resp.Revisions) != 1 || resp.Revisions[0].SourcePath != "test.md" {
 		t.Fatalf("expected the model finding as a source-attributed revision, got %#v", resp.Revisions)
 	}
