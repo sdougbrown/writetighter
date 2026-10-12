@@ -575,9 +575,7 @@ func TestRunLintRejectsSymlinkPath(t *testing.T) {
 
 func writeReviseUserConfig(t *testing.T, baseURL, apiKeyEnv string) {
 	t.Helper()
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
-	t.Setenv("HOME", root)
+	root := isolateUserConfig(t)
 	dir := filepath.Join(root, "writetighter")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -614,9 +612,7 @@ func extractReviseText(userContent string) string {
 
 func writeReviseUserConfigWithMaxRequests(t *testing.T, baseURL string, maxRequests int) {
 	t.Helper()
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
-	t.Setenv("HOME", root)
+	root := isolateUserConfig(t)
 	dir := filepath.Join(root, "writetighter")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -629,9 +625,7 @@ func writeReviseUserConfigWithMaxRequests(t *testing.T, baseURL string, maxReque
 
 func writeReviseStoredKeyConfig(t *testing.T, baseURL, key string) {
 	t.Helper()
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
-	t.Setenv("HOME", root)
+	root := isolateUserConfig(t)
 	dir := filepath.Join(root, "writetighter")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -693,6 +687,18 @@ func TestRunPromptRejectsInvalidOptions(t *testing.T) {
 	}
 }
 
+// isolateUserConfig points XDG_CONFIG_HOME and HOME at one empty scratch dir
+// so user-config lookup cannot see the developer's real ~/.config/writetighter
+// (LoadUserConfig falls back to $HOME when the XDG path is absent). Returns the
+// scratch root for tests that need to write a fixture config into it.
+func isolateUserConfig(t *testing.T) string {
+	t.Helper()
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	return root
+}
+
 func TestRunReviseNoInput(t *testing.T) {
 	err := (&App{}).RunRevise(ReviseParams{})
 	if err == nil {
@@ -715,9 +721,7 @@ func TestRunReviseMutuallyExclusive(t *testing.T) {
 
 func TestRunReviseMissingLLMConfig(t *testing.T) {
 	// Without any user config, RunRevise should fail with a clear message.
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
-	t.Setenv("HOME", root)
+	isolateUserConfig(t)
 	path := writeTempFile(t, "short test.")
 	err := (&App{}).RunRevise(ReviseParams{
 		Paths:  []string{path},
@@ -732,8 +736,7 @@ func TestRunReviseMissingLLMConfig(t *testing.T) {
 }
 
 func TestRunReviseDoesNotEchoMalformedConfigSecrets(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	root := isolateUserConfig(t)
 	dir := filepath.Join(root, "writetighter")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -1008,18 +1011,34 @@ func TestRunReviseRejectsConfiguredUnsetAPIKey(t *testing.T) {
 	}
 }
 
+// TestRunReviseUnsupportedProvider: a config with a valid model and base URL
+// but a non-openai-compatible provider must reach the provider branch and fail
+// with the unsupported-provider error (the missing-model check comes first).
+// The no-config path is covered by TestRunReviseMissingLLMConfig.
 func TestRunReviseUnsupportedProvider(t *testing.T) {
+	root := isolateUserConfig(t)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "[llm]\nprovider = \"ollama\"\nbase_url = \"http://127.0.0.1:11434/v1\"\nmodel = \"test-model\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	path := writeTempFile(t, "test content.")
 	err := (&App{}).RunRevise(ReviseParams{
 		Paths:  []string{path},
 		Format: "json",
 	})
-	if err == nil {
-		t.Fatal("expected error for missing LLM config")
+	// main.go branches on ErrLLMConfigRequired for exit-code handling, so the
+	// error must keep wrapping the sentinel, not just carry the message.
+	if err == nil || !errors.Is(err, ErrLLMConfigRequired) || !strings.Contains(err.Error(), "unsupported llm provider") {
+		t.Fatalf("expected ErrLLMConfigRequired with unsupported llm provider error, got: %v", err)
 	}
 }
 
 func TestReviseAcceptsInputFlags(t *testing.T) {
+	isolateUserConfig(t)
 	// Verify that revise accepts valid flag combinations (config error is about
 	// missing LLM config, not bad flag parsing).
 	path := writeTempFile(t, "test content.")
