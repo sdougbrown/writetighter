@@ -575,9 +575,7 @@ func TestRunLintRejectsSymlinkPath(t *testing.T) {
 
 func writeReviseUserConfig(t *testing.T, baseURL, apiKeyEnv string) {
 	t.Helper()
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
-	t.Setenv("HOME", root)
+	root := isolateUserConfig(t)
 	dir := filepath.Join(root, "writetighter")
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -614,9 +612,7 @@ func extractReviseText(userContent string) string {
 
 func writeReviseUserConfigWithMaxRequests(t *testing.T, baseURL string, maxRequests int) {
 	t.Helper()
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
-	t.Setenv("HOME", root)
+	root := isolateUserConfig(t)
 	dir := filepath.Join(root, "writetighter")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -629,9 +625,7 @@ func writeReviseUserConfigWithMaxRequests(t *testing.T, baseURL string, maxReque
 
 func writeReviseStoredKeyConfig(t *testing.T, baseURL, key string) {
 	t.Helper()
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
-	t.Setenv("HOME", root)
+	root := isolateUserConfig(t)
 	dir := filepath.Join(root, "writetighter")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
@@ -727,9 +721,7 @@ func TestRunReviseMutuallyExclusive(t *testing.T) {
 
 func TestRunReviseMissingLLMConfig(t *testing.T) {
 	// Without any user config, RunRevise should fail with a clear message.
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
-	t.Setenv("HOME", root)
+	isolateUserConfig(t)
 	path := writeTempFile(t, "short test.")
 	err := (&App{}).RunRevise(ReviseParams{
 		Paths:  []string{path},
@@ -744,8 +736,7 @@ func TestRunReviseMissingLLMConfig(t *testing.T) {
 }
 
 func TestRunReviseDoesNotEchoMalformedConfigSecrets(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", root)
+	root := isolateUserConfig(t)
 	dir := filepath.Join(root, "writetighter")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		t.Fatal(err)
