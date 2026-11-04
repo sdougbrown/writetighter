@@ -63,11 +63,16 @@ func CommandShorts() map[string]string {
 	return m
 }
 
+// RootShort is the root tagline. The hand-rolled root help renders the
+// same line (with the "writetighter — " prefix) until every command
+// migrates; cmd's drift test pins the two so they cannot diverge.
+const RootShort = "deterministic and contextual prose revision for technical documentation"
+
 func appFor() *clicontract.App {
 	return &clicontract.App{
 		Name:      "writetighter",
 		Version:   app.Version,
-		RootShort: "deterministic and contextual prose revision for technical documentation",
+		RootShort: RootShort,
 		// The root is a stub until every command migrates; the hand-rolled
 		// dispatch owns root help and unknown-command handling meanwhile.
 		BareHelp: true,

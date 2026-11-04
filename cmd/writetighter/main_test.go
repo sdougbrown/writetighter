@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -739,20 +740,18 @@ max_requests=32
 }
 
 func TestRootHelpMatchesDeclarations(t *testing.T) {
+	firstLine, _, _ := strings.Cut(mainHelp, "\n")
+	if got, want := firstLine, "writetighter \u2014 "+cli.RootShort; got != want {
+		t.Fatalf("mainHelp first line is %q; want %q", got, want)
+	}
 	for name, short := range cli.CommandShorts() {
-		var line string
-		for _, l := range strings.Split(mainHelp, "\n") {
-			fields := strings.Fields(l)
-			if len(fields) > 0 && fields[0] == name {
-				line = l
-				break
-			}
+		re := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(name) + ` +([^\n]+)$`)
+		m := re.FindStringSubmatch(mainHelp)
+		if m == nil {
+			t.Fatalf("mainHelp has no command line for declared command %q", name)
 		}
-		if line == "" {
-			t.Fatalf("mainHelp has no line for declared command %q", name)
-		}
-		if !strings.HasSuffix(line, short) {
-			t.Fatalf("mainHelp line for %q is %q; declared Short is %q", name, line, short)
+		if got := strings.TrimRight(m[1], " "); got != short {
+			t.Fatalf("mainHelp line for %q ends with %q; declared Short is %q", name, got, short)
 		}
 	}
 }
