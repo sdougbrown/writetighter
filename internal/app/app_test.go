@@ -636,16 +636,7 @@ func writeReviseStoredKeyConfig(t *testing.T, baseURL, key string) {
 	}
 }
 
-func TestRunPromptExportsCodeCommentGuidanceWithoutConfig(t *testing.T) {
-	configRoot := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", configRoot)
-	configDir := filepath.Join(configRoot, "writetighter")
-	if err := os.MkdirAll(configDir, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("malformed = ["), 0o600); err != nil {
-		t.Fatal(err)
-	}
+func TestPromptCodeCommentGuidance(t *testing.T) {
 	rubric, format, err := PromptData(PromptParams{Kind: "code-comment", Format: "human"})
 	if err != nil {
 		t.Fatal(err)

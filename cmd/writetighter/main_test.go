@@ -190,6 +190,41 @@ func TestRunExplain(t *testing.T) {
 }
 
 func TestRunPrompt(t *testing.T) {
+	t.Run("human-default", func(t *testing.T) {
+		out := captureStdout(t, func() {
+			if got := run([]string{"prompt"}); got != 0 {
+				t.Fatalf("exit %d", got)
+			}
+		})
+		for _, expected := range []string{"Document kind: description", "Revision principles:", "CORE.CAUSAL_ORDER"} {
+			if !strings.Contains(out, expected) {
+				t.Fatalf("prompt output missing %q: %s", expected, out)
+			}
+		}
+	})
+	// The no-config guarantee end-to-end: a malformed config must not
+	// affect `prompt`.
+	t.Run("human-default-malformed-config", func(t *testing.T) {
+		root := t.TempDir()
+		t.Setenv("XDG_CONFIG_HOME", root)
+		t.Setenv("HOME", root)
+		cfgDir := filepath.Join(root, "writetighter")
+		if err := os.MkdirAll(cfgDir, 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte("malformed = ["), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		out := captureStdout(t, func() {
+			if got := run([]string{"prompt"}); got != 0 {
+				t.Fatalf("exit %d", got)
+			}
+		})
+		if !strings.Contains(out, "Document kind: description") {
+			t.Fatalf("prompt output missing rendered document: %s", out)
+		}
+	})
+
 	old := os.Stdout
 	r, w, err := os.Pipe()
 	if err != nil {
