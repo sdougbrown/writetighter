@@ -31,7 +31,7 @@ const (
 var commands = []*clicontract.Command{
 	{
 		Name:  "version",
-		Short: "print version and embedded profile information",
+		Short: "Print version and embedded profile information",
 		Flags: []clicontract.Flag{
 			{Name: "json", Kind: clicontract.Bool, Usage: "output version information as JSON (default: human-readable)"},
 		},
