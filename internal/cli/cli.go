@@ -17,10 +17,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strings"
-
-	"golang.org/x/term"
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
@@ -144,6 +141,25 @@ func appFor(stdout io.Writer) *clicontract.App {
 // embedded profile loader to simulate a no-profile state.
 var loadEmbedded = profile.LoadEmbedded
 
+// resolveInputMode validates the input-mode contract shared by lint and
+// revise: paths, --stdin and --text are mutually exclusive, and at least
+// one input is required. Returns the --text value when it was given.
+func resolveInputMode(inv clicontract.Invocation) (*string, error) {
+	_, textSet := inv.Supplied["text"]
+	var text *string
+	if textSet {
+		t := inv.Flags["text"]
+		text = &t
+	}
+	switch {
+	case (inv.Bools["stdin"] && (len(inv.Args) > 0 || textSet)) || (textSet && len(inv.Args) > 0):
+		return nil, &clicontract.UsageError{Message: "paths, --stdin, and --text are mutually exclusive"}
+	case !inv.Bools["stdin"] && !textSet && len(inv.Args) == 0:
+		return nil, &clicontract.UsageError{Message: "no input specified"}
+	}
+	return text, nil
+}
+
 type lintResult struct{}
 
 func handleLint(stdout io.Writer, _ context.Context, inv clicontract.Invocation, _ io.Writer) (any, error) {
@@ -157,17 +173,11 @@ func handleLint(stdout io.Writer, _ context.Context, inv clicontract.Invocation,
 		FailOn:     inv.Flags["fail-on"],
 		GitCompare: inv.Flags["git-compare"],
 	}
-	_, textSet := inv.Supplied["text"]
-	if textSet {
-		text := inv.Flags["text"]
-		params.Text = &text
+	textArg, err := resolveInputMode(inv)
+	if err != nil {
+		return nil, err
 	}
-	switch {
-	case (params.Stdin && (len(params.Paths) > 0 || textSet)) || (textSet && len(params.Paths) > 0):
-		return nil, &clicontract.UsageError{Message: "paths, --stdin, and --text are mutually exclusive"}
-	case !params.Stdin && !textSet && len(params.Paths) == 0:
-		return nil, &clicontract.UsageError{Message: "no input specified"}
-	}
+	params.Text = textArg
 	if err := app.New().RunLintTo(stdout, params); err != nil {
 		return nil, err
 	}
@@ -176,7 +186,7 @@ func handleLint(stdout io.Writer, _ context.Context, inv clicontract.Invocation,
 
 type reviseResult struct{}
 
-func handleRevise(stdout, stderr io.Writer, _ context.Context, inv clicontract.Invocation) (any, error) {
+func handleRevise(stdout, stderr io.Writer, ctx context.Context, inv clicontract.Invocation) (any, error) {
 	params := app.ReviseParams{
 		Paths:          inv.Args,
 		Stdin:          inv.Bools["stdin"],
@@ -190,22 +200,16 @@ func handleRevise(stdout, stderr io.Writer, _ context.Context, inv clicontract.I
 		ContextTokens:  inv.Ints["context-tokens"],
 		OutputTokens:   inv.Ints["output-tokens"],
 	}
-	_, textSet := inv.Supplied["text"]
-	if textSet {
-		text := inv.Flags["text"]
-		params.Text = &text
+	textArg, err := resolveInputMode(inv)
+	if err != nil {
+		return nil, err
 	}
-	switch {
-	case (params.Stdin && (len(params.Paths) > 0 || textSet)) || (textSet && len(params.Paths) > 0):
-		return nil, &clicontract.UsageError{Message: "paths, --stdin, and --text are mutually exclusive"}
-	case !params.Stdin && !textSet && len(params.Paths) == 0:
-		return nil, &clicontract.UsageError{Message: "no input specified"}
-	}
-	err := app.New().RunReviseTo(stdout, params)
+	params.Text = textArg
+	err = app.New().RunReviseTo(stdout, params)
 	if errors.Is(err, app.ErrLLMConfigRequired) {
-		if !params.Stdin && term.IsTerminal(int(os.Stdin.Fd())) {
+		if !params.Stdin && setup.StdinIsTerminal() {
 			fmt.Fprintf(stderr, "%v\nStarting interactive configuration.\n", err)
-			if wizardErr := setup.RunInteractive(context.Background()); wizardErr != nil {
+			if wizardErr := setup.RunInteractive(ctx); wizardErr != nil {
 				return nil, &clicontract.UsageError{Message: "config failed: " + wizardErr.Error()}
 			}
 			err = app.New().RunReviseTo(stdout, params)

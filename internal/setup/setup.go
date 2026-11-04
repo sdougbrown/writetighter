@@ -29,6 +29,9 @@ const (
 	maxResponse        = 1 << 20
 )
 
+// StdinIsTerminal reports whether stdin is an interactive terminal.
+func StdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
 // RunInteractive runs the interactive configuration wizard against the
 // process's stdio. Secure API key entry requires a terminal.
 func RunInteractive(ctx context.Context) error {
@@ -36,7 +39,7 @@ func RunInteractive(ctx context.Context) error {
 		In:  os.Stdin,
 		Out: os.Stderr,
 		ReadSecret: func(prompt string) (string, error) {
-			if !term.IsTerminal(int(os.Stdin.Fd())) {
+			if !StdinIsTerminal() {
 				return "", errors.New("secure API key input requires an interactive terminal")
 			}
 			fmt.Fprint(os.Stderr, prompt)

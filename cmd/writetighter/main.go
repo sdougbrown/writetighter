@@ -15,7 +15,6 @@ import (
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
 	"github.com/sdougbrown/writetighter/internal/setup"
-	"golang.org/x/term"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }
@@ -141,7 +140,7 @@ func runRewrite(args []string) int {
 	}
 	err := app.New().RunRewrite(params)
 	if errors.Is(err, app.ErrLLMConfigRequired) {
-		if !params.Stdin && stdinIsTerminal() {
+		if !params.Stdin && setup.StdinIsTerminal() {
 			fmt.Fprintf(os.Stderr, "%v\nStarting interactive configuration.\n", err)
 			if code := runConfig(nil); code != 0 {
 				return code
@@ -310,8 +309,6 @@ func resolveAPIKey(cfg *config.UserConfig) string {
 	}
 	return ""
 }
-
-func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
 
 // The documented CLI permits paths before flags. flag.FlagSet stops at the first
 // positional argument, so normalize the small lint/revise grammar before parsing.
