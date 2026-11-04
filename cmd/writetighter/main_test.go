@@ -366,6 +366,38 @@ func TestNoArgsShowsHelp(t *testing.T) {
 	}
 }
 
+func TestRewriteCommand(t *testing.T) {
+	if got := run([]string{"rewrite"}); got != 2 {
+		t.Fatalf("expected exit 2 for missing input, got %d", got)
+	}
+	if got := run([]string{"rewrite", "--stdin", "foo"}); got != 2 {
+		t.Fatalf("expected exit 2 for stdin+path, got %d", got)
+	}
+}
+
+func TestRewriteAcceptsDirectTextFlag(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	if got := run([]string{"rewrite", "--text", "Short direct text."}); got != 2 {
+		t.Fatalf("expected missing model config exit 2 after accepting --text, got %d", got)
+	}
+	if got := run([]string{"rewrite", "--text", "text", "file.md"}); got != 2 {
+		t.Fatalf("expected --text and path conflict, got %d", got)
+	}
+}
+
+func TestRewriteNoLLMConfigFails(t *testing.T) {
+	// Without any config file, rewrite should fail with a clear message about
+	// missing LLM configuration.
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	if got := run([]string{"rewrite", "missing.txt"}); got != 2 {
+		t.Fatalf("expected exit 2, got %d", got)
+	}
+}
+
 func TestTopLevelHelpFlag(t *testing.T) {
 	for _, args := range [][]string{{"--help"}, {"-h"}} {
 		out := captureStdout(t, func() {
@@ -408,6 +440,7 @@ func TestSubcommandHelpFlags(t *testing.T) {
 	}{
 		{"lint --help", "--fail-on"},
 		{"revise --help", "CONFIGURATION"},
+		{"rewrite --help", "CONFIGURATION"},
 		{"prompt --help", "revision guidance"},
 		{"config --help", "--wizard"},
 		{"explain --help", "rule-id"},

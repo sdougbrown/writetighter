@@ -159,9 +159,10 @@ func appFor(stdout io.Writer) *clicontract.App {
 // embedded profile loader to simulate a no-profile state.
 var loadEmbedded = profile.LoadEmbedded
 
-// runWithMissingConfig runs fn. When the model configuration is missing
-// it offers the interactive configuration wizard on a terminal and retries
-// once; otherwise the failure maps to a usage error (exit 2).
+// runWithMissingConfig maps a RunXxxTo error: a missing model
+// configuration offers the interactive wizard on a terminal and retries
+// once via retry; any other error passes through, and a non-terminal
+// missing config maps to a usage error (exit 2).
 func runWithMissingConfig(ctx context.Context, stderr io.Writer, stdinFlag bool, err error, retry func() error) error {
 	if err == nil {
 		return nil
@@ -180,9 +181,10 @@ func runWithMissingConfig(ctx context.Context, stderr io.Writer, stdinFlag bool,
 	return retry()
 }
 
-// resolveInputMode validates the input-mode contract shared by lint and
-// revise: paths, --stdin and --text are mutually exclusive, and at least
-// one input is required. Returns the --text value when it was given.
+// resolveInputMode validates the input-mode contract shared by every
+// migrated document command (lint, revise, rewrite): paths, --stdin and
+// --text are mutually exclusive, and at least one input is required.
+// Returns the --text value when it was given.
 func resolveInputMode(inv clicontract.Invocation) (*string, error) {
 	_, textSet := inv.Supplied["text"]
 	var text *string
