@@ -311,9 +311,9 @@ func resolveAPIKey(cfg *config.UserConfig) string {
 }
 
 // The documented CLI permits paths before flags. flag.FlagSet stops at the first
-// positional argument, so normalize the small lint/revise grammar before parsing.
+// positional argument, so normalize rewrite's small grammar before parsing.
 func normalizeInterspersedFlags(args []string) []string {
-	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true, "--text": true, "--reference": true, "--git-compare": true, "--model": true, "--code-model": true, "--context-tokens": true, "--output-tokens": true}
+	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--text": true, "--model": true}
 	var flags, paths []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
