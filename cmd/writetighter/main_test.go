@@ -286,6 +286,18 @@ func TestLintAcceptsDirectText(t *testing.T) {
 	}
 }
 
+func TestLintFailOnWarningExitsOne(t *testing.T) {
+	out := captureStdout(t, func() {
+		got := run([]string{"lint", "--text", "This single overly long demonstration sentence deliberately packs far more words than the description profile permits because it keeps going well past the twenty-five word threshold with clause after clause appended for the exact purpose of triggering the rule reliably in every possible review setting without ever stopping to reconsider the structure of this sentence at all.", "--kind", "description", "--format", "json", "--fail-on", "warning"})
+		if got != 1 {
+			t.Fatalf("expected exit 1 for --fail-on warning, got %d", got)
+		}
+	})
+	if !strings.Contains(out, "CORE.SENTENCE_LENGTH") {
+		t.Fatalf("expected SENTENCE_LENGTH finding in JSON output: %s", out)
+	}
+}
+
 func TestLintAcceptedFlags(t *testing.T) {
 	// lint accepts paths before flags.
 	if got := run([]string{"lint", "missing.txt"}); got != 2 {
