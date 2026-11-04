@@ -63,7 +63,8 @@ func run(args []string) int {
 	case "rewrite":
 		return runRewrite(args[1:])
 	case "prompt":
-		return runPrompt(args[1:])
+		// Migrated to the clicontract-declared command surface.
+		return cli.Run(args, os.Stdout, os.Stderr)
 	case "config":
 		return runConfig(args[1:])
 	case "explain":
@@ -83,9 +84,9 @@ func runHelp(args []string) int {
 		return cli.ExitOK
 	}
 	switch args[0] {
-	case "version":
+	case "version", "prompt":
 		// Migrated command: its help renders from the declaration.
-		return cli.Run([]string{"version", "--help"}, os.Stdout, os.Stderr)
+		return cli.Run([]string{args[0], "--help"}, os.Stdout, os.Stderr)
 	}
 	printHelp(args[0])
 	return cli.ExitOK
@@ -286,28 +287,6 @@ func runRewrite(args []string) int {
 			usageErr(err.Error())
 			return cli.ExitModel
 		}
-		usageErr(err.Error())
-		return cli.ExitUsage
-	}
-	return cli.ExitOK
-}
-
-func runPrompt(args []string) int {
-	if wantsHelp(args) {
-		printHelp("prompt")
-		return cli.ExitOK
-	}
-	fs := flag.NewFlagSet("prompt", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	kind := fs.String("kind", "description", "")
-	format := fs.String("format", "human", "")
-	fs.Usage = func() { printHelp("prompt") }
-	if err := fs.Parse(args); err != nil || len(fs.Args()) != 0 {
-		fmt.Fprintln(os.Stderr, "invalid prompt arguments")
-		fmt.Fprintln(os.Stderr, "  Run `writetighter prompt --help` for usage.")
-		return cli.ExitUsage
-	}
-	if err := app.New().RunPrompt(app.PromptParams{Kind: *kind, Format: *format}); err != nil {
 		usageErr(err.Error())
 		return cli.ExitUsage
 	}
@@ -744,26 +723,6 @@ EXAMPLES
   writetighter rewrite docs/intro.md --format json
 `
 
-const promptHelp = `writetighter prompt — export revision guidance
-
-Prints the core and kind-specific revision guidance used by "writetighter revise".
-No model access or configuration is needed.
-
-USAGE
-  writetighter prompt [--kind <kind>] [--format <format>]
-
-FLAGS
-  --kind <kind>        Document kind (default: description)
-                      Choices: description, procedure, pr, code-comment, reference,
-                      decision, incident, agent-instruction, status-update
-  --format <format>   Output format: human, json (default: human)
-
-EXAMPLES
-  writetighter prompt
-  writetighter prompt --kind code-comment
-  writetighter prompt --kind pr --format json
-`
-
 const configHelp = `writetighter config — show or reconfigure model settings
 
 When already configured, prints the current configuration with the API key
@@ -832,7 +791,6 @@ var helpTexts = map[string]string{
 	"lint":    lintHelp,
 	"revise":  reviseHelp,
 	"rewrite": rewriteHelp,
-	"prompt":  promptHelp,
 	"config":  configHelp,
 	"explain": explainHelp,
 	"profile": profileHelp,

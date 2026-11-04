@@ -22,6 +22,7 @@ import (
 	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/writetighter/internal/app"
+	"github.com/sdougbrown/writetighter/internal/guidance"
 	"github.com/sdougbrown/writetighter/internal/profile"
 )
 
@@ -48,6 +49,15 @@ var commands = []*clicontract.Command{
 			{Name: "json", Kind: clicontract.Bool, Usage: "output version information as JSON (default: human-readable)"},
 		},
 		Handle: handleVersion,
+	},
+	{
+		Name:  "prompt",
+		Short: "Export core and kind-specific revision guidance",
+		Flags: []clicontract.Flag{
+			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (default: description; choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)"},
+			{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json (default: human)"},
+		},
+		Handle: handlePrompt,
 	},
 }
 
@@ -85,6 +95,19 @@ func appFor() *clicontract.App {
 // embedded profile loader to simulate a no-profile state.
 var loadEmbedded = profile.LoadEmbedded
 
+type promptResult struct {
+	format string
+	rubric *guidance.Set
+}
+
+func handlePrompt(_ context.Context, inv clicontract.Invocation, _ io.Writer) (any, error) {
+	rubric, format, err := app.PromptData(app.PromptParams{Kind: inv.Flags["kind"], Format: inv.Flags["format"]})
+	if err != nil {
+		return nil, err
+	}
+	return promptResult{format: format, rubric: rubric}, nil
+}
+
 func handleVersion(_ context.Context, inv clicontract.Invocation, _ io.Writer) (any, error) {
 	r, _ := loadEmbedded()
 	profiles := []map[string]any{}
@@ -114,6 +137,12 @@ func (cliAdapter) ErrorResult(_ string, _ error) any { return failureResult{} }
 
 func (cliAdapter) Write(w io.Writer, result any) error {
 	switch r := result.(type) {
+	case promptResult:
+		if r.format == "json" {
+			return json.NewEncoder(w).Encode(r.rubric)
+		}
+		_, err := io.WriteString(w, app.PromptText(r.rubric))
+		return err
 	case versionResult:
 		if r.format == "json" {
 			payload := map[string]any{"version": r.version, "commit": r.commit, "embedded_profiles": r.profiles}
