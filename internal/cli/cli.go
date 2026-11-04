@@ -14,6 +14,7 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -142,9 +143,20 @@ func (cliAdapter) ExitCode(_ clicontract.Invocation, _ any, handlerErr error) in
 	if handlerErr == nil {
 		return ExitOK
 	}
-	// version has no model path; every failure here is an input or
-	// configuration problem.
-	return ExitUsage
+	// Sentinel mapping, not a per-command switch: lint's fail threshold
+	// and the model failures identify themselves, so migrated commands
+	// inherit the codes without a mapping arm per command.
+	switch {
+	case errors.Is(handlerErr, app.ErrFailThreshold):
+		return ExitFailThreshold
+	case errors.Is(handlerErr, app.ErrReviseFailed),
+		errors.Is(handlerErr, app.ErrRewriteFailed):
+		return ExitModel
+	default:
+		// version has no model path; every other failure here is an
+		// input or configuration problem.
+		return ExitUsage
+	}
 }
 
 func (cliAdapter) Deadline(ctx context.Context, _ clicontract.Invocation) (context.Context, context.CancelFunc) {
