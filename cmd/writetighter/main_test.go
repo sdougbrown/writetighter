@@ -253,6 +253,7 @@ func TestStrictFlagAndEnumValidation(t *testing.T) {
 	for _, args := range [][]string{
 		{"version", "--wat"}, {"version", "extra"}, {"lint", "--stdin", "--kind", "blog"},
 		{"lint", "--stdin", "--format", "yaml"}, {"explain", "--wat", "CORE.SENTENCE_LENGTH"},
+		{"lint", "--text", "x", "--fail-on", "bogus"},
 		{"prompt", "--kind", "message"}, {"prompt", "--format", "yaml"}, {"prompt", "extra"},
 		{"profile", "list", "--wat"},
 	} {
@@ -283,6 +284,18 @@ func TestLintAcceptsDirectText(t *testing.T) {
 	}
 	if got := run([]string{"lint", "--text", "text", "--stdin"}); got != 2 {
 		t.Fatalf("expected --text and stdin conflict, got %d", got)
+	}
+}
+
+func TestLintFailOnWarningExitsOne(t *testing.T) {
+	out := captureStdout(t, func() {
+		got := run([]string{"lint", "--text", "This single overly long demonstration sentence deliberately packs far more words than the description profile permits because it keeps going well past the twenty-five word threshold with clause after clause appended for the exact purpose of triggering the rule reliably in every possible review setting without ever stopping to reconsider the structure of this sentence at all.", "--kind", "description", "--format", "json", "--fail-on", "warning"})
+		if got != 1 {
+			t.Fatalf("expected exit 1 for --fail-on warning, got %d", got)
+		}
+	})
+	if !strings.Contains(out, "CORE.SENTENCE_LENGTH") {
+		t.Fatalf("expected SENTENCE_LENGTH finding in JSON output: %s", out)
 	}
 }
 
