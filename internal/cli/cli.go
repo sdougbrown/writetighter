@@ -17,13 +17,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
+
+	"golang.org/x/term"
 
 	clicontract "github.com/sdougbrown/cli-contract"
 
 	"github.com/sdougbrown/writetighter/internal/app"
 	"github.com/sdougbrown/writetighter/internal/guidance"
 	"github.com/sdougbrown/writetighter/internal/profile"
+	"github.com/sdougbrown/writetighter/internal/setup"
 )
 
 // Exit codes are owned by internal/cli. The values match the contract
@@ -69,6 +73,28 @@ func buildCommands(stdout io.Writer) []*clicontract.Command {
 			},
 			Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
 				return handleLint(stdout, ctx, inv, stderr)
+			},
+		},
+		{
+			Name:        "revise",
+			Short:       "Run contextual model-based revision (requires model config)",
+			Positionals: []clicontract.Positional{{Name: "paths", Variadic: true}},
+			Long:        "Sends input to an OpenAI-compatible model with revision guidance and returns rewritten prose. Requires [llm] configuration in the user config.\n\nINPUT\n  Provide input via file paths, --stdin, or --text (mutually exclusive).\n\nCONFIGURATION\n  Revise requires [llm] model settings. Run \"writetighter config\" to configure.\n  If config is missing and stdin is a terminal, interactive setup is offered\n  automatically; otherwise the command exits with a hint.\n\n  Reference revision auto-detects the context window from the\n  /v1/models endpoint. Use --context-tokens to override it.\n\nEXAMPLES\n  writetighter revise --text \"Short text.\" --kind procedure\n  writetighter revise --stdin < README.md\n  writetighter revise docs/*.md --format human\n  writetighter revise docs/*.md --reference style-guide.md\n",
+			Flags: []clicontract.Flag{
+				{Name: "stdin", Kind: clicontract.Bool, Usage: "Read input from stdin"},
+				{Name: "text", Kind: clicontract.String, Usage: "Revise the provided text directly"},
+				{Name: "kind", Kind: clicontract.String, Usage: "Document kind (choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)", Default: "description"},
+				{Name: "profile", Kind: clicontract.String, Usage: "Profile id@version (default: discovered or user config)"},
+				{Name: "config", Kind: clicontract.String, Usage: "Path to .writetighter.toml (default: auto-discovered)"},
+				{Name: "format", Kind: clicontract.String, Usage: "Output format: json, human", Default: "json"},
+				{Name: "reference", Kind: clicontract.Repeat, Usage: "Path to a reference file or directory (repeatable); reference content provides broader context for revision decisions"},
+				{Name: "model", Kind: clicontract.String, Usage: "Override the configured model for this run"},
+				{Name: "code-model", Kind: clicontract.String, Usage: "Override the model used for code-aware comment revision"},
+				{Name: "context-tokens", Kind: clicontract.Int, Usage: "Override the model context window (tokens); 0 = auto-detect from /v1/models"},
+				{Name: "output-tokens", Kind: clicontract.Int, Usage: "Override max output tokens sent to the API; 0 = default when context window is known"},
+			},
+			Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
+				return handleRevise(stdout, stderr, ctx, inv)
 			},
 		},
 		{
@@ -148,6 +174,54 @@ func handleLint(stdout io.Writer, _ context.Context, inv clicontract.Invocation,
 	return lintResult{}, nil
 }
 
+type reviseResult struct{}
+
+func handleRevise(stdout, stderr io.Writer, _ context.Context, inv clicontract.Invocation) (any, error) {
+	params := app.ReviseParams{
+		Paths:          inv.Args,
+		Stdin:          inv.Bools["stdin"],
+		Kind:           inv.Flags["kind"],
+		Profile:        inv.Flags["profile"],
+		ConfigPath:     inv.Flags["config"],
+		Format:         inv.Flags["format"],
+		ReferencePaths: inv.Events,
+		Model:          inv.Flags["model"],
+		CodeModel:      inv.Flags["code-model"],
+		ContextTokens:  inv.Ints["context-tokens"],
+		OutputTokens:   inv.Ints["output-tokens"],
+	}
+	_, textSet := inv.Supplied["text"]
+	if textSet {
+		text := inv.Flags["text"]
+		params.Text = &text
+	}
+	switch {
+	case (params.Stdin && (len(params.Paths) > 0 || textSet)) || (textSet && len(params.Paths) > 0):
+		return nil, &clicontract.UsageError{Message: "paths, --stdin, and --text are mutually exclusive"}
+	case !params.Stdin && !textSet && len(params.Paths) == 0:
+		return nil, &clicontract.UsageError{Message: "no input specified"}
+	}
+	err := app.New().RunReviseTo(stdout, params)
+	if errors.Is(err, app.ErrLLMConfigRequired) {
+		if !params.Stdin && term.IsTerminal(int(os.Stdin.Fd())) {
+			fmt.Fprintf(stderr, "%v\nStarting interactive configuration.\n", err)
+			if wizardErr := setup.RunInteractive(context.Background()); wizardErr != nil {
+				return nil, &clicontract.UsageError{Message: "config failed: " + wizardErr.Error()}
+			}
+			err = app.New().RunReviseTo(stdout, params)
+		} else {
+			// Hint line retired with the migration; see package doc.
+			return nil, &clicontract.UsageError{Message: err.Error()}
+		}
+	}
+	if err != nil {
+		// ErrReviseFailed maps to exit 3 via the adapter's sentinel mapping;
+		// every other failure maps to exit 2.
+		return nil, err
+	}
+	return reviseResult{}, nil
+}
+
 type promptResult struct {
 	format string
 	rubric *guidance.Set
@@ -190,6 +264,10 @@ func (cliAdapter) ErrorResult(_ string, _ error) any { return failureResult{} }
 
 func (cliAdapter) Write(w io.Writer, result any) error {
 	switch r := result.(type) {
+	case reviseResult:
+		// The rendered revision document was written via the dispatch
+		// stdout writer; nothing else to emit.
+		return nil
 	case lintResult:
 		// Findings were already written to stdout by RunLint; nothing
 		// else to emit.
