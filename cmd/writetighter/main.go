@@ -18,18 +18,6 @@ import (
 
 func main() { os.Exit(run(os.Args[1:])) }
 
-type optionalStringFlag struct {
-	value string
-	set   bool
-}
-
-func (f *optionalStringFlag) String() string { return f.value }
-func (f *optionalStringFlag) Set(value string) error {
-	f.value = value
-	f.set = true
-	return nil
-}
-
 // Exit codes:
 // 0: command completed successfully.
 // 1: lint findings reached --fail-on.
