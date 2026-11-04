@@ -54,7 +54,7 @@ var commands = []*clicontract.Command{
 		Name:  "prompt",
 		Short: "Export core and kind-specific revision guidance",
 		Flags: []clicontract.Flag{
-			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (default: description)"},
+			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (default: description; choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)"},
 			{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json (default: human)"},
 		},
 		Handle: handlePrompt,
