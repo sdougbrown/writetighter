@@ -95,6 +95,12 @@ func TestRunVersion(t *testing.T) {
 		if payload.Commit == "" {
 			t.Fatal("missing commit in JSON payload")
 		}
+		if len(payload.EmbeddedProfiles) != 1 {
+			t.Fatalf("expected one embedded profile in JSON payload, got %d", len(payload.EmbeddedProfiles))
+		}
+		if payload.EmbeddedProfiles[0].ID == "" || payload.EmbeddedProfiles[0].Version == "" {
+			t.Fatalf("embedded profile entry missing id/version: %+v", payload.EmbeddedProfiles[0])
+		}
 	})
 
 	// bare version: assert stdout contains the version string
@@ -204,7 +210,7 @@ func TestRunPrompt(t *testing.T) {
 
 func TestStrictFlagAndEnumValidation(t *testing.T) {
 	for _, args := range [][]string{
-		{"version", "--wat"}, {"lint", "--stdin", "--kind", "blog"},
+		{"version", "--wat"}, {"version", "extra"}, {"lint", "--stdin", "--kind", "blog"},
 		{"lint", "--stdin", "--format", "yaml"}, {"explain", "--wat", "CORE.SENTENCE_LENGTH"},
 		{"prompt", "--kind", "message"}, {"prompt", "--format", "yaml"}, {"prompt", "extra"},
 		{"profile", "list", "--wat"},
@@ -353,6 +359,7 @@ func TestSubcommandHelpFlags(t *testing.T) {
 		{"explain --help", "rule-id"},
 		{"profile --help", "SUBCOMMANDS"},
 		{"version --help", "--json"},
+		{"help version", "--json"},
 	} {
 		t.Run(tc.args, func(t *testing.T) {
 			out := captureStdout(t, func() {

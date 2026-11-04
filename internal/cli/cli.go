@@ -26,9 +26,6 @@ const (
 	ExitUsage = 2
 )
 
-// Invocation carries one parsed command invocation.
-type Invocation = clicontract.Invocation
-
 // commands declares the migrated surface. Handle funcs are resolved at
 // dispatch time through these declarations.
 var commands = []*clicontract.Command{
@@ -36,7 +33,7 @@ var commands = []*clicontract.Command{
 		Name:  "version",
 		Short: "print version and embedded profile information",
 		Flags: []clicontract.Flag{
-			{Name: "json", Kind: clicontract.Bool, Usage: "output version information as JSON"},
+			{Name: "json", Kind: clicontract.Bool, Usage: "output version information as JSON (default: human-readable)"},
 		},
 		Handle: handleVersion,
 	},
@@ -58,7 +55,7 @@ func appFor() *clicontract.App {
 // embedded profile loader to simulate a no-profile state.
 var loadEmbedded = profile.LoadEmbedded
 
-func handleVersion(_ context.Context, inv Invocation, _ io.Writer) (any, error) {
+func handleVersion(_ context.Context, inv clicontract.Invocation, _ io.Writer) (any, error) {
 	r, _ := loadEmbedded()
 	profiles := []map[string]any{}
 	if r != nil {
@@ -98,8 +95,8 @@ func (cliAdapter) Write(w io.Writer, result any) error {
 			fmt.Fprintf(&b, " (commit %s)", r.commit)
 		}
 		b.WriteString("\n")
-		if len(r.profiles) == 1 {
-			fmt.Fprintf(&b, "embedded profile: %s@%s\n", r.profiles[0]["id"], r.profiles[0]["version"])
+		for _, p := range r.profiles {
+			fmt.Fprintf(&b, "embedded profile: %s@%s\n", p["id"], p["version"])
 		}
 		_, err := io.WriteString(w, b.String())
 		return err
@@ -112,7 +109,7 @@ func (cliAdapter) Write(w io.Writer, result any) error {
 	}
 }
 
-func (cliAdapter) ExitCode(_ Invocation, _ any, handlerErr error) int {
+func (cliAdapter) ExitCode(_ clicontract.Invocation, _ any, handlerErr error) int {
 	if handlerErr == nil {
 		return ExitOK
 	}
@@ -121,13 +118,13 @@ func (cliAdapter) ExitCode(_ Invocation, _ any, handlerErr error) int {
 	return ExitUsage
 }
 
-func (cliAdapter) Deadline(ctx context.Context, _ Invocation) (context.Context, context.CancelFunc) {
+func (cliAdapter) Deadline(ctx context.Context, _ clicontract.Invocation) (context.Context, context.CancelFunc) {
 	return ctx, func() {}
 }
 
-func (cliAdapter) BeforeHandler(_ Invocation, _ io.Writer) {}
+func (cliAdapter) BeforeHandler(_ clicontract.Invocation, _ io.Writer) {}
 
-func (cliAdapter) Validate(_ Invocation) error { return nil }
+func (cliAdapter) Validate(_ clicontract.Invocation) error { return nil }
 
 type cliAdapter struct{}
 
