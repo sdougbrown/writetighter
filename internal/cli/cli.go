@@ -44,42 +44,42 @@ const (
 // dispatch time through these declarations.
 func buildCommands(stdout io.Writer) []*clicontract.Command {
 	return []*clicontract.Command{
-	{
-		Name:  "version",
-		Short: "Print version and embedded profile information",
-		Flags: []clicontract.Flag{
-			{Name: "json", Kind: clicontract.Bool, Usage: "output version information as JSON (default: human-readable)"},
+		{
+			Name:  "version",
+			Short: "Print version and embedded profile information",
+			Flags: []clicontract.Flag{
+				{Name: "json", Kind: clicontract.Bool, Usage: "output version information as JSON (default: human-readable)"},
+			},
+			Handle: handleVersion,
 		},
-		Handle: handleVersion,
-	},
-	{
-		Name:        "lint",
-		Short:       "Run deterministic profile rules (no model access)",
-		Positionals: []clicontract.Positional{{Name: "paths", Variadic: true}},
-		Long:        "Checks input against the active profile's static rules. No model access is needed.\n\nINPUT\n  Provide input via file paths, --stdin, or --text (mutually exclusive).\n\nEXAMPLES\n  writetighter lint README.md\n  writetighter lint --stdin < README.md\n  writetighter lint --text \"Short text.\" --kind procedure\n  writetighter lint --format json docs/*.md --fail-on warning\n",
-		Flags: []clicontract.Flag{
-			{Name: "stdin", Kind: clicontract.Bool, Usage: "Read input from stdin"},
-			{Name: "text", Kind: clicontract.String, Usage: "Lint the provided text directly"},
-			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)", Default: "description"},
-			{Name: "profile", Kind: clicontract.String, Usage: "Profile id@version (default: discovered or user config)"},
-			{Name: "config", Kind: clicontract.String, Usage: "Path to .writetighter.toml (default: auto-discovered)"},
-			{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json, agent", Default: "human"},
-			{Name: "fail-on", Kind: clicontract.String, Usage: "Fail when findings reach this severity (choices: none, warning, error)", Default: "none"},
-			{Name: "git-compare", Kind: clicontract.String, Usage: "Git revision to compare against for unfamiliar-term detection (only valid with file paths; advisory, candidate/info)"},
+		{
+			Name:        "lint",
+			Short:       "Run deterministic profile rules (no model access)",
+			Positionals: []clicontract.Positional{{Name: "paths", Variadic: true}},
+			Long:        "Checks input against the active profile's static rules. No model access is needed.\n\nINPUT\n  Provide input via file paths, --stdin, or --text (mutually exclusive).\n\nEXAMPLES\n  writetighter lint README.md\n  writetighter lint --stdin < README.md\n  writetighter lint --text \"Short text.\" --kind procedure\n  writetighter lint --format json docs/*.md --fail-on warning\n",
+			Flags: []clicontract.Flag{
+				{Name: "stdin", Kind: clicontract.Bool, Usage: "Read input from stdin"},
+				{Name: "text", Kind: clicontract.String, Usage: "Lint the provided text directly"},
+				{Name: "kind", Kind: clicontract.String, Usage: "Document kind (choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)", Default: "description"},
+				{Name: "profile", Kind: clicontract.String, Usage: "Profile id@version (default: discovered or user config)"},
+				{Name: "config", Kind: clicontract.String, Usage: "Path to .writetighter.toml (default: auto-discovered)"},
+				{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json, agent", Default: "human"},
+				{Name: "fail-on", Kind: clicontract.String, Usage: "Fail when findings reach this severity (choices: none, warning, error)", Default: "none"},
+				{Name: "git-compare", Kind: clicontract.String, Usage: "Git revision to compare against for unfamiliar-term detection (only valid with file paths; advisory, candidate/info)"},
+			},
+			Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
+				return handleLint(stdout, ctx, inv, stderr)
+			},
 		},
-		Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
-			return handleLint(stdout, ctx, inv, stderr)
+		{
+			Name:  "prompt",
+			Short: "Export core and kind-specific revision guidance",
+			Flags: []clicontract.Flag{
+				{Name: "kind", Kind: clicontract.String, Usage: "Document kind (choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)", Default: "description"},
+				{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json", Default: "human"},
+			},
+			Handle: handlePrompt,
 		},
-	},
-	{
-		Name:  "prompt",
-		Short: "Export core and kind-specific revision guidance",
-		Flags: []clicontract.Flag{
-			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)", Default: "description"},
-			{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json", Default: "human"},
-		},
-		Handle: handlePrompt,
-	},
 	}
 }
 
