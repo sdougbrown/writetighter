@@ -366,6 +366,7 @@ func TestSubcommandHelpFlags(t *testing.T) {
 		{"profile --help", "SUBCOMMANDS"},
 		{"version --help", "--json"},
 		{"help version", "--json"},
+		{"help prompt", "revision guidance"},
 	} {
 		t.Run(tc.args, func(t *testing.T) {
 			out := captureStdout(t, func() {

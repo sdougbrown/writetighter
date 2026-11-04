@@ -491,9 +491,10 @@ func validResponseMode(v string) bool {
 	return v == "auto" || v == "json_schema" || v == "json_object" || v == "prompt_json"
 }
 
-// RunPrompt prints the same core and kind-specific guidance used by revise.
-// It does not load user configuration, resolve a profile, read input, or call a model.
-func (a *App) RunPrompt(params PromptParams) error {
+// PromptData resolves the guidance rubric for the params, applying the
+// documented defaults and format validation. It does not load user
+// configuration, resolve a profile, read input, or call a model.
+func PromptData(params PromptParams) (*guidance.Set, string, error) {
 	if params.Kind == "" {
 		params.Kind = guidance.KindDescription
 	}
@@ -501,15 +502,17 @@ func (a *App) RunPrompt(params PromptParams) error {
 		params.Format = "human"
 	}
 	if params.Format != "human" && params.Format != "json" {
-		return fmt.Errorf("invalid prompt format %q", params.Format)
+		return nil, "", fmt.Errorf("invalid prompt format %q", params.Format)
 	}
 	rubric, err := guidance.ForKind(params.Kind)
 	if err != nil {
-		return err
+		return nil, "", err
 	}
-	if params.Format == "json" {
-		return json.NewEncoder(os.Stdout).Encode(rubric)
-	}
+	return rubric, params.Format, nil
+}
+
+// PromptText renders the human-readable prompt document for rubric.
+func PromptText(rubric *guidance.Set) string {
 	var b strings.Builder
 	b.WriteString("You are a technical writing reviewer. Revise prose using the following guidance.\n")
 	fmt.Fprintf(&b, "Document kind: %s\n\n", rubric.Kind)
@@ -525,8 +528,7 @@ func (a *App) RunPrompt(params PromptParams) error {
 	for _, direction := range rubric.KindDirections {
 		fmt.Fprintf(&b, "- %s\n", direction)
 	}
-	_, err = fmt.Fprint(os.Stdout, b.String())
-	return err
+	return b.String()
 }
 
 // RunRewrite runs whole-passage contextual rewrite. It sends the full input

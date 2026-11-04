@@ -646,31 +646,40 @@ func TestRunPromptExportsCodeCommentGuidanceWithoutConfig(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(configDir, "config.toml"), []byte("malformed = ["), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	output := captureStdout(t, func() {
-		if err := (&App{}).RunPrompt(PromptParams{Kind: "code-comment", Format: "human"}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	rubric, format, err := PromptData(PromptParams{Kind: "code-comment", Format: "human"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != "human" {
+		t.Fatalf("format = %q, want human", format)
+	}
+	output := PromptText(rubric)
 	for _, expected := range []string{"Document kind: code-comment", "CORE.CAUSAL_ORDER", "invariant", "TODO", "verify any rewrite against the implementation"} {
-		if !strings.Contains(output.String(), expected) {
-			t.Fatalf("prompt output missing %q: %s", expected, output.String())
+		if !strings.Contains(output, expected) {
+			t.Fatalf("prompt output missing %q: %s", expected, output)
 		}
 	}
 }
 
 func TestRunPromptJSON(t *testing.T) {
-	output := captureStdout(t, func() {
-		if err := (&App{}).RunPrompt(PromptParams{Kind: "pr", Format: "json"}); err != nil {
-			t.Fatal(err)
-		}
-	})
+	rubric, format, err := PromptData(PromptParams{Kind: "pr", Format: "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if format != "json" {
+		t.Fatalf("format = %q, want json", format)
+	}
+	data, err := json.Marshal(rubric)
+	if err != nil {
+		t.Fatal(err)
+	}
 	var payload struct {
 		SchemaVersion  int `json:"schema_version"`
 		Kind           string
 		Principles     []map[string]string `json:"principles"`
 		KindDirections []string            `json:"kind_directions"`
 	}
-	if err := json.Unmarshal(output.Bytes(), &payload); err != nil {
+	if err := json.Unmarshal(data, &payload); err != nil {
 		t.Fatal(err)
 	}
 	if payload.SchemaVersion != 1 || payload.Kind != "pr" || len(payload.Principles) == 0 || len(payload.KindDirections) == 0 {
@@ -679,10 +688,10 @@ func TestRunPromptJSON(t *testing.T) {
 }
 
 func TestRunPromptRejectsInvalidOptions(t *testing.T) {
-	if err := (&App{}).RunPrompt(PromptParams{Kind: "message", Format: "human"}); err == nil {
+	if _, _, err := PromptData(PromptParams{Kind: "message", Format: "human"}); err == nil {
 		t.Fatal("expected invalid kind error")
 	}
-	if err := (&App{}).RunPrompt(PromptParams{Kind: "description", Format: "yaml"}); err == nil {
+	if _, _, err := PromptData(PromptParams{Kind: "description", Format: "yaml"}); err == nil {
 		t.Fatal("expected invalid format error")
 	}
 }
