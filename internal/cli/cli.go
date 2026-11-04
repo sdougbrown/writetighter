@@ -51,6 +51,22 @@ var commands = []*clicontract.Command{
 		Handle: handleVersion,
 	},
 	{
+		Name:        "lint",
+		Short:       "Run deterministic profile rules (no model access)",
+		Positionals: []clicontract.Positional{{Name: "paths", Variadic: true}},
+		Flags: []clicontract.Flag{
+			{Name: "stdin", Kind: clicontract.Bool, Usage: "Read input from stdin"},
+			{Name: "text", Kind: clicontract.String, Usage: "Lint the provided text directly"},
+			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (default: description)"},
+			{Name: "profile", Kind: clicontract.String, Usage: "Profile id@version (default: discovered or user config)"},
+			{Name: "config", Kind: clicontract.String, Usage: "Path to .writetighter.toml (default: auto-discovered)"},
+			{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json, agent (default: human)"},
+			{Name: "fail-on", Kind: clicontract.String, Usage: "Fail when findings reach this severity (default: none)"},
+			{Name: "git-compare", Kind: clicontract.String, Usage: "Git revision to compare against for unfamiliar-term detection"},
+		},
+		Handle: handleLint,
+	},
+	{
 		Name:  "prompt",
 		Short: "Export core and kind-specific revision guidance",
 		Flags: []clicontract.Flag{
@@ -95,6 +111,43 @@ func appFor() *clicontract.App {
 // embedded profile loader to simulate a no-profile state.
 var loadEmbedded = profile.LoadEmbedded
 
+type lintResult struct{}
+
+func handleLint(_ context.Context, inv clicontract.Invocation, _ io.Writer) (any, error) {
+	params := app.LintParams{
+		Paths:      inv.Args,
+		Stdin:      inv.Bools["stdin"],
+		Kind:       valueOr(inv.Flags["kind"], "description"),
+		Profile:    inv.Flags["profile"],
+		ConfigPath: inv.Flags["config"],
+		Format:     valueOr(inv.Flags["format"], "human"),
+		FailOn:     valueOr(inv.Flags["fail-on"], "none"),
+		GitCompare: inv.Flags["git-compare"],
+	}
+	_, textSet := inv.Supplied["text"]
+	if textSet {
+		text := inv.Flags["text"]
+		params.Text = &text
+	}
+	switch {
+	case (params.Stdin && (len(params.Paths) > 0 || textSet)) || (textSet && len(params.Paths) > 0):
+		return nil, &clicontract.UsageError{Message: "paths, --stdin, and --text are mutually exclusive"}
+	case !params.Stdin && !textSet && len(params.Paths) == 0:
+		return nil, &clicontract.UsageError{Message: "no input specified"}
+	}
+	if err := app.New().RunLint(params); err != nil {
+		return nil, err
+	}
+	return lintResult{}, nil
+}
+
+func valueOr(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
+}
+
 type promptResult struct {
 	format string
 	rubric *guidance.Set
@@ -137,6 +190,10 @@ func (cliAdapter) ErrorResult(_ string, _ error) any { return failureResult{} }
 
 func (cliAdapter) Write(w io.Writer, result any) error {
 	switch r := result.(type) {
+	case lintResult:
+		// Findings were already written to stdout by RunLint; nothing
+		// else to emit.
+		return nil
 	case promptResult:
 		if r.format == "json" {
 			return json.NewEncoder(w).Encode(r.rubric)
@@ -195,6 +252,17 @@ func (cliAdapter) Deadline(ctx context.Context, _ clicontract.Invocation) (conte
 func (cliAdapter) BeforeHandler(_ clicontract.Invocation, _ io.Writer) {}
 
 func (cliAdapter) Validate(_ clicontract.Invocation) error { return nil }
+
+// HandlerDiagnostic suppresses the diagnostic line for the fail-threshold
+// sentinel: reaching --fail-on is the command's documented success-adjacent
+// signal and the hand-rolled dispatch printed nothing on exit 1. Other
+// handler failures print the error message, matching the old behavior.
+func (cliAdapter) HandlerDiagnostic(_ clicontract.Invocation, err error) string {
+	if errors.Is(err, app.ErrFailThreshold) {
+		return ""
+	}
+	return err.Error()
+}
 
 type cliAdapter struct{}
 

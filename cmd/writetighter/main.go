@@ -57,7 +57,8 @@ func run(args []string) int {
 		// Migrated to the clicontract-declared command surface.
 		return cli.Run(args, os.Stdout, os.Stderr)
 	case "lint":
-		return runLint(args[1:])
+		// Migrated to the clicontract-declared command surface.
+		return cli.Run(args, os.Stdout, os.Stderr)
 	case "revise":
 		return runRevise(args[1:])
 	case "rewrite":
@@ -84,7 +85,7 @@ func runHelp(args []string) int {
 		return cli.ExitOK
 	}
 	switch args[0] {
-	case "version", "prompt":
+	case "version", "prompt", "lint":
 		// Migrated command: its help renders from the declaration.
 		return cli.Run([]string{args[0], "--help"}, os.Stdout, os.Stderr)
 	}
@@ -101,52 +102,6 @@ func wantsHelp(args []string) bool {
 		}
 	}
 	return false
-}
-
-// runLint runs deterministic profile rules without model access.
-func runLint(args []string) int {
-	if wantsHelp(args) {
-		printHelp("lint")
-		return cli.ExitOK
-	}
-	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	stdin := fs.Bool("stdin", false, "")
-	var text optionalStringFlag
-	fs.Var(&text, "text", "")
-	kind := fs.String("kind", "description", "")
-	profile := fs.String("profile", "", "")
-	configPath := fs.String("config", "", "")
-	format := fs.String("format", "human", "")
-	failOn := fs.String("fail-on", "none", "")
-	gitCompare := fs.String("git-compare", "", "")
-	fs.Usage = func() { printHelp("lint") }
-	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
-		return cli.ExitUsage
-	}
-	params := app.LintParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, FailOn: *failOn, GitCompare: *gitCompare}
-	if text.set {
-		params.Text = &text.value
-	}
-	if (params.Stdin && (len(params.Paths) > 0 || params.Text != nil)) || (params.Text != nil && len(params.Paths) > 0) {
-		fmt.Fprintln(os.Stderr, "paths, --stdin, and --text are mutually exclusive")
-		fmt.Fprintln(os.Stderr, "  Run `writetighter lint --help` for usage.")
-		return cli.ExitUsage
-	}
-	if !params.Stdin && params.Text == nil && len(params.Paths) == 0 {
-		fmt.Fprintln(os.Stderr, "no input specified")
-		fmt.Fprintln(os.Stderr, "  Run `writetighter lint --help` for usage.")
-		return cli.ExitUsage
-	}
-	err := app.New().RunLint(params)
-	switch {
-	case errors.Is(err, app.ErrFailThreshold):
-		return cli.ExitFailThreshold
-	case err != nil:
-		usageErr(err.Error())
-		return cli.ExitUsage
-	}
-	return cli.ExitOK
 }
 
 // runRevise is the opt-in contextual revision command.
@@ -606,39 +561,6 @@ EXIT CODES
   3  model call or model response failure
 `
 
-const lintHelp = `writetighter lint — run deterministic profile rules
-
-Checks input against the active profile's static rules. No model access is needed.
-
-USAGE
-  writetighter lint [flags] [paths...]
-
-FLAGS
-  --stdin              Read input from stdin
-  --text <string>     Lint the provided text directly
-  --kind <kind>       Document kind (default: description)
-                      Choices: description, procedure, pr, code-comment, reference,
-                      decision, incident, agent-instruction, status-update
-  --profile <spec>    Profile id@version (default: discovered or user config)
-  --config <path>     Path to .writetighter.toml (default: auto-discovered)
-  --format <format>   Output format: human, json, agent (default: human)
-  --fail-on <level>   Fail when findings reach this severity
-                      Choices: none, warning, error (default: none)
-  --git-compare <rev> Git revision to compare against for unfamiliar-term detection
-                      Only valid with file paths. When set, flags terms that
-                      appear in the changed prose but have no precedent in the
-                      comparison revision. Advisory only (candidate/info).
-
-INPUT
-  Provide input via file paths, --stdin, or --text (mutually exclusive).
-
-EXAMPLES
-  writetighter lint README.md
-  writetighter lint --stdin < README.md
-  writetighter lint --text "Short text." --kind procedure
-  writetighter lint --format json docs/*.md --fail-on warning
-`
-
 const reviseHelp = `writetighter revise — run contextual model-based revision
 
 Sends input to an OpenAI-compatible model with revision guidance and returns
@@ -788,7 +710,6 @@ EXAMPLES
 
 var helpTexts = map[string]string{
 	"":        mainHelp,
-	"lint":    lintHelp,
 	"revise":  reviseHelp,
 	"rewrite": rewriteHelp,
 	"config":  configHelp,
