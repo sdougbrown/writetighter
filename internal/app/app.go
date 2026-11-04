@@ -769,9 +769,10 @@ func (a *App) RunRewrite(params RewriteParams) error {
 	return nil
 }
 
-// RunRevise runs contextual model revision. It reads LLM config from the
-// user config [llm] section and returns a structured ReviseResponse.
-func (a *App) RunRevise(params ReviseParams) error {
+// RunReviseTo runs contextual model revision: it reads LLM config from
+// the user config [llm] section and returns a structured ReviseResponse.
+// It is RunRevise with the output writer injected.
+func (a *App) RunReviseTo(w io.Writer, params ReviseParams) error {
 	if params.Kind == "" {
 		params.Kind = "description"
 	}
@@ -1241,11 +1242,16 @@ func (a *App) RunRevise(params ReviseParams) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprint(os.Stdout, formatted)
+	_, _ = fmt.Fprint(w, formatted)
 	if len(revisionErrors) > 0 {
 		return fmt.Errorf("%w: %d document revision request(s) failed", ErrReviseFailed, len(revisionErrors))
 	}
 	return nil
+}
+
+// RunRevise is RunReviseTo with os.Stdout as the writer.
+func (a *App) RunRevise(params ReviseParams) error {
+	return a.RunReviseTo(os.Stdout, params)
 }
 
 // usesCodeCommentProtocol selects lexer-owned comment IDs only for explicit file

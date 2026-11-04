@@ -15,18 +15,9 @@ import (
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
 	"github.com/sdougbrown/writetighter/internal/setup"
-	"golang.org/x/term"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }
-
-type pathsFlag []string
-
-func (f *pathsFlag) String() string { return strings.Join(*f, ",") }
-func (f *pathsFlag) Set(value string) error {
-	*f = append(*f, value)
-	return nil
-}
 
 type optionalStringFlag struct {
 	value string
@@ -60,7 +51,8 @@ func run(args []string) int {
 		// Migrated to the clicontract-declared command surface.
 		return cli.Run(args, os.Stdout, os.Stderr)
 	case "revise":
-		return runRevise(args[1:])
+		// Migrated to the clicontract-declared command surface.
+		return cli.Run(args, os.Stdout, os.Stderr)
 	case "rewrite":
 		return runRewrite(args[1:])
 	case "prompt":
@@ -85,7 +77,7 @@ func runHelp(args []string) int {
 		return cli.ExitOK
 	}
 	switch args[0] {
-	case "version", "prompt", "lint":
+	case "version", "prompt", "lint", "revise":
 		// Migrated command: its help renders from the declaration.
 		return cli.Run([]string{args[0], "--help"}, os.Stdout, os.Stderr)
 	}
@@ -102,83 +94,6 @@ func wantsHelp(args []string) bool {
 		}
 	}
 	return false
-}
-
-// runRevise is the opt-in contextual revision command.
-func runRevise(args []string) int {
-	if wantsHelp(args) {
-		printHelp("revise")
-		return cli.ExitOK
-	}
-	fs := flag.NewFlagSet("revise", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	stdin := fs.Bool("stdin", false, "")
-	var text optionalStringFlag
-	fs.Var(&text, "text", "")
-	kind := fs.String("kind", "description", "")
-	profile := fs.String("profile", "", "")
-	configPath := fs.String("config", "", "")
-	format := fs.String("format", "json", "")
-	var referencePaths pathsFlag
-	fs.Var(&referencePaths, "reference", "")
-	model := fs.String("model", "", "Override the configured model for this run")
-	codeModel := fs.String("code-model", "", "Override the model used for code-aware comment revision")
-	contextTokens := fs.Int("context-tokens", 0, "Override the model context window (tokens); 0 = auto-detect from /v1/models")
-	outputTokens := fs.Int("output-tokens", 0, "Override max output tokens sent to the API; 0 = default when context window is known")
-	fs.Usage = func() { printHelp("revise") }
-	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
-		return cli.ExitUsage
-	}
-	params := app.ReviseParams{
-		Paths:          fs.Args(),
-		Stdin:          *stdin,
-		Kind:           *kind,
-		Profile:        *profile,
-		ConfigPath:     *configPath,
-		Format:         *format,
-		ReferencePaths: []string(referencePaths),
-		Model:          *model,
-		CodeModel:      *codeModel,
-		ContextTokens:  *contextTokens,
-		OutputTokens:   *outputTokens,
-	}
-	if text.set {
-		params.Text = &text.value
-	}
-	if (params.Stdin && (len(params.Paths) > 0 || params.Text != nil)) || (params.Text != nil && len(params.Paths) > 0) {
-		fmt.Fprintln(os.Stderr, "paths, --stdin, and --text are mutually exclusive")
-		fmt.Fprintln(os.Stderr, "  Run `writetighter revise --help` for usage.")
-		return cli.ExitUsage
-	}
-	if !params.Stdin && params.Text == nil && len(params.Paths) == 0 {
-		fmt.Fprintln(os.Stderr, "no input specified")
-		fmt.Fprintln(os.Stderr, "  Run `writetighter revise --help` for usage.")
-		return cli.ExitUsage
-	}
-	err := app.New().RunRevise(params)
-	if errors.Is(err, app.ErrLLMConfigRequired) {
-		if !params.Stdin && stdinIsTerminal() {
-			fmt.Fprintf(os.Stderr, "%v\nStarting interactive configuration.\n", err)
-			if code := runConfig(nil); code != 0 {
-				return code
-			}
-			err = app.New().RunRevise(params)
-		} else {
-			fmt.Fprintln(os.Stderr, err.Error())
-			fmt.Fprintln(os.Stderr, "  Run `writetighter config` to configure, then retry.")
-			return cli.ExitUsage
-		}
-	}
-	if err != nil {
-		// Runtime model/response failures => exit 3; configuration/input errors => exit 2.
-		if errors.Is(err, app.ErrReviseFailed) {
-			usageErr(err.Error())
-			return cli.ExitModel
-		}
-		usageErr(err.Error())
-		return cli.ExitUsage
-	}
-	return cli.ExitOK
 }
 
 // runRewrite is the whole-passage rewrite command.
@@ -225,7 +140,7 @@ func runRewrite(args []string) int {
 	}
 	err := app.New().RunRewrite(params)
 	if errors.Is(err, app.ErrLLMConfigRequired) {
-		if !params.Stdin && stdinIsTerminal() {
+		if !params.Stdin && setup.StdinIsTerminal() {
 			fmt.Fprintf(os.Stderr, "%v\nStarting interactive configuration.\n", err)
 			if code := runConfig(nil); code != 0 {
 				return code
@@ -378,20 +293,7 @@ func runConfig(args []string) int {
 	}
 
 	// Run the interactive wizard (either --wizard was passed, or not yet configured).
-	_, err := setup.Run(context.Background(), setup.Options{
-		In:  os.Stdin,
-		Out: os.Stderr,
-		ReadSecret: func(prompt string) (string, error) {
-			if !stdinIsTerminal() {
-				return "", errors.New("secure API key input requires an interactive terminal")
-			}
-			fmt.Fprint(os.Stderr, prompt)
-			secret, err := term.ReadPassword(int(os.Stdin.Fd()))
-			fmt.Fprintln(os.Stderr)
-			return string(secret), err
-		},
-	})
-	if err != nil {
+	if err := setup.RunInteractive(context.Background()); err != nil {
 		usageErr("config failed: " + err.Error())
 		return cli.ExitUsage
 	}
@@ -408,12 +310,10 @@ func resolveAPIKey(cfg *config.UserConfig) string {
 	return ""
 }
 
-func stdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
-
 // The documented CLI permits paths before flags. flag.FlagSet stops at the first
-// positional argument, so normalize the small lint/revise grammar before parsing.
+// positional argument, so normalize rewrite's small grammar before parsing.
 func normalizeInterspersedFlags(args []string) []string {
-	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--fail-on": true, "--text": true, "--reference": true, "--git-compare": true, "--model": true, "--code-model": true, "--context-tokens": true, "--output-tokens": true}
+	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--text": true, "--model": true}
 	var flags, paths []string
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -561,49 +461,6 @@ EXIT CODES
   3  model call or model response failure
 `
 
-const reviseHelp = `writetighter revise — run contextual model-based revision
-
-Sends input to an OpenAI-compatible model with revision guidance and returns
-rewritten prose. Requires [llm] configuration in the user config.
-
-USAGE
-  writetighter revise [flags] [paths...]
-
-FLAGS
-  --stdin              Read input from stdin
-  --text <string>     Revise the provided text directly
-  --kind <kind>       Document kind (default: description)
-                      Choices: description, procedure, pr, code-comment, reference,
-                      decision, incident, agent-instruction, status-update
-  --profile <spec>    Profile id@version (default: discovered or user config)
-  --config <path>     Path to .writetighter.toml (default: auto-discovered)
-  --format <format>   Output format: json, human (default: json)
-  --reference <path>  Path to reference file or directory (repeatable)
-                      Reference content provides broader context for revision
-                      decisions. May be combined with paths, --stdin, or --text.
-  --model <id>        Override the configured model for this run
-  --code-model <id>   Override the model used for code-aware comment revision
-  --context-tokens <n> Override model context window (0 = auto-detect)
-  --output-tokens <n>  Override max output tokens sent to the API (0 = default)
-
-INPUT
-  Provide input via file paths, --stdin, or --text (mutually exclusive).
-
-CONFIGURATION
-  Revise requires [llm] model settings. Run "writetighter config" to configure.
-  If config is missing and stdin is a terminal, interactive setup is offered
-  automatically; otherwise the command exits with a hint.
-
-  Reference revision auto-detects the context window from the
-  /v1/models endpoint. Use --context-tokens to override it.
-
-EXAMPLES
-  writetighter revise --text "Short text." --kind procedure
-  writetighter revise --stdin < README.md
-  writetighter revise docs/*.md --format human
-  writetighter revise docs/*.md --reference style-guide.md
-`
-
 const rewriteHelp = `writetighter rewrite — run whole-passage contextual rewrite
 
 Sends the full input as one model request and returns the complete rewritten
@@ -710,7 +567,6 @@ EXAMPLES
 
 var helpTexts = map[string]string{
 	"":        mainHelp,
-	"revise":  reviseHelp,
 	"rewrite": rewriteHelp,
 	"config":  configHelp,
 	"explain": explainHelp,

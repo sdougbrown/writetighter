@@ -16,6 +16,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/term"
+
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
 )
@@ -26,6 +28,28 @@ const (
 	defaultMaxRequests = 32
 	maxResponse        = 1 << 20
 )
+
+// StdinIsTerminal reports whether stdin is an interactive terminal.
+func StdinIsTerminal() bool { return term.IsTerminal(int(os.Stdin.Fd())) }
+
+// RunInteractive runs the interactive configuration wizard against the
+// process's stdio. Secure API key entry requires a terminal.
+func RunInteractive(ctx context.Context) error {
+	_, err := Run(ctx, Options{
+		In:  os.Stdin,
+		Out: os.Stderr,
+		ReadSecret: func(prompt string) (string, error) {
+			if !StdinIsTerminal() {
+				return "", errors.New("secure API key input requires an interactive terminal")
+			}
+			fmt.Fprint(os.Stderr, prompt)
+			secret, err := term.ReadPassword(int(os.Stdin.Fd()))
+			fmt.Fprintln(os.Stderr)
+			return string(secret), err
+		},
+	})
+	return err
+}
 
 // SecretReader reads a secret without persisting it.
 type SecretReader func(prompt string) (string, error)
