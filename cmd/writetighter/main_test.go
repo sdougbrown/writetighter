@@ -9,12 +9,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/sdougbrown/writetighter/internal/app"
+	"github.com/sdougbrown/writetighter/internal/cli"
 	"github.com/sdougbrown/writetighter/internal/config"
-	"github.com/sdougbrown/writetighter/internal/profile"
 )
 
 // captureStdout runs fn with os.Stdout replaced by a pipe and returns the captured text.
@@ -80,6 +81,7 @@ func TestRunVersion(t *testing.T) {
 			EmbeddedProfiles []struct {
 				ID      string `json:"id"`
 				Version string `json:"version"`
+				SHA256  string `json:"sha256"`
 			} `json:"embedded_profiles"`
 		}
 		out := captureStdout(t, func() {
@@ -95,6 +97,15 @@ func TestRunVersion(t *testing.T) {
 		}
 		if payload.Commit == "" {
 			t.Fatal("missing commit in JSON payload")
+		}
+		if len(payload.EmbeddedProfiles) != 1 {
+			t.Fatalf("expected one embedded profile in JSON payload, got %d", len(payload.EmbeddedProfiles))
+		}
+		if payload.EmbeddedProfiles[0].ID == "" || payload.EmbeddedProfiles[0].Version == "" {
+			t.Fatalf("embedded profile entry missing id/version: %+v", payload.EmbeddedProfiles[0])
+		}
+		if payload.EmbeddedProfiles[0].SHA256 == "" {
+			t.Fatalf("embedded profile entry missing sha256: %+v", payload.EmbeddedProfiles[0])
 		}
 	})
 
@@ -148,41 +159,6 @@ func TestRunVersion(t *testing.T) {
 		}
 	})
 
-	// no embedded profile: override the loader to return nil
-	t.Run("no-embedded-profile", func(t *testing.T) {
-		oldLoader := loadEmbedded
-		loadEmbedded = func() (*profile.Resolution, error) { return nil, nil }
-		defer func() { loadEmbedded = oldLoader }()
-		out := captureStdout(t, func() {
-			if got := run([]string{"version"}); got != 0 {
-				t.Fatalf("exit %d", got)
-			}
-		})
-		if strings.Contains(out, "embedded profile:") {
-			t.Fatalf("embedded profile line should be absent, got: %s", out)
-		}
-		if !strings.Contains(out, "writetighter "+app.Version) {
-			t.Fatalf("expected 'writetighter %s' in output, got: %s", app.Version, out)
-		}
-
-		// --json with no embedded profile: embedded_profiles must be empty
-		jsonOut := captureStdout(t, func() {
-			if got := run([]string{"version", "--json"}); got != 0 {
-				t.Fatalf("exit %d", got)
-			}
-		})
-		var payload struct {
-			EmbeddedProfiles []struct {
-				ID string `json:"id"`
-			} `json:"embedded_profiles"`
-		}
-		if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
-			t.Fatalf("invalid JSON: %v\n%s", err, jsonOut)
-		}
-		if len(payload.EmbeddedProfiles) != 0 {
-			t.Fatalf("expected empty embedded_profiles, got %d items", len(payload.EmbeddedProfiles))
-		}
-	})
 }
 
 func TestRunExplain(t *testing.T) {
@@ -240,7 +216,7 @@ func TestRunPrompt(t *testing.T) {
 
 func TestStrictFlagAndEnumValidation(t *testing.T) {
 	for _, args := range [][]string{
-		{"version", "--wat"}, {"lint", "--stdin", "--kind", "blog"},
+		{"version", "--wat"}, {"version", "extra"}, {"lint", "--stdin", "--kind", "blog"},
 		{"lint", "--stdin", "--format", "yaml"}, {"explain", "--wat", "CORE.SENTENCE_LENGTH"},
 		{"prompt", "--kind", "message"}, {"prompt", "--format", "yaml"}, {"prompt", "extra"},
 		{"profile", "list", "--wat"},
@@ -389,6 +365,7 @@ func TestSubcommandHelpFlags(t *testing.T) {
 		{"explain --help", "rule-id"},
 		{"profile --help", "SUBCOMMANDS"},
 		{"version --help", "--json"},
+		{"help version", "--json"},
 	} {
 		t.Run(tc.args, func(t *testing.T) {
 			out := captureStdout(t, func() {
@@ -759,5 +736,22 @@ max_requests=32
 	}
 	if cfg.LLM.Model != "qwen" {
 		t.Fatalf("model should be unchanged, got %q", cfg.LLM.Model)
+	}
+}
+
+func TestRootHelpMatchesDeclarations(t *testing.T) {
+	firstLine, _, _ := strings.Cut(mainHelp, "\n")
+	if got, want := firstLine, "writetighter \u2014 "+cli.RootShort; got != want {
+		t.Fatalf("mainHelp first line is %q; want %q", got, want)
+	}
+	for name, short := range cli.CommandShorts() {
+		re := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(name) + ` +([^\n]+)$`)
+		m := re.FindStringSubmatch(mainHelp)
+		if m == nil {
+			t.Fatalf("mainHelp has no command line for declared command %q", name)
+		}
+		if got := strings.TrimRight(m[1], " "); got != short {
+			t.Fatalf("mainHelp line for %q ends with %q; declared Short is %q", name, got, short)
+		}
 	}
 }

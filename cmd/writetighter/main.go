@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,18 +11,14 @@ import (
 	"time"
 
 	"github.com/sdougbrown/writetighter/internal/app"
+	"github.com/sdougbrown/writetighter/internal/cli"
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
-	"github.com/sdougbrown/writetighter/internal/profile"
 	"github.com/sdougbrown/writetighter/internal/setup"
 	"golang.org/x/term"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }
-
-// loadEmbedded provides a package-level hook so tests can replace the
-// embedded profile loader to simulate a no-profile state.
-var loadEmbedded = profile.LoadEmbedded
 
 type pathsFlag []string
 
@@ -53,13 +48,14 @@ func (f *optionalStringFlag) Set(value string) error {
 func run(args []string) int {
 	if len(args) == 0 || args[0] == "--help" || args[0] == "-h" {
 		printHelp("")
-		return 0
+		return cli.ExitOK
 	}
 	switch args[0] {
 	case "help":
 		return runHelp(args[1:])
 	case "version":
-		return runVersion(args[1:])
+		// Migrated to the clicontract-declared command surface.
+		return cli.Run(args, os.Stdout, os.Stderr)
 	case "lint":
 		return runLint(args[1:])
 	case "revise":
@@ -77,17 +73,22 @@ func run(args []string) int {
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", args[0])
 		printHelp("")
-		return 2
+		return cli.ExitUsage
 	}
 }
 
 func runHelp(args []string) int {
 	if len(args) == 0 {
 		printHelp("")
-		return 0
+		return cli.ExitOK
+	}
+	switch args[0] {
+	case "version":
+		// Migrated command: its help renders from the declaration.
+		return cli.Run([]string{"version", "--help"}, os.Stdout, os.Stderr)
 	}
 	printHelp(args[0])
-	return 0
+	return cli.ExitOK
 }
 
 // wantsHelp reports whether the argument list contains --help or -h.
@@ -105,7 +106,7 @@ func wantsHelp(args []string) bool {
 func runLint(args []string) int {
 	if wantsHelp(args) {
 		printHelp("lint")
-		return 0
+		return cli.ExitOK
 	}
 	fs := flag.NewFlagSet("lint", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -120,7 +121,7 @@ func runLint(args []string) int {
 	gitCompare := fs.String("git-compare", "", "")
 	fs.Usage = func() { printHelp("lint") }
 	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
-		return 2
+		return cli.ExitUsage
 	}
 	params := app.LintParams{Paths: fs.Args(), Stdin: *stdin, Kind: *kind, Profile: *profile, ConfigPath: *configPath, Format: *format, FailOn: *failOn, GitCompare: *gitCompare}
 	if text.set {
@@ -129,29 +130,29 @@ func runLint(args []string) int {
 	if (params.Stdin && (len(params.Paths) > 0 || params.Text != nil)) || (params.Text != nil && len(params.Paths) > 0) {
 		fmt.Fprintln(os.Stderr, "paths, --stdin, and --text are mutually exclusive")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter lint --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 	if !params.Stdin && params.Text == nil && len(params.Paths) == 0 {
 		fmt.Fprintln(os.Stderr, "no input specified")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter lint --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 	err := app.New().RunLint(params)
 	switch {
 	case errors.Is(err, app.ErrFailThreshold):
-		return 1
+		return cli.ExitFailThreshold
 	case err != nil:
 		usageErr(err.Error())
-		return 2
+		return cli.ExitUsage
 	}
-	return 0
+	return cli.ExitOK
 }
 
 // runRevise is the opt-in contextual revision command.
 func runRevise(args []string) int {
 	if wantsHelp(args) {
 		printHelp("revise")
-		return 0
+		return cli.ExitOK
 	}
 	fs := flag.NewFlagSet("revise", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -170,7 +171,7 @@ func runRevise(args []string) int {
 	outputTokens := fs.Int("output-tokens", 0, "Override max output tokens sent to the API; 0 = default when context window is known")
 	fs.Usage = func() { printHelp("revise") }
 	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
-		return 2
+		return cli.ExitUsage
 	}
 	params := app.ReviseParams{
 		Paths:          fs.Args(),
@@ -191,12 +192,12 @@ func runRevise(args []string) int {
 	if (params.Stdin && (len(params.Paths) > 0 || params.Text != nil)) || (params.Text != nil && len(params.Paths) > 0) {
 		fmt.Fprintln(os.Stderr, "paths, --stdin, and --text are mutually exclusive")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter revise --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 	if !params.Stdin && params.Text == nil && len(params.Paths) == 0 {
 		fmt.Fprintln(os.Stderr, "no input specified")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter revise --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 	err := app.New().RunRevise(params)
 	if errors.Is(err, app.ErrLLMConfigRequired) {
@@ -209,26 +210,26 @@ func runRevise(args []string) int {
 		} else {
 			fmt.Fprintln(os.Stderr, err.Error())
 			fmt.Fprintln(os.Stderr, "  Run `writetighter config` to configure, then retry.")
-			return 2
+			return cli.ExitUsage
 		}
 	}
 	if err != nil {
 		// Runtime model/response failures => exit 3; configuration/input errors => exit 2.
 		if errors.Is(err, app.ErrReviseFailed) {
 			usageErr(err.Error())
-			return 3
+			return cli.ExitModel
 		}
 		usageErr(err.Error())
-		return 2
+		return cli.ExitUsage
 	}
-	return 0
+	return cli.ExitOK
 }
 
 // runRewrite is the whole-passage rewrite command.
 func runRewrite(args []string) int {
 	if wantsHelp(args) {
 		printHelp("rewrite")
-		return 0
+		return cli.ExitOK
 	}
 	fs := flag.NewFlagSet("rewrite", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -242,7 +243,7 @@ func runRewrite(args []string) int {
 	model := fs.String("model", "", "Override the configured model for this run")
 	fs.Usage = func() { printHelp("rewrite") }
 	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
-		return 2
+		return cli.ExitUsage
 	}
 	params := app.RewriteParams{
 		Paths:      fs.Args(),
@@ -259,12 +260,12 @@ func runRewrite(args []string) int {
 	if (params.Stdin && (len(params.Paths) > 0 || params.Text != nil)) || (params.Text != nil && len(params.Paths) > 0) {
 		fmt.Fprintln(os.Stderr, "paths, --stdin, and --text are mutually exclusive")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter rewrite --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 	if !params.Stdin && params.Text == nil && len(params.Paths) == 0 {
 		fmt.Fprintln(os.Stderr, "no input specified")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter rewrite --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 	err := app.New().RunRewrite(params)
 	if errors.Is(err, app.ErrLLMConfigRequired) {
@@ -277,24 +278,24 @@ func runRewrite(args []string) int {
 		} else {
 			fmt.Fprintln(os.Stderr, err.Error())
 			fmt.Fprintln(os.Stderr, "  Run `writetighter config` to configure, then retry.")
-			return 2
+			return cli.ExitUsage
 		}
 	}
 	if err != nil {
 		if errors.Is(err, app.ErrRewriteFailed) {
 			usageErr(err.Error())
-			return 3
+			return cli.ExitModel
 		}
 		usageErr(err.Error())
-		return 2
+		return cli.ExitUsage
 	}
-	return 0
+	return cli.ExitOK
 }
 
 func runPrompt(args []string) int {
 	if wantsHelp(args) {
 		printHelp("prompt")
-		return 0
+		return cli.ExitOK
 	}
 	fs := flag.NewFlagSet("prompt", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -304,19 +305,19 @@ func runPrompt(args []string) int {
 	if err := fs.Parse(args); err != nil || len(fs.Args()) != 0 {
 		fmt.Fprintln(os.Stderr, "invalid prompt arguments")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter prompt --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 	if err := app.New().RunPrompt(app.PromptParams{Kind: *kind, Format: *format}); err != nil {
 		usageErr(err.Error())
-		return 2
+		return cli.ExitUsage
 	}
-	return 0
+	return cli.ExitOK
 }
 
 func runConfig(args []string) int {
 	if wantsHelp(args) {
 		printHelp("config")
-		return 0
+		return cli.ExitOK
 	}
 	fs := flag.NewFlagSet("config", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -326,12 +327,12 @@ func runConfig(args []string) int {
 	model := fs.String("model", "", "Set model ID")
 	codeModel := fs.String("code-model", "", "Set the model used for code-aware comment revision")
 	if err := fs.Parse(args); err != nil {
-		return 2
+		return cli.ExitUsage
 	}
 	if len(fs.Args()) != 0 {
 		fmt.Fprintln(os.Stderr, "config does not accept positional arguments")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter config --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 
 	hasTargetedFlags := *model != "" || *codeModel != ""
@@ -340,7 +341,7 @@ func runConfig(args []string) int {
 	if hasTargetedFlags && *wizard {
 		fmt.Fprintln(os.Stderr, "--model and --code-model cannot be combined with --wizard")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter config --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 
 	// Targeted update path.
@@ -350,14 +351,14 @@ func runConfig(args []string) int {
 		if err != nil {
 			if errors.Is(err, os.ErrNotExist) {
 				usageErr("no existing config; run 'writetighter config --wizard' first")
-				return 2
+				return cli.ExitUsage
 			}
 			usageErr("failed to load config: " + err.Error())
-			return 2
+			return cli.ExitUsage
 		}
 		if existing.LLM.BaseURL == "" {
 			usageErr("config is missing base_url; run 'writetighter config --wizard' first")
-			return 2
+			return cli.ExitUsage
 		}
 
 		// If --model is specified, preflight it against the endpoint.
@@ -383,7 +384,7 @@ func runConfig(args []string) int {
 				}
 				if !found {
 					usageErr(fmt.Sprintf("model %q was not reported by the endpoint", *model))
-					return 2
+					return cli.ExitUsage
 				}
 			}
 
@@ -409,18 +410,18 @@ func runConfig(args []string) int {
 		path, err := config.WriteUserConfig(existing)
 		if err != nil {
 			usageErr("failed to save config: " + err.Error())
-			return 2
+			return cli.ExitUsage
 		}
 
 		// Show sanitized result.
 		tomlStr, err := existing.SanitizedTOML()
 		if err != nil {
 			usageErr("failed to render config: " + err.Error())
-			return 2
+			return cli.ExitUsage
 		}
 		fmt.Print(tomlStr)
 		fmt.Fprintf(os.Stderr, "\nWrote %s\n", path)
-		return 0
+		return cli.ExitOK
 	}
 
 	// If not explicitly requesting the wizard, check whether a model is configured.
@@ -431,14 +432,14 @@ func runConfig(args []string) int {
 			tomlStr, err := existing.SanitizedTOML()
 			if err != nil {
 				usageErr("failed to render config: " + err.Error())
-				return 2
+				return cli.ExitUsage
 			}
 			fmt.Print(tomlStr)
 			if existing.LLM.APIKey != "" {
 				fmt.Fprintln(os.Stderr, "\n(API key is stored in config.toml but redacted here.)")
 			}
 			fmt.Fprintln(os.Stderr, "To reconfigure, run: writetighter config --wizard")
-			return 0
+			return cli.ExitOK
 		}
 	}
 
@@ -458,9 +459,9 @@ func runConfig(args []string) int {
 	})
 	if err != nil {
 		usageErr("config failed: " + err.Error())
-		return 2
+		return cli.ExitUsage
 	}
-	return 0
+	return cli.ExitOK
 }
 
 func resolveAPIKey(cfg *config.UserConfig) string {
@@ -502,7 +503,7 @@ func normalizeInterspersedFlags(args []string) []string {
 func runExplain(args []string) int {
 	if wantsHelp(args) {
 		printHelp("explain")
-		return 0
+		return cli.ExitOK
 	}
 	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -512,102 +513,68 @@ func runExplain(args []string) int {
 	if err := fs.Parse(args); err != nil || len(fs.Args()) != 1 || (*format != "human" && *format != "json") {
 		fmt.Fprintln(os.Stderr, "invalid explain arguments")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter explain --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 	if err := app.New().RunExplainWithOptions(fs.Args()[0], *profile, *format); err != nil {
 		usageErr(err.Error())
-		return 2
+		return cli.ExitUsage
 	}
-	return 0
+	return cli.ExitOK
 }
 
 func runProfile(args []string) int {
 	if wantsHelp(args) {
 		printHelp("profile")
-		return 0
+		return cli.ExitOK
 	}
 	if len(args) == 0 {
 		fmt.Fprintln(os.Stderr, "profile subcommand required")
 		fmt.Fprintln(os.Stderr, "  Run `writetighter profile --help` for usage.")
-		return 2
+		return cli.ExitUsage
 	}
 	switch args[0] {
 	case "install":
 		if len(args) != 2 || args[1] == "" {
 			usageErr("profile install requires one bundle path")
-			return 2
+			return cli.ExitUsage
 		}
 		if err := app.New().RunProfileInstall(args[1]); err != nil {
 			usageErr(err.Error())
-			return 2
+			return cli.ExitUsage
 		}
-		return 0
+		return cli.ExitOK
 	case "list":
 		format, ok := parseProfileFormat(args[1:])
 		if !ok {
 			usageErr("invalid profile list arguments")
-			return 2
+			return cli.ExitUsage
 		}
 		if err := app.New().RunProfileList(format); err != nil {
 			usageErr(err.Error())
-			return 2
+			return cli.ExitUsage
 		}
-		return 0
+		return cli.ExitOK
 	case "verify":
 		if len(args) < 2 || (len(args) >= 2 && args[1] == "") {
 			usageErr("profile verify requires a profile or bundle path")
-			return 2
+			return cli.ExitUsage
 		}
 		spec := args[1]
 		format, ok := parseProfileFormat(args[2:])
 		if !ok {
 			usageErr("invalid profile verify arguments")
-			return 2
+			return cli.ExitUsage
 		}
 		if err := app.New().RunProfileVerify(spec, format); err != nil {
 			usageErr(err.Error())
-			return 2
+			return cli.ExitUsage
 		}
-		return 0
+		return cli.ExitOK
 	default:
 		fmt.Fprintf(os.Stderr, "unknown profile subcommand %q\n", args[0])
 		printHelp("profile")
-		return 2
+		return cli.ExitUsage
 	}
-}
-
-func runVersion(args []string) int {
-	if wantsHelp(args) {
-		printHelp("version")
-		return 0
-	}
-	fs := flag.NewFlagSet("version", flag.ContinueOnError)
-	jsonFlag := fs.Bool("json", false, "")
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { printHelp("version") }
-	if err := fs.Parse(args); err != nil || len(fs.Args()) != 0 {
-		fmt.Fprintln(os.Stderr, "Run `writetighter version --help` for usage.")
-		return 2
-	}
-	r, _ := loadEmbedded()
-	profiles := []any{}
-	if r != nil {
-		profiles = append(profiles, map[string]any{"id": string(r.ID), "version": string(r.Version), "sha256": r.SHA256})
-	}
-	if !*jsonFlag {
-		fmt.Fprintf(os.Stdout, "writetighter %s", app.Version)
-		if app.Commit != "" && app.Commit != "unknown" {
-			fmt.Fprintf(os.Stdout, " (commit %s)", app.Commit)
-		}
-		if r != nil {
-			fmt.Fprintf(os.Stdout, "\nembedded profile: %s@%s", r.ID, r.Version)
-		}
-		fmt.Fprintln(os.Stdout)
-		return 0
-	}
-	payload := map[string]any{"version": app.Version, "commit": app.Commit, "embedded_profiles": profiles}
-	_ = json.NewEncoder(os.Stdout).Encode(payload)
-	return 0
 }
 
 func parseProfileFormat(args []string) (string, bool) {
@@ -860,18 +827,6 @@ EXAMPLES
   writetighter profile install ./my-profile
 `
 
-const versionHelp = `writetighter version — print version information
-
-USAGE
-  writetighter version [--json]
-
-FLAGS
-  --json    Output version information as JSON (default: human-readable)
-
-Without --json, prints a compact human-readable summary. With --json, the
-output includes the tool version, build commit, and embedded profile details.
-`
-
 var helpTexts = map[string]string{
 	"":        mainHelp,
 	"lint":    lintHelp,
@@ -881,5 +836,4 @@ var helpTexts = map[string]string{
 	"config":  configHelp,
 	"explain": explainHelp,
 	"profile": profileHelp,
-	"version": versionHelp,
 }

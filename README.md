@@ -65,7 +65,7 @@ from the `latest` tag the installer resolves.
 
 ### Go install
 
-If you have Go 1.22+ installed:
+If you have Go 1.26+ installed:
 
 ```sh
 go install github.com/sdougbrown/writetighter/cmd/writetighter@latest
