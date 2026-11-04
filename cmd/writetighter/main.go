@@ -20,14 +20,6 @@ import (
 
 func main() { os.Exit(run(os.Args[1:])) }
 
-type pathsFlag []string
-
-func (f *pathsFlag) String() string { return strings.Join(*f, ",") }
-func (f *pathsFlag) Set(value string) error {
-	*f = append(*f, value)
-	return nil
-}
-
 type optionalStringFlag struct {
 	value string
 	set   bool
