@@ -3,6 +3,12 @@
 // vocabulary, and the exit-code mapping. Commands migrate here one at a
 // time; cmd/writetighter/main.go keeps the hand-rolled dispatch for the
 // commands that have not migrated yet.
+//
+// Migrated commands print the library's dispatch-level diagnostics
+// (for example, "version: unknown flag: --wat") with no stdout on
+// failure, not the hand-rolled commands'
+// "Run `writetighter <cmd> --help` for usage." hint. The hint is retired
+// command by command as the migration completes.
 package cli
 
 import (
@@ -18,12 +24,17 @@ import (
 	"github.com/sdougbrown/writetighter/internal/profile"
 )
 
-// Exit codes owned by this process. 1 is lint's fail threshold and 3 is a
-// model failure; neither has a migrated command yet, so nothing maps to
-// them here. The values match the hand-rolled dispatch.
+// Exit codes are owned by internal/cli. The values match the contract
+// documented in cmd/writetighter/main.go (0 success, 1 lint fail
+// threshold, 2 usage/configuration/input failure, 3 model failure);
+// every command references these constants as it migrates, so the
+// vocabulary has one owner. Signal handling is the library's:
+// migrated commands exit 130/143 on SIGINT/SIGTERM.
 const (
-	ExitOK    = 0
-	ExitUsage = 2
+	ExitOK            = 0
+	ExitFailThreshold = 1
+	ExitUsage         = 2
+	ExitModel         = 3
 )
 
 // commands declares the migrated surface. Handle funcs are resolved at
@@ -39,6 +50,19 @@ var commands = []*clicontract.Command{
 	},
 }
 
+// CommandShorts reports the declared short description of every migrated
+// top-level command. Help surfaces that still render from the
+// hand-rolled texts claim to describe the same commands; cmd's tests
+// compare this map against those texts so the two cannot drift during
+// the migration.
+func CommandShorts() map[string]string {
+	m := make(map[string]string, len(commands))
+	for _, c := range commands {
+		m[c.Name] = c.Short
+	}
+	return m
+}
+
 func appFor() *clicontract.App {
 	return &clicontract.App{
 		Name:      "writetighter",
@@ -46,8 +70,8 @@ func appFor() *clicontract.App {
 		RootShort: "deterministic and contextual prose revision for technical documentation",
 		// The root is a stub until every command migrates; the hand-rolled
 		// dispatch owns root help and unknown-command handling meanwhile.
-		BareHelp:  true,
-		Commands:  commands,
+		BareHelp: true,
+		Commands: commands,
 	}
 }
 

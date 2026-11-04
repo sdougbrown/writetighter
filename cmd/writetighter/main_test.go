@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/writetighter/internal/app"
+	"github.com/sdougbrown/writetighter/internal/cli"
 	"github.com/sdougbrown/writetighter/internal/config"
 )
 
@@ -79,6 +80,7 @@ func TestRunVersion(t *testing.T) {
 			EmbeddedProfiles []struct {
 				ID      string `json:"id"`
 				Version string `json:"version"`
+				SHA256  string `json:"sha256"`
 			} `json:"embedded_profiles"`
 		}
 		out := captureStdout(t, func() {
@@ -100,6 +102,9 @@ func TestRunVersion(t *testing.T) {
 		}
 		if payload.EmbeddedProfiles[0].ID == "" || payload.EmbeddedProfiles[0].Version == "" {
 			t.Fatalf("embedded profile entry missing id/version: %+v", payload.EmbeddedProfiles[0])
+		}
+		if payload.EmbeddedProfiles[0].SHA256 == "" {
+			t.Fatalf("embedded profile entry missing sha256: %+v", payload.EmbeddedProfiles[0])
 		}
 	})
 
@@ -730,5 +735,24 @@ max_requests=32
 	}
 	if cfg.LLM.Model != "qwen" {
 		t.Fatalf("model should be unchanged, got %q", cfg.LLM.Model)
+	}
+}
+
+func TestRootHelpMatchesDeclarations(t *testing.T) {
+	for name, short := range cli.CommandShorts() {
+		var line string
+		for _, l := range strings.Split(mainHelp, "\n") {
+			fields := strings.Fields(l)
+			if len(fields) > 0 && fields[0] == name {
+				line = l
+				break
+			}
+		}
+		if line == "" {
+			t.Fatalf("mainHelp has no line for declared command %q", name)
+		}
+		if !strings.HasSuffix(line, short) {
+			t.Fatalf("mainHelp line for %q is %q; declared Short is %q", name, line, short)
+		}
 	}
 }
