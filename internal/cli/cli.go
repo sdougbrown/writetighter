@@ -1,0 +1,139 @@
+// Package cli implements the writetighter command boundary on the
+// clicontract library: the declared command surface, the output
+// vocabulary, and the exit-code mapping. Commands migrate here one at a
+// time; cmd/writetighter/main.go keeps the hand-rolled dispatch for the
+// commands that have not migrated yet.
+package cli
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"strings"
+
+	clicontract "github.com/sdougbrown/cli-contract"
+
+	"github.com/sdougbrown/writetighter/internal/app"
+	"github.com/sdougbrown/writetighter/internal/profile"
+)
+
+// Exit codes owned by this process. 1 is lint's fail threshold and 3 is a
+// model failure; neither has a migrated command yet, so nothing maps to
+// them here. The values match the hand-rolled dispatch.
+const (
+	ExitOK    = 0
+	ExitUsage = 2
+)
+
+// Invocation carries one parsed command invocation.
+type Invocation = clicontract.Invocation
+
+// commands declares the migrated surface. Handle funcs are resolved at
+// dispatch time through these declarations.
+var commands = []*clicontract.Command{
+	{
+		Name:  "version",
+		Short: "print version and embedded profile information",
+		Flags: []clicontract.Flag{
+			{Name: "json", Kind: clicontract.Bool, Usage: "output version information as JSON"},
+		},
+		Handle: handleVersion,
+	},
+}
+
+func appFor() *clicontract.App {
+	return &clicontract.App{
+		Name:      "writetighter",
+		Version:   app.Version,
+		RootShort: "deterministic and contextual prose revision for technical documentation",
+		// The root is a stub until every command migrates; the hand-rolled
+		// dispatch owns root help and unknown-command handling meanwhile.
+		BareHelp:  true,
+		Commands:  commands,
+	}
+}
+
+// loadEmbedded provides a package-level hook so tests can replace the
+// embedded profile loader to simulate a no-profile state.
+var loadEmbedded = profile.LoadEmbedded
+
+func handleVersion(_ context.Context, inv Invocation, _ io.Writer) (any, error) {
+	r, _ := loadEmbedded()
+	profiles := []map[string]any{}
+	if r != nil {
+		profiles = append(profiles, map[string]any{"id": string(r.ID), "version": string(r.Version), "sha256": r.SHA256})
+	}
+	format := "human"
+	if inv.Bools["json"] {
+		format = "json"
+	}
+	return versionResult{format: format, version: app.Version, commit: app.Commit, profiles: profiles}, nil
+}
+
+type versionResult struct {
+	format   string
+	version  string
+	commit   string
+	profiles []map[string]any
+}
+
+// failureResult carries a dispatch-level failure. Run prints the
+// diagnostic to stderr itself; Write deliberately emits nothing on
+// stdout, matching the hand-rolled dispatch's stdout contract.
+type failureResult struct{}
+
+func (cliAdapter) ErrorResult(_ string, _ error) any { return failureResult{} }
+
+func (cliAdapter) Write(w io.Writer, result any) error {
+	switch r := result.(type) {
+	case versionResult:
+		if r.format == "json" {
+			payload := map[string]any{"version": r.version, "commit": r.commit, "embedded_profiles": r.profiles}
+			return json.NewEncoder(w).Encode(payload)
+		}
+		var b strings.Builder
+		fmt.Fprintf(&b, "writetighter %s", r.version)
+		if r.commit != "" && r.commit != "unknown" {
+			fmt.Fprintf(&b, " (commit %s)", r.commit)
+		}
+		b.WriteString("\n")
+		if len(r.profiles) == 1 {
+			fmt.Fprintf(&b, "embedded profile: %s@%s\n", r.profiles[0]["id"], r.profiles[0]["version"])
+		}
+		_, err := io.WriteString(w, b.String())
+		return err
+	case failureResult, nil:
+		// Dispatch-level failure (or a handler that failed without producing
+		// a result): the diagnostic is on stderr; stdout stays empty.
+		return nil
+	default:
+		return fmt.Errorf("cli: unhandled result type %T", result)
+	}
+}
+
+func (cliAdapter) ExitCode(_ Invocation, _ any, handlerErr error) int {
+	if handlerErr == nil {
+		return ExitOK
+	}
+	// version has no model path; every failure here is an input or
+	// configuration problem.
+	return ExitUsage
+}
+
+func (cliAdapter) Deadline(ctx context.Context, _ Invocation) (context.Context, context.CancelFunc) {
+	return ctx, func() {}
+}
+
+func (cliAdapter) BeforeHandler(_ Invocation, _ io.Writer) {}
+
+func (cliAdapter) Validate(_ Invocation) error { return nil }
+
+type cliAdapter struct{}
+
+// Run executes argv (program name excluded) through the declared surface.
+// Commands that have not migrated are not declared here; callers route
+// only migrated commands.
+func Run(argv []string, stdout, stderr io.Writer) int {
+	return clicontract.Run(appFor(), cliAdapter{}, argv, stdout, stderr)
+}

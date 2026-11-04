@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -12,18 +11,14 @@ import (
 	"time"
 
 	"github.com/sdougbrown/writetighter/internal/app"
+	"github.com/sdougbrown/writetighter/internal/cli"
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
-	"github.com/sdougbrown/writetighter/internal/profile"
 	"github.com/sdougbrown/writetighter/internal/setup"
 	"golang.org/x/term"
 )
 
 func main() { os.Exit(run(os.Args[1:])) }
-
-// loadEmbedded provides a package-level hook so tests can replace the
-// embedded profile loader to simulate a no-profile state.
-var loadEmbedded = profile.LoadEmbedded
 
 type pathsFlag []string
 
@@ -59,7 +54,8 @@ func run(args []string) int {
 	case "help":
 		return runHelp(args[1:])
 	case "version":
-		return runVersion(args[1:])
+		// Migrated to the clicontract-declared command surface.
+		return cli.Run(args, os.Stdout, os.Stderr)
 	case "lint":
 		return runLint(args[1:])
 	case "revise":
@@ -85,6 +81,11 @@ func runHelp(args []string) int {
 	if len(args) == 0 {
 		printHelp("")
 		return 0
+	}
+	switch args[0] {
+	case "version":
+		// Migrated command: its help renders from the declaration.
+		return cli.Run([]string{"version", "--help"}, os.Stdout, os.Stderr)
 	}
 	printHelp(args[0])
 	return 0
@@ -576,40 +577,6 @@ func runProfile(args []string) int {
 	}
 }
 
-func runVersion(args []string) int {
-	if wantsHelp(args) {
-		printHelp("version")
-		return 0
-	}
-	fs := flag.NewFlagSet("version", flag.ContinueOnError)
-	jsonFlag := fs.Bool("json", false, "")
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { printHelp("version") }
-	if err := fs.Parse(args); err != nil || len(fs.Args()) != 0 {
-		fmt.Fprintln(os.Stderr, "Run `writetighter version --help` for usage.")
-		return 2
-	}
-	r, _ := loadEmbedded()
-	profiles := []any{}
-	if r != nil {
-		profiles = append(profiles, map[string]any{"id": string(r.ID), "version": string(r.Version), "sha256": r.SHA256})
-	}
-	if !*jsonFlag {
-		fmt.Fprintf(os.Stdout, "writetighter %s", app.Version)
-		if app.Commit != "" && app.Commit != "unknown" {
-			fmt.Fprintf(os.Stdout, " (commit %s)", app.Commit)
-		}
-		if r != nil {
-			fmt.Fprintf(os.Stdout, "\nembedded profile: %s@%s", r.ID, r.Version)
-		}
-		fmt.Fprintln(os.Stdout)
-		return 0
-	}
-	payload := map[string]any{"version": app.Version, "commit": app.Commit, "embedded_profiles": profiles}
-	_ = json.NewEncoder(os.Stdout).Encode(payload)
-	return 0
-}
-
 func parseProfileFormat(args []string) (string, bool) {
 	fs := flag.NewFlagSet("profile", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -860,18 +827,6 @@ EXAMPLES
   writetighter profile install ./my-profile
 `
 
-const versionHelp = `writetighter version — print version information
-
-USAGE
-  writetighter version [--json]
-
-FLAGS
-  --json    Output version information as JSON (default: human-readable)
-
-Without --json, prints a compact human-readable summary. With --json, the
-output includes the tool version, build commit, and embedded profile details.
-`
-
 var helpTexts = map[string]string{
 	"":        mainHelp,
 	"lint":    lintHelp,
@@ -881,5 +836,4 @@ var helpTexts = map[string]string{
 	"config":  configHelp,
 	"explain": explainHelp,
 	"profile": profileHelp,
-	"version": versionHelp,
 }

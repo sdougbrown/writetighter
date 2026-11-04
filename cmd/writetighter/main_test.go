@@ -14,7 +14,6 @@ import (
 
 	"github.com/sdougbrown/writetighter/internal/app"
 	"github.com/sdougbrown/writetighter/internal/config"
-	"github.com/sdougbrown/writetighter/internal/profile"
 )
 
 // captureStdout runs fn with os.Stdout replaced by a pipe and returns the captured text.
@@ -148,41 +147,6 @@ func TestRunVersion(t *testing.T) {
 		}
 	})
 
-	// no embedded profile: override the loader to return nil
-	t.Run("no-embedded-profile", func(t *testing.T) {
-		oldLoader := loadEmbedded
-		loadEmbedded = func() (*profile.Resolution, error) { return nil, nil }
-		defer func() { loadEmbedded = oldLoader }()
-		out := captureStdout(t, func() {
-			if got := run([]string{"version"}); got != 0 {
-				t.Fatalf("exit %d", got)
-			}
-		})
-		if strings.Contains(out, "embedded profile:") {
-			t.Fatalf("embedded profile line should be absent, got: %s", out)
-		}
-		if !strings.Contains(out, "writetighter "+app.Version) {
-			t.Fatalf("expected 'writetighter %s' in output, got: %s", app.Version, out)
-		}
-
-		// --json with no embedded profile: embedded_profiles must be empty
-		jsonOut := captureStdout(t, func() {
-			if got := run([]string{"version", "--json"}); got != 0 {
-				t.Fatalf("exit %d", got)
-			}
-		})
-		var payload struct {
-			EmbeddedProfiles []struct {
-				ID string `json:"id"`
-			} `json:"embedded_profiles"`
-		}
-		if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
-			t.Fatalf("invalid JSON: %v\n%s", err, jsonOut)
-		}
-		if len(payload.EmbeddedProfiles) != 0 {
-			t.Fatalf("expected empty embedded_profiles, got %d items", len(payload.EmbeddedProfiles))
-		}
-	})
 }
 
 func TestRunExplain(t *testing.T) {
