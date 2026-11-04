@@ -54,15 +54,16 @@ var commands = []*clicontract.Command{
 		Name:        "lint",
 		Short:       "Run deterministic profile rules (no model access)",
 		Positionals: []clicontract.Positional{{Name: "paths", Variadic: true}},
+		Long:        "Checks input against the active profile's static rules. No model access is needed.\n\nINPUT\n  Provide input via file paths, --stdin, or --text (mutually exclusive).\n\nEXAMPLES\n  writetighter lint README.md\n  writetighter lint --stdin < README.md\n  writetighter lint --text \"Short text.\" --kind procedure\n  writetighter lint --format json docs/*.md --fail-on warning\n",
 		Flags: []clicontract.Flag{
 			{Name: "stdin", Kind: clicontract.Bool, Usage: "Read input from stdin"},
 			{Name: "text", Kind: clicontract.String, Usage: "Lint the provided text directly"},
-			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (default: description)"},
+			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (default: description; choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)"},
 			{Name: "profile", Kind: clicontract.String, Usage: "Profile id@version (default: discovered or user config)"},
 			{Name: "config", Kind: clicontract.String, Usage: "Path to .writetighter.toml (default: auto-discovered)"},
 			{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json, agent (default: human)"},
-			{Name: "fail-on", Kind: clicontract.String, Usage: "Fail when findings reach this severity (default: none)"},
-			{Name: "git-compare", Kind: clicontract.String, Usage: "Git revision to compare against for unfamiliar-term detection"},
+			{Name: "fail-on", Kind: clicontract.String, Usage: "Fail when findings reach this severity (default: none; choices: none, warning, error)"},
+			{Name: "git-compare", Kind: clicontract.String, Usage: "Git revision to compare against for unfamiliar-term detection (only valid with file paths; advisory, candidate/info)"},
 		},
 		Handle: handleLint,
 	},
@@ -117,11 +118,11 @@ func handleLint(_ context.Context, inv clicontract.Invocation, _ io.Writer) (any
 	params := app.LintParams{
 		Paths:      inv.Args,
 		Stdin:      inv.Bools["stdin"],
-		Kind:       valueOr(inv.Flags["kind"], "description"),
+		Kind:       suppliedOrDefault(inv.Supplied["kind"], inv.Flags["kind"], "description"),
 		Profile:    inv.Flags["profile"],
 		ConfigPath: inv.Flags["config"],
-		Format:     valueOr(inv.Flags["format"], "human"),
-		FailOn:     valueOr(inv.Flags["fail-on"], "none"),
+		Format:     suppliedOrDefault(inv.Supplied["format"], inv.Flags["format"], "human"),
+		FailOn:     suppliedOrDefault(inv.Supplied["fail-on"], inv.Flags["fail-on"], "none"),
 		GitCompare: inv.Flags["git-compare"],
 	}
 	_, textSet := inv.Supplied["text"]
@@ -141,11 +142,14 @@ func handleLint(_ context.Context, inv clicontract.Invocation, _ io.Writer) (any
 	return lintResult{}, nil
 }
 
-func valueOr(value, fallback string) string {
-	if value == "" {
-		return fallback
+// suppliedOrDefault returns the flag value when the flag was given —
+// including an explicit empty string, which callers must see as present —
+// else fallback.
+func suppliedOrDefault(supplied bool, value, fallback string) string {
+	if supplied {
+		return value
 	}
-	return value
+	return fallback
 }
 
 type promptResult struct {
