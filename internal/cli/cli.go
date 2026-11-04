@@ -95,6 +95,24 @@ func buildCommands(stdout io.Writer) []*clicontract.Command {
 			},
 		},
 		{
+			Name:        "rewrite",
+			Short:       "Run whole-passage contextual rewrite (requires model config)",
+			Positionals: []clicontract.Positional{{Name: "paths", Variadic: true}},
+			Long:        "Sends the full input as one model request and returns the complete rewritten passage, not surgical findings. Deterministic lint runs first and its findings are passed to the model as context. If the model call fails, the response is empty, or protected-content validation fails, the original text is returned.\n\nUnlike \"revise\", which returns individual suggestions for interactive review, \"rewrite\" produces one coherent tightened passage for non-interactive contexts (hooks, CI, piping into other tools). It never asks clarification questions; ambiguous sections are preserved as-is rather than guessed.\n\nINPUT\n  Provide input via file paths, --stdin, or --text (mutually exclusive).\n\nCONFIGURATION\n  Rewrite requires [llm] model settings. Run \"writetighter config\" to configure.\n  If config is missing and stdin is a terminal, interactive setup is offered\n  automatically; otherwise the command exits with an error.\n\nEXAMPLES\n  writetighter rewrite --text \"Short text.\" --kind procedure\n  writetighter rewrite --stdin < README.md\n  printf '%s' \"$MESSAGE\" | writetighter rewrite --stdin --kind description\n  writetighter rewrite docs/intro.md --format json\n",
+			Flags: []clicontract.Flag{
+				{Name: "stdin", Kind: clicontract.Bool, Usage: "Read input from stdin"},
+				{Name: "text", Kind: clicontract.String, Usage: "Rewrite the provided text directly"},
+				{Name: "kind", Kind: clicontract.String, Usage: "Document kind (choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)", Default: "description"},
+				{Name: "profile", Kind: clicontract.String, Usage: "Profile id@version (default: discovered or user config)"},
+				{Name: "config", Kind: clicontract.String, Usage: "Path to .writetighter.toml (default: auto-discovered)"},
+				{Name: "format", Kind: clicontract.String, Usage: "Output format: text, json, human", Default: "text"},
+				{Name: "model", Kind: clicontract.String, Usage: "Override the configured model for this run"},
+			},
+			Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
+				return handleRewrite(stdout, stderr, ctx, inv)
+			},
+		},
+		{
 			Name:  "prompt",
 			Short: "Export core and kind-specific revision guidance",
 			Flags: []clicontract.Flag{
@@ -141,6 +159,27 @@ func appFor(stdout io.Writer) *clicontract.App {
 // embedded profile loader to simulate a no-profile state.
 var loadEmbedded = profile.LoadEmbedded
 
+// runWithMissingConfig runs fn. When the model configuration is missing
+// it offers the interactive configuration wizard on a terminal and retries
+// once; otherwise the failure maps to a usage error (exit 2).
+func runWithMissingConfig(ctx context.Context, stderr io.Writer, stdinFlag bool, err error, retry func() error) error {
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, app.ErrLLMConfigRequired) {
+		return err
+	}
+	if stdinFlag || !setup.StdinIsTerminal() {
+		// Hint line retired with the migration; see package doc.
+		return &clicontract.UsageError{Message: err.Error()}
+	}
+	fmt.Fprintf(stderr, "%v\nStarting interactive configuration.\n", err)
+	if wizardErr := setup.RunInteractive(ctx); wizardErr != nil {
+		return &clicontract.UsageError{Message: "config failed: " + wizardErr.Error()}
+	}
+	return retry()
+}
+
 // resolveInputMode validates the input-mode contract shared by lint and
 // revise: paths, --stdin and --text are mutually exclusive, and at least
 // one input is required. Returns the --text value when it was given.
@@ -184,6 +223,33 @@ func handleLint(stdout io.Writer, _ context.Context, inv clicontract.Invocation,
 	return lintResult{}, nil
 }
 
+type rewriteResult struct{}
+
+func handleRewrite(stdout, stderr io.Writer, ctx context.Context, inv clicontract.Invocation) (any, error) {
+	params := app.RewriteParams{
+		Paths:      inv.Args,
+		Stdin:      inv.Bools["stdin"],
+		Kind:       inv.Flags["kind"],
+		Profile:    inv.Flags["profile"],
+		ConfigPath: inv.Flags["config"],
+		Format:     inv.Flags["format"],
+		Model:      inv.Flags["model"],
+	}
+	textArg, err := resolveInputMode(inv)
+	if err != nil {
+		return nil, err
+	}
+	params.Text = textArg
+	err = app.New().RunRewriteTo(stdout, params)
+	err = runWithMissingConfig(ctx, stderr, params.Stdin, err, func() error { return app.New().RunRewriteTo(stdout, params) })
+	if err != nil {
+		// ErrRewriteFailed maps to exit 3 via the adapter's sentinel mapping;
+		// every other failure maps to exit 2.
+		return nil, err
+	}
+	return rewriteResult{}, nil
+}
+
 type reviseResult struct{}
 
 func handleRevise(stdout, stderr io.Writer, ctx context.Context, inv clicontract.Invocation) (any, error) {
@@ -206,18 +272,7 @@ func handleRevise(stdout, stderr io.Writer, ctx context.Context, inv clicontract
 	}
 	params.Text = textArg
 	err = app.New().RunReviseTo(stdout, params)
-	if errors.Is(err, app.ErrLLMConfigRequired) {
-		if !params.Stdin && setup.StdinIsTerminal() {
-			fmt.Fprintf(stderr, "%v\nStarting interactive configuration.\n", err)
-			if wizardErr := setup.RunInteractive(ctx); wizardErr != nil {
-				return nil, &clicontract.UsageError{Message: "config failed: " + wizardErr.Error()}
-			}
-			err = app.New().RunReviseTo(stdout, params)
-		} else {
-			// Hint line retired with the migration; see package doc.
-			return nil, &clicontract.UsageError{Message: err.Error()}
-		}
-	}
+	err = runWithMissingConfig(ctx, stderr, params.Stdin, err, func() error { return app.New().RunReviseTo(stdout, params) })
 	if err != nil {
 		// ErrReviseFailed maps to exit 3 via the adapter's sentinel mapping;
 		// every other failure maps to exit 2.
@@ -268,6 +323,10 @@ func (cliAdapter) ErrorResult(_ string, _ error) any { return failureResult{} }
 
 func (cliAdapter) Write(w io.Writer, result any) error {
 	switch r := result.(type) {
+	case rewriteResult:
+		// The rendered rewrite document was written via the dispatch
+		// stdout writer; nothing else to emit.
+		return nil
 	case reviseResult:
 		// The rendered revision document was written via the dispatch
 		// stdout writer; nothing else to emit.
