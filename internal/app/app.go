@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"sort"
@@ -110,7 +111,8 @@ type App struct{}
 
 func New() *App { return &App{} }
 
-func (a *App) RunLint(params LintParams) error {
+// RunLintTo is RunLint with the output writer injected.
+func (a *App) RunLintTo(w io.Writer, params LintParams) error {
 	if !validKind(params.Kind) || !validFormat(params.Format) || !validFailOn(params.FailOn) {
 		return fmt.Errorf("invalid lint option")
 	}
@@ -313,11 +315,16 @@ func (a *App) RunLint(params LintParams) error {
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprint(os.Stdout, formatted)
+	_, _ = fmt.Fprint(w, formatted)
 	if fail {
 		return ErrFailThreshold
 	}
 	return nil
+}
+
+// RunLint is RunLintTo with os.Stdout as the writer.
+func (a *App) RunLint(params LintParams) error {
+	return a.RunLintTo(os.Stdout, params)
 }
 
 func runDeterministicChecks(doc *document.Document, res *profile.Resolution, terms []config.TermEntry, enabled []check.Checker, gitCompare *corpus.GitCompare) ([]report.Finding, error) {

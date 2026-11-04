@@ -39,9 +39,11 @@ const (
 	ExitModel         = 3
 )
 
-// commands declares the migrated surface. Handle funcs are resolved at
+// buildCommands declares the migrated surface, closing over the stdout
+// writer where a command emits through it; Handle funcs are resolved at
 // dispatch time through these declarations.
-var commands = []*clicontract.Command{
+func buildCommands(stdout io.Writer) []*clicontract.Command {
+	return []*clicontract.Command{
 	{
 		Name:  "version",
 		Short: "Print version and embedded profile information",
@@ -58,24 +60,27 @@ var commands = []*clicontract.Command{
 		Flags: []clicontract.Flag{
 			{Name: "stdin", Kind: clicontract.Bool, Usage: "Read input from stdin"},
 			{Name: "text", Kind: clicontract.String, Usage: "Lint the provided text directly"},
-			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (default: description; choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)"},
+			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)", Default: "description"},
 			{Name: "profile", Kind: clicontract.String, Usage: "Profile id@version (default: discovered or user config)"},
 			{Name: "config", Kind: clicontract.String, Usage: "Path to .writetighter.toml (default: auto-discovered)"},
-			{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json, agent (default: human)"},
-			{Name: "fail-on", Kind: clicontract.String, Usage: "Fail when findings reach this severity (default: none; choices: none, warning, error)"},
+			{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json, agent", Default: "human"},
+			{Name: "fail-on", Kind: clicontract.String, Usage: "Fail when findings reach this severity (choices: none, warning, error)", Default: "none"},
 			{Name: "git-compare", Kind: clicontract.String, Usage: "Git revision to compare against for unfamiliar-term detection (only valid with file paths; advisory, candidate/info)"},
 		},
-		Handle: handleLint,
+		Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
+			return handleLint(stdout, ctx, inv, stderr)
+		},
 	},
 	{
 		Name:  "prompt",
 		Short: "Export core and kind-specific revision guidance",
 		Flags: []clicontract.Flag{
-			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (default: description; choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)"},
-			{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json (default: human)"},
+			{Name: "kind", Kind: clicontract.String, Usage: "Document kind (choices: description, procedure, pr, code-comment, reference, decision, incident, agent-instruction, status-update)", Default: "description"},
+			{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json", Default: "human"},
 		},
 		Handle: handlePrompt,
 	},
+	}
 }
 
 // CommandShorts reports the declared short description of every migrated
@@ -84,8 +89,9 @@ var commands = []*clicontract.Command{
 // compare this map against those texts so the two cannot drift during
 // the migration.
 func CommandShorts() map[string]string {
-	m := make(map[string]string, len(commands))
-	for _, c := range commands {
+	cs := buildCommands(io.Discard)
+	m := make(map[string]string, len(cs))
+	for _, c := range cs {
 		m[c.Name] = c.Short
 	}
 	return m
@@ -96,7 +102,7 @@ func CommandShorts() map[string]string {
 // migrates; cmd's drift test pins the two so they cannot diverge.
 const RootShort = "deterministic and contextual prose revision for technical documentation"
 
-func appFor() *clicontract.App {
+func appFor(stdout io.Writer) *clicontract.App {
 	return &clicontract.App{
 		Name:      "writetighter",
 		Version:   app.Version,
@@ -104,7 +110,7 @@ func appFor() *clicontract.App {
 		// The root is a stub until every command migrates; the hand-rolled
 		// dispatch owns root help and unknown-command handling meanwhile.
 		BareHelp: true,
-		Commands: commands,
+		Commands: buildCommands(stdout),
 	}
 }
 
@@ -114,15 +120,15 @@ var loadEmbedded = profile.LoadEmbedded
 
 type lintResult struct{}
 
-func handleLint(_ context.Context, inv clicontract.Invocation, _ io.Writer) (any, error) {
+func handleLint(stdout io.Writer, _ context.Context, inv clicontract.Invocation, _ io.Writer) (any, error) {
 	params := app.LintParams{
 		Paths:      inv.Args,
 		Stdin:      inv.Bools["stdin"],
-		Kind:       suppliedOrDefault(inv.Supplied["kind"], inv.Flags["kind"], "description"),
+		Kind:       inv.Flags["kind"],
 		Profile:    inv.Flags["profile"],
 		ConfigPath: inv.Flags["config"],
-		Format:     suppliedOrDefault(inv.Supplied["format"], inv.Flags["format"], "human"),
-		FailOn:     suppliedOrDefault(inv.Supplied["fail-on"], inv.Flags["fail-on"], "none"),
+		Format:     inv.Flags["format"],
+		FailOn:     inv.Flags["fail-on"],
 		GitCompare: inv.Flags["git-compare"],
 	}
 	_, textSet := inv.Supplied["text"]
@@ -136,20 +142,10 @@ func handleLint(_ context.Context, inv clicontract.Invocation, _ io.Writer) (any
 	case !params.Stdin && !textSet && len(params.Paths) == 0:
 		return nil, &clicontract.UsageError{Message: "no input specified"}
 	}
-	if err := app.New().RunLint(params); err != nil {
+	if err := app.New().RunLintTo(stdout, params); err != nil {
 		return nil, err
 	}
 	return lintResult{}, nil
-}
-
-// suppliedOrDefault returns the flag value when the flag was given —
-// including an explicit empty string, which callers must see as present —
-// else fallback.
-func suppliedOrDefault(supplied bool, value, fallback string) string {
-	if supplied {
-		return value
-	}
-	return fallback
 }
 
 type promptResult struct {
@@ -274,5 +270,5 @@ type cliAdapter struct{}
 // Commands that have not migrated are not declared here; callers route
 // only migrated commands.
 func Run(argv []string, stdout, stderr io.Writer) int {
-	return clicontract.Run(appFor(), cliAdapter{}, argv, stdout, stderr)
+	return clicontract.Run(appFor(stdout), cliAdapter{}, argv, stdout, stderr)
 }
