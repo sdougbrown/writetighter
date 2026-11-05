@@ -126,6 +126,19 @@ func buildCommands(stdout io.Writer) []*clicontract.Command {
 			},
 		},
 		{
+			Name:  "config",
+			Short: "Show model configuration or run the setup wizard",
+			Long:  "When already configured, prints the current configuration with the API key redacted. To reconfigure interactively, pass --wizard. If no configuration exists yet, the interactive wizard runs automatically.\n\nNOTE\n  --model and --code-model are mutually exclusive with --wizard.\n  When either flag is given, the config file is updated directly without\n  the interactive wizard.\n\nEXAMPLES\n  writetighter config\n  writetighter config --wizard\n  writetighter config --model gemma4\n  writetighter config --code-model qwen-coder\n",
+			Flags: []clicontract.Flag{
+				{Name: "wizard", Kind: clicontract.Bool, Short: "w", Usage: "Run the interactive configuration wizard"},
+				{Name: "model", Kind: clicontract.String, Usage: "Set model ID"},
+				{Name: "code-model", Kind: clicontract.String, Usage: "Set the model used for code-aware comment revision"},
+			},
+			Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
+				return handleConfig(stdout, stderr, ctx, inv)
+			},
+		},
+		{
 			Name:  "profile",
 			Short: "Manage profiles (install, list, verify)",
 			Long:  "Manage profiles.\n\nEXAMPLES\n  writetighter profile list\n  writetighter profile list --format json\n  writetighter profile verify core@1\n  writetighter profile install ./my-profile\n",
@@ -295,6 +308,36 @@ func handleProfileVerify(stdout, stderr io.Writer, inv clicontract.Invocation) (
 	return profileResult{}, nil
 }
 
+type configResult struct{}
+
+func handleConfig(stdout, stderr io.Writer, ctx context.Context, inv clicontract.Invocation) (any, error) {
+	model := inv.Flags["model"]
+	codeModel := inv.Flags["code-model"]
+	wizard := inv.Bools["wizard"]
+	if (model != "" || codeModel != "") && wizard {
+		return nil, &clicontract.UsageError{Message: "--model and --code-model cannot be combined with --wizard"}
+	}
+	if model != "" || codeModel != "" {
+		if err := app.New().RunConfigUpdate(ctx, stdout, stderr, model, codeModel); err != nil {
+			return nil, err
+		}
+		return configResult{}, nil
+	}
+	if !wizard {
+		shown, err := app.New().RunConfigShow(stdout, stderr)
+		if err != nil {
+			return nil, err
+		}
+		if shown {
+			return configResult{}, nil
+		}
+	}
+	if err := setup.RunInteractive(ctx); err != nil {
+		return nil, &clicontract.UsageError{Message: "config failed: " + err.Error()}
+	}
+	return configResult{}, nil
+}
+
 type profileResult struct{}
 
 type explainResult struct{}
@@ -406,6 +449,10 @@ func (cliAdapter) ErrorResult(_ string, _ error) any { return failureResult{} }
 
 func (cliAdapter) Write(w io.Writer, result any) error {
 	switch r := result.(type) {
+	case configResult:
+		// Config output (if any) was written via the dispatch writers;
+		// nothing else to emit.
+		return nil
 	case profileResult:
 		// Profile output (if any) was written via the dispatch writers;
 		// nothing else to emit.
