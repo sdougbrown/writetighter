@@ -4,7 +4,7 @@ go 1.26.8
 
 require (
 	github.com/BurntSushi/toml v1.6.0
-	github.com/sdougbrown/cli-contract v0.5.0
+	github.com/sdougbrown/cli-contract v0.6.0
 	golang.org/x/net v0.30.0
 	golang.org/x/term v0.29.0
 )
