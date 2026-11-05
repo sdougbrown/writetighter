@@ -7,16 +7,11 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
 	"github.com/sdougbrown/writetighter/internal/setup"
 )
-
-// configProbeTimeout bounds the targeted-update model discovery and response
-// mode probes.
-const configProbeTimeout = 45 * time.Second
 
 // RunConfigUpdate applies a targeted --model/--code-model change to the
 // existing user config, preflighting the model against the endpoint, and
@@ -35,10 +30,10 @@ func (a *App) RunConfigUpdate(ctx context.Context, stdout, stderr io.Writer, mod
 
 	if model != "" {
 		apiKey := resolveAPIKey(existing)
-		ctx, cancel := context.WithTimeout(ctx, configProbeTimeout)
+		ctx, cancel := context.WithTimeout(ctx, llm.DefaultTimeout)
 		defer cancel()
 
-		models, discErr := llm.ListModels(existing.LLM.BaseURL, apiKey, configProbeTimeout)
+		models, discErr := llm.ListModels(existing.LLM.BaseURL, apiKey, llm.DefaultTimeout)
 		if discErr != nil || len(models) == 0 {
 			if discErr != nil {
 				fmt.Fprintf(stderr, "Warning: model discovery unavailable: %v; proceeding with explicit model %q.\n", discErr, model)
@@ -60,7 +55,7 @@ func (a *App) RunConfigUpdate(ctx context.Context, stdout, stderr io.Writer, mod
 
 		existing.LLM.Model = model
 
-		client := &http.Client{Timeout: configProbeTimeout}
+		client := &http.Client{Timeout: llm.DefaultTimeout}
 		newMode, probeErr := setup.ProbeResponseMode(ctx, client, existing.LLM.BaseURL, model, apiKey)
 		if probeErr != nil {
 			fmt.Fprintf(stderr, "Warning: response mode preflight failed for %q: %v\n", model, probeErr)
