@@ -339,8 +339,10 @@ func TestProfileCommands(t *testing.T) {
 	})
 	var payload struct {
 		Profiles []struct {
-			ID     string `json:"id"`
-			Source string `json:"source"`
+			ID      string `json:"id"`
+			Version string `json:"version"`
+			SHA256  string `json:"sha256"`
+			Source  string `json:"source"`
 		} `json:"profiles"`
 	}
 	if err := json.Unmarshal([]byte(out), &payload); err != nil {
@@ -348,6 +350,9 @@ func TestProfileCommands(t *testing.T) {
 	}
 	if len(payload.Profiles) == 0 || payload.Profiles[0].ID != "software-docs-en" || payload.Profiles[0].Source != "embedded" {
 		t.Fatalf("unexpected profile list payload: %+v", payload.Profiles)
+	}
+	if payload.Profiles[0].Version == "" || payload.Profiles[0].SHA256 == "" {
+		t.Fatalf("profile list entry missing version/sha256: %+v", payload.Profiles[0])
 	}
 
 	humanOut := captureStdout(t, func() {
@@ -427,6 +432,26 @@ func TestProfileInstallAndList(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("installed 0.5.0 bundle missing from list: %+v", payload.Profiles)
+	}
+
+	// Bundle-mode verify: a valid bundle directory exits 0; a broken one
+	// exits 2 through the "profile verification failed" branch.
+	if got := run([]string{"profile", "verify", bundle}); got != 0 {
+		t.Fatalf("expected exit 0 verifying valid bundle, got %d", got)
+	}
+	broken := filepath.Join(root, "broken-bundle")
+	if err := os.MkdirAll(broken, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	manifest, err := os.ReadFile(filepath.Join(src, "manifest.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(broken, "manifest.json"), manifest, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := run([]string{"profile", "verify", broken}); got != 2 {
+		t.Fatalf("expected exit 2 verifying broken bundle, got %d", got)
 	}
 }
 
