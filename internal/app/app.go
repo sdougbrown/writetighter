@@ -1423,7 +1423,8 @@ func planBudgetedChunks(doc *document.Document, refPack *reference.Pack, cfg llm
 	return chunks, nil
 }
 
-func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {
+// RunExplainTo is RunExplainWithOptions with the output writer injected.
+func (a *App) RunExplainTo(w io.Writer, term, profileSpec, format string) error {
 	if format != "human" && format != "json" {
 		return fmt.Errorf("unsupported format %q", format)
 	}
@@ -1435,13 +1436,18 @@ func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {
 		switch format {
 		case "json":
 			data := map[string]any{"id": c.ID(), "version": c.Version()}
-			return json.NewEncoder(os.Stdout).Encode(data)
+			return json.NewEncoder(w).Encode(data)
 		default:
-			_, err = fmt.Fprintf(os.Stdout, "%s v%d\n", c.ID(), c.Version())
+			_, err = fmt.Fprintf(w, "%s v%d\n", c.ID(), c.Version())
 			return err
 		}
 	}
 	return fmt.Errorf("rule not found: %s", term)
+}
+
+// RunExplainWithOptions is RunExplainTo with os.Stdout as the writer.
+func (a *App) RunExplainWithOptions(term, profileSpec, format string) error {
+	return a.RunExplainTo(os.Stdout, term, profileSpec, format)
 }
 
 func (a *App) RunProfileInstall(spec string) error {

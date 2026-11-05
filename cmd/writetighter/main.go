@@ -49,7 +49,8 @@ func run(args []string) int {
 	case "config":
 		return runConfig(args[1:])
 	case "explain":
-		return runExplain(args[1:])
+		// Migrated to the clicontract-declared command surface.
+		return cli.Run(args, os.Stdout, os.Stderr)
 	case "profile":
 		return runProfile(args[1:])
 	default:
@@ -65,7 +66,7 @@ func runHelp(args []string) int {
 		return cli.ExitOK
 	}
 	switch args[0] {
-	case "version", "prompt", "lint", "revise", "rewrite":
+	case "version", "prompt", "lint", "revise", "rewrite", "explain":
 		// Migrated command: its help renders from the declaration.
 		return cli.Run([]string{args[0], "--help"}, os.Stdout, os.Stderr)
 	}
@@ -231,28 +232,6 @@ func resolveAPIKey(cfg *config.UserConfig) string {
 	return ""
 }
 
-func runExplain(args []string) int {
-	if wantsHelp(args) {
-		printHelp("explain")
-		return cli.ExitOK
-	}
-	fs := flag.NewFlagSet("explain", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() { printHelp("explain") }
-	profile := fs.String("profile", "", "")
-	format := fs.String("format", "human", "")
-	if err := fs.Parse(args); err != nil || len(fs.Args()) != 1 || (*format != "human" && *format != "json") {
-		fmt.Fprintln(os.Stderr, "invalid explain arguments")
-		fmt.Fprintln(os.Stderr, "  Run `writetighter explain --help` for usage.")
-		return cli.ExitUsage
-	}
-	if err := app.New().RunExplainWithOptions(fs.Args()[0], *profile, *format); err != nil {
-		usageErr(err.Error())
-		return cli.ExitUsage
-	}
-	return cli.ExitOK
-}
-
 func runProfile(args []string) int {
 	if wantsHelp(args) {
 		printHelp("profile")
@@ -385,22 +364,6 @@ EXAMPLES
   writetighter config --code-model qwen-coder  # set a separate model for code comment revision
 `
 
-const explainHelp = `writetighter explain — explain a lint rule
-
-Prints information about a named lint rule from the active profile.
-
-USAGE
-  writetighter explain <rule-id> [--profile <spec>] [--format <format>]
-
-FLAGS
-  --profile <spec>    Profile id@version (default: discovered or user config)
-  --format <format>   Output format: human, json (default: human)
-
-EXAMPLES
-  writetighter explain CORE.SENTENCE_LENGTH
-  writetighter explain CORE.SENTENCE_LENGTH --format json
-`
-
 const profileHelp = `writetighter profile — manage profiles
 
 USAGE
@@ -424,6 +387,5 @@ EXAMPLES
 var helpTexts = map[string]string{
 	"":        mainHelp,
 	"config":  configHelp,
-	"explain": explainHelp,
 	"profile": profileHelp,
 }

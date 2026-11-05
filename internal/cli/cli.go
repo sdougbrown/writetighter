@@ -113,6 +113,19 @@ func buildCommands(stdout io.Writer) []*clicontract.Command {
 			},
 		},
 		{
+			Name:        "explain",
+			Short:       "Explain a lint rule",
+			Positionals: []clicontract.Positional{{Name: "rule-id", Required: true}},
+			Long:        "Prints information about a named lint rule from the active profile.\n\nEXAMPLES\n  writetighter explain CORE.SENTENCE_LENGTH\n  writetighter explain CORE.SENTENCE_LENGTH --format json\n",
+			Flags: []clicontract.Flag{
+				{Name: "profile", Kind: clicontract.String, Usage: "Profile id@version (default: discovered or user config)"},
+				{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json", Default: "human"},
+			},
+			Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
+				return handleExplain(stdout, inv)
+			},
+		},
+		{
 			Name:  "prompt",
 			Short: "Export core and kind-specific revision guidance",
 			Flags: []clicontract.Flag{
@@ -225,6 +238,15 @@ func handleLint(stdout io.Writer, _ context.Context, inv clicontract.Invocation,
 	return lintResult{}, nil
 }
 
+type explainResult struct{}
+
+func handleExplain(stdout io.Writer, inv clicontract.Invocation) (any, error) {
+	if err := app.New().RunExplainTo(stdout, inv.Args[0], inv.Flags["profile"], inv.Flags["format"]); err != nil {
+		return nil, err
+	}
+	return explainResult{}, nil
+}
+
 type rewriteResult struct{}
 
 func handleRewrite(stdout, stderr io.Writer, ctx context.Context, inv clicontract.Invocation) (any, error) {
@@ -325,6 +347,10 @@ func (cliAdapter) ErrorResult(_ string, _ error) any { return failureResult{} }
 
 func (cliAdapter) Write(w io.Writer, result any) error {
 	switch r := result.(type) {
+	case explainResult:
+		// The rule description was written via the dispatch stdout writer;
+		// nothing else to emit.
+		return nil
 	case rewriteResult:
 		// The rendered rewrite document was written via the dispatch
 		// stdout writer; nothing else to emit.
