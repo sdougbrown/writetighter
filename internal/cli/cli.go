@@ -186,34 +186,25 @@ func buildCommands(stdout io.Writer) []*clicontract.Command {
 	}
 }
 
-// CommandShorts reports the declared short description of every migrated
-// top-level command. Help surfaces that still render from the
-// hand-rolled texts claim to describe the same commands; cmd's tests
-// compare this map against those texts so the two cannot drift during
-// the migration.
-func CommandShorts() map[string]string {
-	cs := buildCommands(io.Discard)
-	m := make(map[string]string, len(cs))
-	for _, c := range cs {
-		m[c.Name] = c.Short
-	}
-	return m
-}
-
 // RootShort is the root tagline. The hand-rolled root help renders the
 // same line (with the "writetighter — " prefix) until every command
 // migrates; cmd's drift test pins the two so they cannot diverge.
 const RootShort = "deterministic and contextual prose revision for technical documentation"
+
+// RootLong is the root help body: the declared commands follow it, and the
+// exit-code contract closes it.
+const RootLong = "Deterministic and contextual prose revision for technical documentation.\n\n" +
+	"Commands cover deterministic lint, model-backed revision and rewriting, profile management, configuration, and version reporting.\n\n" +
+	"EXIT CODES\n  0  command completed successfully\n  1  lint findings reached --fail-on threshold\n  2  usage, configuration, profile, or input failure\n  3  model call or model response failure"
 
 func appFor(stdout io.Writer) *clicontract.App {
 	return &clicontract.App{
 		Name:      "writetighter",
 		Version:   app.Version,
 		RootShort: RootShort,
-		// The root is a stub until every command migrates; the hand-rolled
-		// dispatch owns root help and unknown-command handling meanwhile.
-		BareHelp: true,
-		Commands: buildCommands(stdout),
+		RootLong:  RootLong,
+		BareHelp:  true,
+		Commands:  buildCommands(stdout),
 	}
 }
 

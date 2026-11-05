@@ -9,12 +9,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/sdougbrown/writetighter/internal/app"
-	"github.com/sdougbrown/writetighter/internal/cli"
 	"github.com/sdougbrown/writetighter/internal/config"
 )
 
@@ -521,10 +519,10 @@ func TestNoArgsShowsHelp(t *testing.T) {
 			t.Fatalf("expected exit 0 for no args, got %d", got)
 		}
 	})
-	if !strings.Contains(out, "USAGE") {
+	if !strings.Contains(out, "Usage:") {
 		t.Fatalf("expected help text on stdout, got: %s", out)
 	}
-	if !strings.Contains(out, "COMMANDS") {
+	if !strings.Contains(out, "Available Commands:") {
 		t.Fatalf("expected command list in help, got: %s", out)
 	}
 }
@@ -568,9 +566,20 @@ func TestTopLevelHelpFlag(t *testing.T) {
 				t.Fatalf("%v: expected exit 0, got %d", args, got)
 			}
 		})
-		if !strings.Contains(out, "COMMANDS") {
+		if !strings.Contains(out, "Available Commands:") {
 			t.Fatalf("%v: expected help text, got: %s", args, out)
 		}
+	}
+}
+
+func TestTopLevelVersionFlag(t *testing.T) {
+	out := captureStdout(t, func() {
+		if got := run([]string{"--version"}); got != 0 {
+			t.Fatalf("expected exit 0 for --version, got %d", got)
+		}
+	})
+	if !strings.Contains(out, "writetighter ") {
+		t.Fatalf("expected version line, got: %s", out)
 	}
 }
 
@@ -580,7 +589,7 @@ func TestHelpCommand(t *testing.T) {
 			t.Fatalf("expected exit 0, got %d", got)
 		}
 	})
-	if !strings.Contains(out, "COMMANDS") {
+	if !strings.Contains(out, "Available Commands:") {
 		t.Fatalf("expected main help, got: %s", out)
 	}
 }
@@ -626,14 +635,17 @@ func TestSubcommandHelpFlags(t *testing.T) {
 	}
 }
 
-func TestUnknownCommandShowsHelp(t *testing.T) {
-	out := captureStdout(t, func() {
+func TestUnknownCommandFails(t *testing.T) {
+	out, errOut := captureStdoutStderr(t, func() {
 		if got := run([]string{"bogus"}); got != 2 {
 			t.Fatalf("expected exit 2 for unknown command, got %d", got)
 		}
 	})
-	if !strings.Contains(out, "COMMANDS") {
-		t.Fatalf("expected help text after unknown command, got: %s", out)
+	if out != "" {
+		t.Fatalf("expected no stdout for an unknown command, got: %s", out)
+	}
+	if !strings.Contains(errOut, "unknown command") {
+		t.Fatalf("expected unknown-command diagnostic on stderr, got: %s", errOut)
 	}
 }
 
@@ -982,22 +994,5 @@ max_requests=32
 	}
 	if cfg.LLM.Model != "qwen" {
 		t.Fatalf("model should be unchanged, got %q", cfg.LLM.Model)
-	}
-}
-
-func TestRootHelpMatchesDeclarations(t *testing.T) {
-	firstLine, _, _ := strings.Cut(mainHelp, "\n")
-	if got, want := firstLine, "writetighter \u2014 "+cli.RootShort; got != want {
-		t.Fatalf("mainHelp first line is %q; want %q", got, want)
-	}
-	for name, short := range cli.CommandShorts() {
-		re := regexp.MustCompile(`(?m)^  ` + regexp.QuoteMeta(name) + ` +([^\n]+)$`)
-		m := re.FindStringSubmatch(mainHelp)
-		if m == nil {
-			t.Fatalf("mainHelp has no command line for declared command %q", name)
-		}
-		if got := strings.TrimRight(m[1], " "); got != short {
-			t.Fatalf("mainHelp line for %q ends with %q; declared Short is %q", name, got, short)
-		}
 	}
 }
