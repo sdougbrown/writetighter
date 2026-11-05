@@ -25,7 +25,7 @@ import (
 	"github.com/sdougbrown/writetighter/internal/setup"
 )
 
-// Exit codes are owned by this package; RootLong documents the same
+// Exit codes are owned by this package; rootLong documents the same
 // contract in the root help (0 success, 1 lint fail threshold,
 // 2 usage/configuration/input failure, 3 model failure). Signal
 // handling is the library's: commands exit 130/143 on SIGINT/SIGTERM.
@@ -182,12 +182,12 @@ func buildCommands(stdout io.Writer) []*clicontract.Command {
 	}
 }
 
-// RootShort is the root tagline the library renders in the root help.
-const RootShort = "deterministic and contextual prose revision for technical documentation"
+// rootShort is the root tagline the library renders in the root help.
+const rootShort = "deterministic and contextual prose revision for technical documentation"
 
-// RootLong is the root help body: the declared commands follow it, and the
+// rootLong is the root help body: the declared commands follow it, and the
 // exit-code contract closes it.
-const RootLong = "Deterministic and contextual prose revision for technical documentation.\n\n" +
+const rootLong = "Deterministic and contextual prose revision for technical documentation.\n\n" +
 	"Commands cover deterministic lint, model-backed revision and rewriting, profile management, configuration, and version reporting.\n\n" +
 	"EXIT CODES\n  0  command completed successfully\n  1  lint findings reached --fail-on threshold\n  2  usage, configuration, profile, or input failure\n  3  model call or model response failure"
 
@@ -195,8 +195,8 @@ func appFor(stdout io.Writer) *clicontract.App {
 	return &clicontract.App{
 		Name:      "writetighter",
 		Version:   app.Version,
-		RootShort: RootShort,
-		RootLong:  RootLong,
+		RootShort: rootShort,
+		RootLong:  rootLong,
 		BareHelp:  true,
 		Commands:  buildCommands(stdout),
 	}
