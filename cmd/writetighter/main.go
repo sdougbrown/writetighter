@@ -9,7 +9,6 @@ import (
 	"os"
 	"time"
 
-	"github.com/sdougbrown/writetighter/internal/app"
 	"github.com/sdougbrown/writetighter/internal/cli"
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
@@ -52,7 +51,8 @@ func run(args []string) int {
 		// Migrated to the clicontract-declared command surface.
 		return cli.Run(args, os.Stdout, os.Stderr)
 	case "profile":
-		return runProfile(args[1:])
+		// Migrated to the clicontract-declared command surface.
+		return cli.Run(args, os.Stdout, os.Stderr)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown command %q\n", args[0])
 		printHelp("")
@@ -66,7 +66,7 @@ func runHelp(args []string) int {
 		return cli.ExitOK
 	}
 	switch args[0] {
-	case "version", "prompt", "lint", "revise", "rewrite", "explain":
+	case "version", "prompt", "lint", "revise", "rewrite", "explain", "profile":
 		// Migrated command: its help renders from the declaration.
 		return cli.Run([]string{args[0], "--help"}, os.Stdout, os.Stderr)
 	}
@@ -232,72 +232,6 @@ func resolveAPIKey(cfg *config.UserConfig) string {
 	return ""
 }
 
-func runProfile(args []string) int {
-	if wantsHelp(args) {
-		printHelp("profile")
-		return cli.ExitOK
-	}
-	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "profile subcommand required")
-		fmt.Fprintln(os.Stderr, "  Run `writetighter profile --help` for usage.")
-		return cli.ExitUsage
-	}
-	switch args[0] {
-	case "install":
-		if len(args) != 2 || args[1] == "" {
-			usageErr("profile install requires one bundle path")
-			return cli.ExitUsage
-		}
-		if err := app.New().RunProfileInstall(args[1]); err != nil {
-			usageErr(err.Error())
-			return cli.ExitUsage
-		}
-		return cli.ExitOK
-	case "list":
-		format, ok := parseProfileFormat(args[1:])
-		if !ok {
-			usageErr("invalid profile list arguments")
-			return cli.ExitUsage
-		}
-		if err := app.New().RunProfileList(format); err != nil {
-			usageErr(err.Error())
-			return cli.ExitUsage
-		}
-		return cli.ExitOK
-	case "verify":
-		if len(args) < 2 || (len(args) >= 2 && args[1] == "") {
-			usageErr("profile verify requires a profile or bundle path")
-			return cli.ExitUsage
-		}
-		spec := args[1]
-		format, ok := parseProfileFormat(args[2:])
-		if !ok {
-			usageErr("invalid profile verify arguments")
-			return cli.ExitUsage
-		}
-		if err := app.New().RunProfileVerify(spec, format); err != nil {
-			usageErr(err.Error())
-			return cli.ExitUsage
-		}
-		return cli.ExitOK
-	default:
-		fmt.Fprintf(os.Stderr, "unknown profile subcommand %q\n", args[0])
-		printHelp("profile")
-		return cli.ExitUsage
-	}
-}
-
-func parseProfileFormat(args []string) (string, bool) {
-	fs := flag.NewFlagSet("profile", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	fs.Usage = func() {}
-	format := fs.String("format", "human", "")
-	if err := fs.Parse(args); err != nil || len(fs.Args()) != 0 {
-		return "", false
-	}
-	return *format, *format == "human" || *format == "json"
-}
-
 func usageErr(msg string) { fmt.Fprintln(os.Stderr, msg) }
 
 // ---------------------------------------------------------------------------
@@ -364,28 +298,7 @@ EXAMPLES
   writetighter config --code-model qwen-coder  # set a separate model for code comment revision
 `
 
-const profileHelp = `writetighter profile — manage profiles
-
-USAGE
-  writetighter profile <subcommand> [options]
-
-SUBCOMMANDS
-  install <path>    Install a profile bundle from a directory
-  list              List embedded and installed profiles
-  verify <spec>     Verify a profile or bundle
-
-FLAGS (list, verify)
-  --format <format>   Output format: human, json (default: human)
-
-EXAMPLES
-  writetighter profile list
-  writetighter profile list --format json
-  writetighter profile verify core@1
-  writetighter profile install ./my-profile
-`
-
 var helpTexts = map[string]string{
-	"":        mainHelp,
-	"config":  configHelp,
-	"profile": profileHelp,
+	"":       mainHelp,
+	"config": configHelp,
 }

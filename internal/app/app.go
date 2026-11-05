@@ -1455,7 +1455,11 @@ func (a *App) RunProfileInstall(spec string) error {
 	return err
 }
 
-func (a *App) RunProfileList(format string) error {
+// RunProfileListTo is RunProfileList with the output writer injected.
+func (a *App) RunProfileListTo(w io.Writer, format string) error {
+	if format != "human" && format != "json" {
+		return fmt.Errorf("unsupported format %q", format)
+	}
 	embedded, err := profile.LoadEmbedded()
 	if err != nil {
 		return err
@@ -1481,23 +1485,32 @@ func (a *App) RunProfileList(format string) error {
 			profiles = append(profiles, map[string]any{"id": item.ID, "version": item.Version, "sha256": item.SHA256, "source": item.Source})
 		}
 		data := map[string]any{"profiles": profiles}
-		return json.NewEncoder(os.Stdout).Encode(data)
+		return json.NewEncoder(w).Encode(data)
 	}
 	for _, item := range all {
-		fmt.Fprintf(os.Stdout, "%s  %s@%s  sha256:%s\n", item.Source, item.ID, item.Version, item.SHA256)
+		fmt.Fprintf(w, "%s  %s@%s  sha256:%s\n", item.Source, item.ID, item.Version, item.SHA256)
 	}
 	return nil
+}
+
+// RunProfileList is RunProfileListTo with os.Stdout as the writer.
+func (a *App) RunProfileList(format string) error {
+	return a.RunProfileListTo(os.Stdout, format)
 }
 
 func profileConflictErrForApp(r *profile.Resolution) error {
 	return fmt.Errorf("installed profile conflicts with embedded %s@%s", r.ID, r.Version)
 }
 
-func (a *App) RunProfileVerify(spec, format string) error {
+// RunProfileVerifyTo is RunProfileVerify with the output writers injected.
+func (a *App) RunProfileVerifyTo(w, stderr io.Writer, spec, format string) error {
+	if format != "human" && format != "json" {
+		return fmt.Errorf("unsupported format %q", format)
+	}
 	if info, err := os.Stat(spec); err == nil && info.IsDir() {
 		result := profile.VerifyBundle(spec)
 		if format == "json" {
-			return json.NewEncoder(os.Stdout).Encode(result)
+			return json.NewEncoder(w).Encode(result)
 		}
 		if !result.Valid {
 			return fmt.Errorf("profile verification failed")
@@ -1511,12 +1524,17 @@ func (a *App) RunProfileVerify(spec, format string) error {
 		}
 		if format == "json" {
 			data := map[string]any{"id": string(resolution.ID), "version": string(resolution.Version), "sha256": resolution.SHA256, "valid": true}
-			return json.NewEncoder(os.Stdout).Encode(data)
+			return json.NewEncoder(w).Encode(data)
 		}
-		fmt.Fprintf(os.Stderr, "Profile %s@%s resolved (embedded): SHA256=%s\n", resolution.ID, resolution.Version, resolution.SHA256)
+		fmt.Fprintf(stderr, "Profile %s@%s resolved (embedded): SHA256=%s\n", resolution.ID, resolution.Version, resolution.SHA256)
 		return nil
 	}
 	return fmt.Errorf("profile not found: %s", spec)
+}
+
+// RunProfileVerify is RunProfileVerifyTo with os.Stdout and os.Stderr as the writers.
+func (a *App) RunProfileVerify(spec, format string) error {
+	return a.RunProfileVerifyTo(os.Stdout, os.Stderr, spec, format)
 }
 
 func renderReport(r *report.Report, format string) (string, error) {
