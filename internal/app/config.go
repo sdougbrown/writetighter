@@ -7,11 +7,9 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"time"
 
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
-	"github.com/sdougbrown/writetighter/internal/setup"
 )
 
 // RunConfigUpdate applies a targeted --model/--code-model change to the
@@ -29,16 +27,15 @@ func (a *App) RunConfigUpdate(ctx context.Context, stdout, stderr io.Writer, mod
 		return fmt.Errorf("config is missing base_url; run 'writetighter config --wizard' first")
 	}
 
-	timeout := llm.DefaultTimeout
-	if existing.LLM.Timeout != "" {
-		d, err := time.ParseDuration(existing.LLM.Timeout)
-		if err != nil {
-			return fmt.Errorf("invalid llm timeout: %w", err)
-		}
-		timeout = d
+	timeout, err := existing.LLM.TimeoutDuration()
+	if err != nil {
+		return fmt.Errorf("invalid llm timeout: %w", err)
 	}
 
 	if model != "" {
+		if existing.LLM.APIKey == "" && existing.LLM.APIKeyEnv != "" && os.Getenv(existing.LLM.APIKeyEnv) == "" {
+			return fmt.Errorf("api_key_env %q is configured but the environment variable is unset", existing.LLM.APIKeyEnv)
+		}
 		apiKey := resolveAPIKey(existing)
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -66,7 +63,7 @@ func (a *App) RunConfigUpdate(ctx context.Context, stdout, stderr io.Writer, mod
 		existing.LLM.Model = model
 
 		client := &http.Client{Timeout: timeout}
-		newMode, probeErr := setup.ProbeResponseMode(ctx, client, existing.LLM.BaseURL, model, apiKey)
+		newMode, probeErr := llm.ProbeResponseMode(ctx, client, existing.LLM.BaseURL, model, apiKey)
 		if probeErr != nil {
 			fmt.Fprintf(stderr, "Warning: response mode preflight failed for %q: %v\n", model, probeErr)
 		} else {

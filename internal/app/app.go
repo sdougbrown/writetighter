@@ -10,7 +10,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 	"unicode/utf8"
 
 	"github.com/sdougbrown/writetighter/internal/check"
@@ -632,13 +631,9 @@ func (a *App) RunRewriteTo(w io.Writer, params RewriteParams) error {
 	llmModel := uc.Model
 	llmAPIKey := uc.APIKey
 	llmAPIKeyEnv := uc.APIKeyEnv
-	llmTimeout := llm.DefaultTimeout
-	if uc.Timeout != "" {
-		d, e := time.ParseDuration(uc.Timeout)
-		if e != nil {
-			return fmt.Errorf("%w: invalid llm timeout: %v", ErrLLMConfigRequired, e)
-		}
-		llmTimeout = d
+	llmTimeout, timeoutErr := uc.TimeoutDuration()
+	if timeoutErr != nil {
+		return fmt.Errorf("%w: invalid llm timeout: %v", ErrLLMConfigRequired, timeoutErr)
 	}
 
 	// Apply runtime model override.
@@ -870,17 +865,13 @@ func (a *App) RunReviseTo(w io.Writer, params ReviseParams) error {
 	llmAPIKey := uc.APIKey
 	llmAPIKeyEnv := uc.APIKeyEnv
 	llmResponseMode := uc.ResponseMode
-	llmTimeout := llm.DefaultTimeout
+	llmTimeout, timeoutErr := uc.TimeoutDuration()
+	if timeoutErr != nil {
+		return fmt.Errorf("%w: invalid llm timeout: %v", ErrLLMConfigRequired, timeoutErr)
+	}
 	maxRequests := uc.MaxRequests
 	if maxRequests == 0 {
 		maxRequests = defaultMaxModelRequests
-	}
-	if uc.Timeout != "" {
-		d, e := time.ParseDuration(uc.Timeout)
-		if e != nil {
-			return fmt.Errorf("%w: invalid llm timeout: %v", ErrLLMConfigRequired, e)
-		}
-		llmTimeout = d
 	}
 
 	// Apply runtime model override.
