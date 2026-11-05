@@ -186,6 +186,26 @@ func TestRunExplain(t *testing.T) {
 		if payload["id"] != "CORE.SENTENCE_LENGTH" {
 			t.Fatalf("unexpected id: %v", payload["id"])
 		}
+		if payload["version"] != float64(1) {
+			t.Fatalf("unexpected version: %v", payload["version"])
+		}
+	})
+
+	// Flags after the rule work on the declared surface (the hand-rolled
+	// flag parser rejected this order).
+	t.Run("flags after rule", func(t *testing.T) {
+		out := captureStdout(t, func() {
+			if got := run([]string{"explain", "CORE.SENTENCE_LENGTH", "--format", "json"}); got != 0 {
+				t.Fatalf("expected exit 0, got %d", got)
+			}
+		})
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(out), &payload); err != nil {
+			t.Fatalf("unmarshal output: %v", err)
+		}
+		if payload["id"] != "CORE.SENTENCE_LENGTH" {
+			t.Fatalf("unexpected id: %v", payload["id"])
+		}
 	})
 }
 
