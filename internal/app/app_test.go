@@ -2,6 +2,7 @@ package app
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -2130,5 +2131,79 @@ func TestRunDeterministicChecksPassesGitCompare(t *testing.T) {
 	}
 	if received != gitCompare {
 		t.Fatalf("checker received GitCompare %p, want %p", received, gitCompare)
+	}
+}
+
+// --- RunConfigUpdate / RunConfigShow tests ---
+
+func TestRunConfigUpdateNoConfig(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	var out, errOut bytes.Buffer
+	err := (&App{}).RunConfigUpdate(context.Background(), &out, &errOut, "some-model", "")
+	if err == nil || !strings.Contains(err.Error(), "no existing config") {
+		t.Fatalf("expected no-existing-config error, got %v", err)
+	}
+}
+
+func TestRunConfigUpdateMissingBaseURL(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "[llm]\nprovider='openai-compatible'\nmodel='test-model'\n"
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	err := (&App{}).RunConfigUpdate(context.Background(), &out, &errOut, "some-model", "")
+	if err == nil || !strings.Contains(err.Error(), "missing base_url") {
+		t.Fatalf("expected missing base_url error, got %v", err)
+	}
+}
+
+func TestRunConfigShowUnconfigured(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte(""), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	shown, err := (&App{}).RunConfigShow(&out, &errOut)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if shown {
+		t.Fatal("expected unconfigured config to report not shown")
+	}
+}
+
+func TestRunConfigShowCorruptConfigErrors(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "config.toml"), []byte("malformed = ["), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	shown, err := (&App{}).RunConfigShow(&out, &errOut)
+	if err == nil {
+		t.Fatalf("expected parse error for corrupt config, got shown=%v", shown)
+	}
+	if !strings.Contains(err.Error(), "failed to load config") {
+		t.Fatalf("expected load-config error, got %v", err)
 	}
 }

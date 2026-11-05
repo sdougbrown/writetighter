@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/llm"
@@ -28,12 +29,21 @@ func (a *App) RunConfigUpdate(ctx context.Context, stdout, stderr io.Writer, mod
 		return fmt.Errorf("config is missing base_url; run 'writetighter config --wizard' first")
 	}
 
+	timeout := llm.DefaultTimeout
+	if existing.LLM.Timeout != "" {
+		d, err := time.ParseDuration(existing.LLM.Timeout)
+		if err != nil {
+			return fmt.Errorf("invalid llm timeout: %w", err)
+		}
+		timeout = d
+	}
+
 	if model != "" {
 		apiKey := resolveAPIKey(existing)
-		ctx, cancel := context.WithTimeout(ctx, llm.DefaultTimeout)
+		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
-		models, discErr := llm.ListModels(existing.LLM.BaseURL, apiKey, llm.DefaultTimeout)
+		models, discErr := llm.ListModels(existing.LLM.BaseURL, apiKey, timeout)
 		if discErr != nil || len(models) == 0 {
 			if discErr != nil {
 				fmt.Fprintf(stderr, "Warning: model discovery unavailable: %v; proceeding with explicit model %q.\n", discErr, model)
@@ -55,7 +65,7 @@ func (a *App) RunConfigUpdate(ctx context.Context, stdout, stderr io.Writer, mod
 
 		existing.LLM.Model = model
 
-		client := &http.Client{Timeout: llm.DefaultTimeout}
+		client := &http.Client{Timeout: timeout}
 		newMode, probeErr := setup.ProbeResponseMode(ctx, client, existing.LLM.BaseURL, model, apiKey)
 		if probeErr != nil {
 			fmt.Fprintf(stderr, "Warning: response mode preflight failed for %q: %v\n", model, probeErr)
@@ -85,10 +95,16 @@ func (a *App) RunConfigUpdate(ctx context.Context, stdout, stderr io.Writer, mod
 
 // RunConfigShow prints the sanitized user config when a model is configured,
 // and reports whether it did. A missing or unconfigured config reports false
-// so the caller can offer the wizard.
+// so the caller can offer the wizard; an unreadable config is an error.
 func (a *App) RunConfigShow(stdout, stderr io.Writer) (bool, error) {
 	existing, err := config.LoadUserConfig()
-	if err != nil || existing == nil || existing.LLM.Model == "" {
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to load config: %w", err)
+	}
+	if existing == nil || existing.LLM.Model == "" {
 		return false, nil
 	}
 	tomlStr, err := existing.SanitizedTOML()
