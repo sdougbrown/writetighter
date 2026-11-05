@@ -16,6 +16,7 @@ import (
 	"testing"
 
 	"github.com/sdougbrown/writetighter/internal/check"
+	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/corpus"
 	"github.com/sdougbrown/writetighter/internal/document"
 	"github.com/sdougbrown/writetighter/internal/llm"
@@ -2205,5 +2206,37 @@ func TestRunConfigShowCorruptConfigErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "failed to load config") {
 		t.Fatalf("expected load-config error, got %v", err)
+	}
+}
+
+func TestRunConfigUpdateCodeModelOnly(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	dir := filepath.Join(root, "writetighter")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	body := "[llm]\nprovider='openai-compatible'\nbase_url='http://127.0.0.1:1/v1'\nmodel='main-model'\n"
+	path := filepath.Join(dir, "config.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	if err := (&App{}).RunConfigUpdate(context.Background(), &out, &errOut, "", "coder-model"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	cfg, err := config.LoadUserConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.LLM.CodeModel != "coder-model" {
+		t.Fatalf("code model = %q, want coder-model", cfg.LLM.CodeModel)
+	}
+	if cfg.LLM.Model != "main-model" {
+		t.Fatalf("main model should be unchanged, got %q", cfg.LLM.Model)
+	}
+	if strings.Contains(errOut.String(), "Response mode") || strings.Contains(errOut.String(), "Warning:") {
+		t.Fatalf("expected no discovery/probe output, got: %s", errOut.String())
 	}
 }
