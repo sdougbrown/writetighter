@@ -128,6 +128,7 @@ func buildCommands(stdout io.Writer) []*clicontract.Command {
 		{
 			Name:  "profile",
 			Short: "Manage profiles (install, list, verify)",
+			Long:  "Manage profiles.\n\nEXAMPLES\n  writetighter profile list\n  writetighter profile list --format json\n  writetighter profile verify core@1\n  writetighter profile install ./my-profile\n",
 			Subcommands: []*clicontract.Command{
 				{
 					Name:        "install",

@@ -367,6 +367,21 @@ func TestProfileCommands(t *testing.T) {
 	}
 }
 
+func TestProfileVerifyHumanStderr(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_DATA_HOME", root)
+	_, errOut := captureStdoutStderr(t, func() {
+		if got := run([]string{"profile", "verify", "software-docs-en@0.6.0"}); got != 0 {
+			t.Fatalf("expected exit 0, got %d", got)
+		}
+	})
+	if !strings.Contains(errOut, "resolved (embedded): SHA256=") {
+		t.Fatalf("expected resolved line on stderr, got: %s", errOut)
+	}
+}
+
 func TestProfileSubcommandValidation(t *testing.T) {
 	for _, args := range [][]string{
 		{"profile"},
@@ -520,6 +535,7 @@ func TestSubcommandHelpFlags(t *testing.T) {
 		{"config --help", "--wizard"},
 		{"explain --help", "rule-id"},
 		{"profile --help", "install"},
+		{"help profile", "install"},
 		{"version --help", "--json"},
 		{"help version", "--json"},
 		{"help prompt", "revision guidance"},
