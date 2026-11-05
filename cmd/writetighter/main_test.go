@@ -186,6 +186,9 @@ func TestRunExplain(t *testing.T) {
 		if payload["id"] != "CORE.SENTENCE_LENGTH" {
 			t.Fatalf("unexpected id: %v", payload["id"])
 		}
+		if payload["version"] != float64(1) {
+			t.Fatalf("unexpected version: %v", payload["version"])
+		}
 	})
 
 	// Flags after the rule work on the declared surface (the hand-rolled
