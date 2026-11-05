@@ -14,12 +14,13 @@ import (
 	"time"
 	"unicode"
 
+	"github.com/sdougbrown/writetighter/internal/config"
 	"github.com/sdougbrown/writetighter/internal/guidance"
 	"github.com/sdougbrown/writetighter/schemas"
 )
 
 const (
-	DefaultTimeout = 45 * time.Second
+	DefaultTimeout = config.DefaultLLMTimeout
 	MaxInputChars  = 32000
 	MaxSuggestions = 20
 	MaxOutputChars = 10000

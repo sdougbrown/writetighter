@@ -84,7 +84,7 @@ func TestLookupContextWindowEndpointError(t *testing.T) {
 func TestListModelsRejectsLargeResponse(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// The response does not need to be valid JSON: the size check runs first.
-		_, _ = w.Write([]byte(strings.Repeat("x", modelsMaxResponse+1)))
+		_, _ = w.Write([]byte(strings.Repeat("x", maxResponseBytes+1)))
 	}))
 	defer server.Close()
 
@@ -92,8 +92,8 @@ func TestListModelsRejectsLargeResponse(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for oversized response")
 	}
-	if !strings.Contains(err.Error(), "models response is too large") {
-		t.Fatalf("expected 'models response is too large', got: %v", err)
+	if !strings.Contains(err.Error(), "preflight response is too large") {
+		t.Fatalf("expected 'preflight response is too large', got: %v", err)
 	}
 }
 

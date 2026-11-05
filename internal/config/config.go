@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/BurntSushi/toml"
 )
@@ -27,6 +28,26 @@ type TermEntry struct {
 	Definition    string   `toml:"definition"`
 	Override      bool     `toml:"override"`
 	Reason        string   `toml:"reason"`
+}
+
+// DefaultLLMTimeout is the fallback LLM request timeout when the config
+// leaves it empty or non-positive.
+const DefaultLLMTimeout = 45 * time.Second
+
+// TimeoutDuration returns the configured LLM timeout, falling back to
+// DefaultLLMTimeout for empty or non-positive values.
+func (l LLMConfig) TimeoutDuration() (time.Duration, error) {
+	if l.Timeout == "" {
+		return DefaultLLMTimeout, nil
+	}
+	d, err := time.ParseDuration(l.Timeout)
+	if err != nil {
+		return 0, err
+	}
+	if d <= 0 {
+		return DefaultLLMTimeout, nil
+	}
+	return d, nil
 }
 
 type UserConfig struct {

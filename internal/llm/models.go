@@ -1,9 +1,9 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"sort"
 	"strings"
@@ -40,38 +40,13 @@ type modelsEnvelope struct {
 	Data []ModelInfo `json:"data"`
 }
 
-const modelsMaxResponse = 1 << 20
-
 // ListModels queries the /v1/models endpoint and returns discovered models
 // with metadata.
 func ListModels(baseURL, apiKey string, timeout time.Duration) ([]ModelInfo, error) {
 	client := &http.Client{Timeout: timeout}
-	req, err := http.NewRequest(http.MethodGet, baseURL+"/models", nil)
+	body, err := doJSON(context.Background(), client, http.MethodGet, baseURL+"/models", apiKey, nil)
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("Accept", "application/json")
-	if apiKey != "" {
-		req.Header.Set("Authorization", "Bearer "+apiKey)
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, modelsMaxResponse+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(body) > modelsMaxResponse {
-		return nil, fmt.Errorf("models response is too large")
-	}
-	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		message := strings.TrimSpace(string(body))
-		if apiKey != "" {
-			message = strings.ReplaceAll(message, apiKey, "[REDACTED]")
-		}
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, SafeDisplay(message))
 	}
 	var envelope modelsEnvelope
 	if err := json.Unmarshal(body, &envelope); err != nil {
