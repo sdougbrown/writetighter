@@ -1,14 +1,12 @@
 // Package cli implements the writetighter command boundary on the
 // clicontract library: the declared command surface, the output
-// vocabulary, and the exit-code mapping. Commands migrate here one at a
-// time; cmd/writetighter/main.go keeps the hand-rolled dispatch for the
-// commands that have not migrated yet.
+// vocabulary, and the exit-code mapping. This package is the CLI's only
+// entry point; cmd/writetighter/main.go delegates to Run.
 //
-// Migrated commands print the library's dispatch-level diagnostics
-// (for example, "version: unknown flag: --wat") with no stdout on
-// failure, not the hand-rolled commands'
-// "Run `writetighter <cmd> --help` for usage." hint. The hint is retired
-// command by command as the migration completes.
+// Dispatch-level failures print the library's diagnostics (for example,
+// "version: unknown flag: --wat") with no stdout. The retired
+// "Run `writetighter <cmd> --help` for usage." hint is tracked in
+// sdougbrown/cli-contract#12.
 package cli
 
 import (
@@ -27,12 +25,10 @@ import (
 	"github.com/sdougbrown/writetighter/internal/setup"
 )
 
-// Exit codes are owned by internal/cli. The values match the contract
-// documented in cmd/writetighter/main.go (0 success, 1 lint fail
-// threshold, 2 usage/configuration/input failure, 3 model failure);
-// every command references these constants as it migrates, so the
-// vocabulary has one owner. Signal handling is the library's:
-// migrated commands exit 130/143 on SIGINT/SIGTERM.
+// Exit codes are owned by this package; RootLong documents the same
+// contract in the root help (0 success, 1 lint fail threshold,
+// 2 usage/configuration/input failure, 3 model failure). Signal
+// handling is the library's: commands exit 130/143 on SIGINT/SIGTERM.
 const (
 	ExitOK            = 0
 	ExitFailThreshold = 1
@@ -186,9 +182,7 @@ func buildCommands(stdout io.Writer) []*clicontract.Command {
 	}
 }
 
-// RootShort is the root tagline. The hand-rolled root help renders the
-// same line (with the "writetighter — " prefix) until every command
-// migrates; cmd's drift test pins the two so they cannot diverge.
+// RootShort is the root tagline the library renders in the root help.
 const RootShort = "deterministic and contextual prose revision for technical documentation"
 
 // RootLong is the root help body: the declared commands follow it, and the
@@ -536,9 +530,8 @@ func (cliAdapter) HandlerDiagnostic(_ clicontract.Invocation, err error) string 
 
 type cliAdapter struct{}
 
-// Run executes argv (program name excluded) through the declared surface.
-// Commands that have not migrated are not declared here; callers route
-// only migrated commands.
+// Run executes argv (program name excluded) through the declared surface:
+// the CLI's only entry point.
 func Run(argv []string, stdout, stderr io.Writer) int {
 	return clicontract.Run(appFor(stdout), cliAdapter{}, argv, stdout, stderr)
 }
