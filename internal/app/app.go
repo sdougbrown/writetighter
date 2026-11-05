@@ -543,7 +543,8 @@ func PromptText(rubric *guidance.Set) string {
 // findings. Lint findings are collected first (deterministic, no model) and
 // passed as context to the rewrite. If the model call fails, the response is
 // empty, or protected-content validation fails, the original text is returned.
-func (a *App) RunRewrite(params RewriteParams) error {
+// RunRewriteTo is RunRewrite with the output writer injected.
+func (a *App) RunRewriteTo(w io.Writer, params RewriteParams) error {
 	if params.Kind == "" {
 		params.Kind = "description"
 	}
@@ -764,9 +765,14 @@ func (a *App) RunRewrite(params RewriteParams) error {
 		if renderErr != nil {
 			return renderErr
 		}
-		_, _ = fmt.Fprint(os.Stdout, formatted)
+		_, _ = fmt.Fprint(w, formatted)
 	}
 	return nil
+}
+
+// RunRewrite is RunRewriteTo with os.Stdout as the writer.
+func (a *App) RunRewrite(params RewriteParams) error {
+	return a.RunRewriteTo(os.Stdout, params)
 }
 
 // RunReviseTo runs contextual model revision: it reads LLM config from

@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/sdougbrown/writetighter/internal/app"
@@ -18,18 +17,6 @@ import (
 )
 
 func main() { os.Exit(run(os.Args[1:])) }
-
-type optionalStringFlag struct {
-	value string
-	set   bool
-}
-
-func (f *optionalStringFlag) String() string { return f.value }
-func (f *optionalStringFlag) Set(value string) error {
-	f.value = value
-	f.set = true
-	return nil
-}
 
 // Exit codes:
 // 0: command completed successfully.
@@ -54,7 +41,8 @@ func run(args []string) int {
 		// Migrated to the clicontract-declared command surface.
 		return cli.Run(args, os.Stdout, os.Stderr)
 	case "rewrite":
-		return runRewrite(args[1:])
+		// Migrated to the clicontract-declared command surface.
+		return cli.Run(args, os.Stdout, os.Stderr)
 	case "prompt":
 		// Migrated to the clicontract-declared command surface.
 		return cli.Run(args, os.Stdout, os.Stderr)
@@ -77,7 +65,7 @@ func runHelp(args []string) int {
 		return cli.ExitOK
 	}
 	switch args[0] {
-	case "version", "prompt", "lint", "revise":
+	case "version", "prompt", "lint", "revise", "rewrite":
 		// Migrated command: its help renders from the declaration.
 		return cli.Run([]string{args[0], "--help"}, os.Stdout, os.Stderr)
 	}
@@ -94,73 +82,6 @@ func wantsHelp(args []string) bool {
 		}
 	}
 	return false
-}
-
-// runRewrite is the whole-passage rewrite command.
-func runRewrite(args []string) int {
-	if wantsHelp(args) {
-		printHelp("rewrite")
-		return cli.ExitOK
-	}
-	fs := flag.NewFlagSet("rewrite", flag.ContinueOnError)
-	fs.SetOutput(os.Stderr)
-	stdin := fs.Bool("stdin", false, "")
-	var text optionalStringFlag
-	fs.Var(&text, "text", "")
-	kind := fs.String("kind", "description", "")
-	profile := fs.String("profile", "", "")
-	configPath := fs.String("config", "", "")
-	format := fs.String("format", "text", "")
-	model := fs.String("model", "", "Override the configured model for this run")
-	fs.Usage = func() { printHelp("rewrite") }
-	if err := fs.Parse(normalizeInterspersedFlags(args)); err != nil {
-		return cli.ExitUsage
-	}
-	params := app.RewriteParams{
-		Paths:      fs.Args(),
-		Stdin:      *stdin,
-		Kind:       *kind,
-		Profile:    *profile,
-		ConfigPath: *configPath,
-		Format:     *format,
-		Model:      *model,
-	}
-	if text.set {
-		params.Text = &text.value
-	}
-	if (params.Stdin && (len(params.Paths) > 0 || params.Text != nil)) || (params.Text != nil && len(params.Paths) > 0) {
-		fmt.Fprintln(os.Stderr, "paths, --stdin, and --text are mutually exclusive")
-		fmt.Fprintln(os.Stderr, "  Run `writetighter rewrite --help` for usage.")
-		return cli.ExitUsage
-	}
-	if !params.Stdin && params.Text == nil && len(params.Paths) == 0 {
-		fmt.Fprintln(os.Stderr, "no input specified")
-		fmt.Fprintln(os.Stderr, "  Run `writetighter rewrite --help` for usage.")
-		return cli.ExitUsage
-	}
-	err := app.New().RunRewrite(params)
-	if errors.Is(err, app.ErrLLMConfigRequired) {
-		if !params.Stdin && setup.StdinIsTerminal() {
-			fmt.Fprintf(os.Stderr, "%v\nStarting interactive configuration.\n", err)
-			if code := runConfig(nil); code != 0 {
-				return code
-			}
-			err = app.New().RunRewrite(params)
-		} else {
-			fmt.Fprintln(os.Stderr, err.Error())
-			fmt.Fprintln(os.Stderr, "  Run `writetighter config` to configure, then retry.")
-			return cli.ExitUsage
-		}
-	}
-	if err != nil {
-		if errors.Is(err, app.ErrRewriteFailed) {
-			usageErr(err.Error())
-			return cli.ExitModel
-		}
-		usageErr(err.Error())
-		return cli.ExitUsage
-	}
-	return cli.ExitOK
 }
 
 func runConfig(args []string) int {
@@ -310,30 +231,6 @@ func resolveAPIKey(cfg *config.UserConfig) string {
 	return ""
 }
 
-// The documented CLI permits paths before flags. flag.FlagSet stops at the first
-// positional argument, so normalize rewrite's small grammar before parsing.
-func normalizeInterspersedFlags(args []string) []string {
-	withValue := map[string]bool{"--kind": true, "--profile": true, "--config": true, "--format": true, "--text": true, "--model": true}
-	var flags, paths []string
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if arg == "--" {
-			paths = append(paths, args[i+1:]...)
-			break
-		}
-		if strings.HasPrefix(arg, "--") {
-			flags = append(flags, arg)
-			if withValue[arg] && i+1 < len(args) {
-				i++
-				flags = append(flags, args[i])
-			}
-			continue
-		}
-		paths = append(paths, arg)
-	}
-	return append(flags, paths...)
-}
-
 func runExplain(args []string) int {
 	if wantsHelp(args) {
 		printHelp("explain")
@@ -461,47 +358,6 @@ EXIT CODES
   3  model call or model response failure
 `
 
-const rewriteHelp = `writetighter rewrite — run whole-passage contextual rewrite
-
-Sends the full input as one model request and returns the complete rewritten
-passage, not surgical findings. Deterministic lint runs first and its findings
-are passed to the model as context. If the model call fails, the response is
-empty, or protected-content validation fails, the original text is returned.
-
-Unlike "revise", which returns individual suggestions for interactive review,
-"rewrite" produces one coherent tightened passage for non-interactive contexts
-(hooks, CI, piping into other tools). It never asks clarification questions —
-ambiguous sections are preserved as-is rather than guessed.
-
-USAGE
-  writetighter rewrite [flags] [paths...]
-
-FLAGS
-  --stdin              Read input from stdin
-  --text <string>     Rewrite the provided text directly
-  --kind <kind>       Document kind (default: description)
-                      Choices: description, procedure, pr, code-comment, reference,
-                      decision, incident, agent-instruction, status-update
-  --profile <spec>    Profile id@version (default: discovered or user config)
-  --config <path>     Path to .writetighter.toml (default: auto-discovered)
-  --format <format>   Output format: text, json, human (default: text)
-  --model <id>        Override the configured model for this run
-
-INPUT
-  Provide input via file paths, --stdin, or --text (mutually exclusive).
-
-CONFIGURATION
-  Rewrite requires [llm] model settings. Run "writetighter config" to configure.
-  If config is missing and stdin is a terminal, interactive setup is offered
-  automatically; otherwise the command exits with a hint.
-
-EXAMPLES
-  writetighter rewrite --text "Short text." --kind procedure
-  writetighter rewrite --stdin < README.md
-  printf '%s' "$MESSAGE" | writetighter rewrite --stdin --kind description
-  writetighter rewrite docs/intro.md --format json
-`
-
 const configHelp = `writetighter config — show or reconfigure model settings
 
 When already configured, prints the current configuration with the API key
@@ -567,7 +423,6 @@ EXAMPLES
 
 var helpTexts = map[string]string{
 	"":        mainHelp,
-	"rewrite": rewriteHelp,
 	"config":  configHelp,
 	"explain": explainHelp,
 	"profile": profileHelp,
