@@ -998,10 +998,7 @@ func (a *App) RunReviseTo(w io.Writer, params ReviseParams) error {
 	}
 
 	// Resolve the API key for endpoint queries (model metadata lookup).
-	resolvedAPIKey := llmAPIKey
-	if resolvedAPIKey == "" && llmAPIKeyEnv != "" {
-		resolvedAPIKey = os.Getenv(llmAPIKeyEnv)
-	}
+	resolvedAPIKey := resolveAPIKeyParts(llmAPIKey, llmAPIKeyEnv)
 
 	// Resolve context window and output tokens at runtime. These are not
 	// stored in config — they are auto-detected from the /v1/models endpoint

@@ -108,12 +108,19 @@ func (a *App) RunConfigShow(stdout, stderr io.Writer) (bool, error) {
 	return true, nil
 }
 
-func resolveAPIKey(cfg *config.UserConfig) string {
-	if cfg.LLM.APIKey != "" {
-		return cfg.LLM.APIKey
+// resolveAPIKeyParts resolves an API key from a direct value with an
+// environment-variable fallback. It is the single owner of that rule for
+// the app layer (config preflight and revise/rewrite endpoint queries).
+func resolveAPIKeyParts(apiKey, apiKeyEnv string) string {
+	if apiKey != "" {
+		return apiKey
 	}
-	if cfg.LLM.APIKeyEnv != "" {
-		return os.Getenv(cfg.LLM.APIKeyEnv)
+	if apiKeyEnv != "" {
+		return os.Getenv(apiKeyEnv)
 	}
 	return ""
+}
+
+func resolveAPIKey(cfg *config.UserConfig) string {
+	return resolveAPIKeyParts(cfg.LLM.APIKey, cfg.LLM.APIKeyEnv)
 }
