@@ -274,10 +274,6 @@ func handleLint(stdout io.Writer, _ context.Context, inv clicontract.Invocation,
 	return lintResult{}, nil
 }
 
-// validProfileFormat keeps the pre-migration validation: only human and
-// json are accepted for profile subcommands.
-func validProfileFormat(format string) bool { return format == "human" || format == "json" }
-
 func handleProfileInstall(inv clicontract.Invocation) (any, error) {
 	if err := app.New().RunProfileInstall(inv.Args[0]); err != nil {
 		return nil, err
@@ -286,22 +282,14 @@ func handleProfileInstall(inv clicontract.Invocation) (any, error) {
 }
 
 func handleProfileList(stdout io.Writer, inv clicontract.Invocation) (any, error) {
-	format := inv.Flags["format"]
-	if !validProfileFormat(format) {
-		return nil, &clicontract.UsageError{Message: "invalid profile list arguments"}
-	}
-	if err := app.New().RunProfileListTo(stdout, format); err != nil {
+	if err := app.New().RunProfileListTo(stdout, inv.Flags["format"]); err != nil {
 		return nil, err
 	}
 	return profileResult{}, nil
 }
 
 func handleProfileVerify(stdout, stderr io.Writer, inv clicontract.Invocation) (any, error) {
-	format := inv.Flags["format"]
-	if !validProfileFormat(format) {
-		return nil, &clicontract.UsageError{Message: "invalid profile verify arguments"}
-	}
-	if err := app.New().RunProfileVerifyTo(stdout, stderr, inv.Args[0], format); err != nil {
+	if err := app.New().RunProfileVerifyTo(stdout, stderr, inv.Args[0], inv.Flags["format"]); err != nil {
 		return nil, err
 	}
 	return profileResult{}, nil

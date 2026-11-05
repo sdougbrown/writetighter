@@ -1457,6 +1457,9 @@ func (a *App) RunProfileInstall(spec string) error {
 
 // RunProfileListTo is RunProfileList with the output writer injected.
 func (a *App) RunProfileListTo(w io.Writer, format string) error {
+	if format != "human" && format != "json" {
+		return fmt.Errorf("unsupported format %q", format)
+	}
 	embedded, err := profile.LoadEmbedded()
 	if err != nil {
 		return err
@@ -1501,6 +1504,9 @@ func profileConflictErrForApp(r *profile.Resolution) error {
 
 // RunProfileVerifyTo is RunProfileVerify with the output writers injected.
 func (a *App) RunProfileVerifyTo(w, stderr io.Writer, spec, format string) error {
+	if format != "human" && format != "json" {
+		return fmt.Errorf("unsupported format %q", format)
+	}
 	if info, err := os.Stat(spec); err == nil && info.IsDir() {
 		result := profile.VerifyBundle(spec)
 		if format == "json" {

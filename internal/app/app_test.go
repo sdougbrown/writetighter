@@ -422,7 +422,7 @@ func TestProfileListReturnsEmbedded(t *testing.T) {
 	r, w, _ := os.Pipe()
 	os.Stdout = w
 
-	err := (&App{}).RunProfileList("")
+	err := (&App{}).RunProfileList("human")
 	w.Close()
 	os.Stdout = oldStdout
 

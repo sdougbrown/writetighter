@@ -382,6 +382,54 @@ func TestProfileVerifyHumanStderr(t *testing.T) {
 	}
 }
 
+func TestProfileInstallAndList(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", root)
+	t.Setenv("HOME", root)
+	t.Setenv("XDG_DATA_HOME", root)
+	src := filepath.Join("..", "..", "internal", "profile", "data", "profiles", "software-docs-en", "0.5.0")
+	bundle := filepath.Join(root, "bundle")
+	if err := os.MkdirAll(bundle, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"manifest.json", "dictionary.json", "rules.json"} {
+		data, err := os.ReadFile(filepath.Join(src, name))
+		if err != nil {
+			t.Fatalf("read fixture %s: %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(bundle, name), data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := run([]string{"profile", "install", bundle}); got != 0 {
+		t.Fatalf("expected exit 0 installing bundle, got %d", got)
+	}
+	out := captureStdout(t, func() {
+		if got := run([]string{"profile", "list", "--format", "json"}); got != 0 {
+			t.Fatalf("expected exit 0, got %d", got)
+		}
+	})
+	var payload struct {
+		Profiles []struct {
+			ID      string `json:"id"`
+			Version string `json:"version"`
+			Source  string `json:"source"`
+		} `json:"profiles"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("invalid profile list JSON: %v\n%s", err, out)
+	}
+	found := false
+	for _, p := range payload.Profiles {
+		if p.Source == "installed" && p.ID == "software-docs-en" && p.Version == "0.5.0" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("installed 0.5.0 bundle missing from list: %+v", payload.Profiles)
+	}
+}
+
 func TestProfileSubcommandValidation(t *testing.T) {
 	for _, args := range [][]string{
 		{"profile"},
