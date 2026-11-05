@@ -36,7 +36,7 @@ func (a *App) RunConfigUpdate(ctx context.Context, stdout, stderr io.Writer, mod
 		if existing.LLM.APIKey == "" && existing.LLM.APIKeyEnv != "" && os.Getenv(existing.LLM.APIKeyEnv) == "" {
 			return fmt.Errorf("api_key_env %q is configured but the environment variable is unset", existing.LLM.APIKeyEnv)
 		}
-		apiKey := resolveAPIKey(existing)
+		apiKey := resolveAPIKeyParts(existing.LLM.APIKey, existing.LLM.APIKeyEnv)
 		ctx, cancel := context.WithTimeout(ctx, timeout)
 		defer cancel()
 
@@ -127,8 +127,4 @@ func resolveAPIKeyParts(apiKey, apiKeyEnv string) string {
 		return os.Getenv(apiKeyEnv)
 	}
 	return ""
-}
-
-func resolveAPIKey(cfg *config.UserConfig) string {
-	return resolveAPIKeyParts(cfg.LLM.APIKey, cfg.LLM.APIKeyEnv)
 }

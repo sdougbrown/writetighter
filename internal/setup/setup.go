@@ -198,26 +198,12 @@ func Run(ctx context.Context, opts Options) (*Result, error) {
 
 	fmt.Fprintf(opts.Out, "Preflighting model %s ...\n", model)
 	// Probe from most constrained to least; stop at the first mode the
-	// endpoint accepts.
-	probeOrder := []struct {
-		mode      string
-		nextLabel string
-	}{
-		{"json_schema", "json_object"},
-		{"json_object", "prompt-only JSON"},
-		{"prompt_json", ""},
-	}
-	var responseMode string
-	for i, step := range probeOrder {
-		if err := llm.ProbeMode(ctx, opts.HTTPClient, baseURL, model, apiKey, step.mode); err != nil {
-			if i == len(probeOrder)-1 {
-				return nil, fmt.Errorf("model preflight failed: %w", err)
-			}
-			fmt.Fprintf(opts.Out, "%s was not accepted (%v); trying %s.\n", step.mode, err, step.nextLabel)
-			continue
-		}
-		responseMode = step.mode
-		break
+	// endpoint accepts. The order lives with the probe implementation.
+	responseMode, preflightErr := llm.ProbeResponseModeWithProgress(ctx, opts.HTTPClient, baseURL, model, apiKey, func(mode string, modeErr error, next string) {
+		fmt.Fprintf(opts.Out, "%s was not accepted (%v); trying %s.\n", mode, modeErr, next)
+	})
+	if preflightErr != nil {
+		return nil, fmt.Errorf("model preflight failed: %w", preflightErr)
 	}
 
 	// Inform the user about auto-detected context capacity. The wizard does

@@ -11,12 +11,20 @@ import (
 	"strings"
 )
 
-// probeMaxResponse bounds a preflight response body.
-const probeMaxResponse = 1 << 20
+// maxResponseBytes bounds a JSON response body read through doJSON.
+const maxResponseBytes = 1 << 20
 
 // ProbeResponseMode probes the model for supported response modes and returns
 // the best available mode. It probes json_schema, json_object, then prompt_json.
+// ProbeResponseMode probes the model for supported response modes and returns
+// the first mode the endpoint accepts.
 func ProbeResponseMode(ctx context.Context, client *http.Client, baseURL, model, apiKey string) (string, error) {
+	return ProbeResponseModeWithProgress(ctx, client, baseURL, model, apiKey, nil)
+}
+
+// ProbeResponseModeWithProgress is ProbeResponseMode with a callback invoked
+// when a mode is rejected and the next one is tried.
+func ProbeResponseModeWithProgress(ctx context.Context, client *http.Client, baseURL, model, apiKey string, rejected func(mode string, err error, next string)) (string, error) {
 	probeOrder := []struct {
 		mode      string
 		nextLabel string
@@ -29,6 +37,9 @@ func ProbeResponseMode(ctx context.Context, client *http.Client, baseURL, model,
 		if err := probeMode(ctx, client, baseURL, model, apiKey, step.mode); err != nil {
 			if i == len(probeOrder)-1 {
 				return "", err
+			}
+			if rejected != nil {
+				rejected(step.mode, err, step.nextLabel)
 			}
 			continue
 		}
@@ -113,11 +124,11 @@ func doJSON(ctx context.Context, client *http.Client, method, endpoint, apiKey s
 		return nil, err
 	}
 	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, probeMaxResponse+1))
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, err
 	}
-	if len(body) > probeMaxResponse {
+	if len(body) > maxResponseBytes {
 		return nil, errors.New("preflight response is too large")
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
@@ -129,9 +140,4 @@ func doJSON(ctx context.Context, client *http.Client, method, endpoint, apiKey s
 		return nil, fmt.Errorf("HTTP %d: %s", response.StatusCode, message)
 	}
 	return body, nil
-}
-
-// ProbeMode probes one response mode against the endpoint.
-func ProbeMode(ctx context.Context, client *http.Client, baseURL, model, apiKey, responseMode string) error {
-	return probeMode(ctx, client, baseURL, model, apiKey, responseMode)
 }
