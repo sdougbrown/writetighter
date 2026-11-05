@@ -126,6 +126,41 @@ func buildCommands(stdout io.Writer) []*clicontract.Command {
 			},
 		},
 		{
+			Name:  "profile",
+			Short: "Manage profiles (install, list, verify)",
+			Subcommands: []*clicontract.Command{
+				{
+					Name:        "install",
+					Short:       "Install a profile bundle from a directory",
+					Positionals: []clicontract.Positional{{Name: "path", Required: true}},
+					Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
+						return handleProfileInstall(inv)
+					},
+				},
+				{
+					Name:  "list",
+					Short: "List embedded and installed profiles",
+					Flags: []clicontract.Flag{
+						{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json", Default: "human"},
+					},
+					Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
+						return handleProfileList(stdout, inv)
+					},
+				},
+				{
+					Name:        "verify",
+					Short:       "Verify a profile or bundle",
+					Positionals: []clicontract.Positional{{Name: "spec", Required: true}},
+					Flags: []clicontract.Flag{
+						{Name: "format", Kind: clicontract.String, Usage: "Output format: human, json", Default: "human"},
+					},
+					Handle: func(ctx context.Context, inv clicontract.Invocation, stderr io.Writer) (any, error) {
+						return handleProfileVerify(stdout, stderr, inv)
+					},
+				},
+			},
+		},
+		{
 			Name:  "prompt",
 			Short: "Export core and kind-specific revision guidance",
 			Flags: []clicontract.Flag{
@@ -238,6 +273,41 @@ func handleLint(stdout io.Writer, _ context.Context, inv clicontract.Invocation,
 	return lintResult{}, nil
 }
 
+// validProfileFormat keeps the pre-migration validation: only human and
+// json are accepted for profile subcommands.
+func validProfileFormat(format string) bool { return format == "human" || format == "json" }
+
+func handleProfileInstall(inv clicontract.Invocation) (any, error) {
+	if err := app.New().RunProfileInstall(inv.Args[0]); err != nil {
+		return nil, err
+	}
+	return profileResult{}, nil
+}
+
+func handleProfileList(stdout io.Writer, inv clicontract.Invocation) (any, error) {
+	format := inv.Flags["format"]
+	if !validProfileFormat(format) {
+		return nil, &clicontract.UsageError{Message: "invalid profile list arguments"}
+	}
+	if err := app.New().RunProfileListTo(stdout, format); err != nil {
+		return nil, err
+	}
+	return profileResult{}, nil
+}
+
+func handleProfileVerify(stdout, stderr io.Writer, inv clicontract.Invocation) (any, error) {
+	format := inv.Flags["format"]
+	if !validProfileFormat(format) {
+		return nil, &clicontract.UsageError{Message: "invalid profile verify arguments"}
+	}
+	if err := app.New().RunProfileVerifyTo(stdout, stderr, inv.Args[0], format); err != nil {
+		return nil, err
+	}
+	return profileResult{}, nil
+}
+
+type profileResult struct{}
+
 type explainResult struct{}
 
 func handleExplain(stdout io.Writer, inv clicontract.Invocation) (any, error) {
@@ -347,6 +417,10 @@ func (cliAdapter) ErrorResult(_ string, _ error) any { return failureResult{} }
 
 func (cliAdapter) Write(w io.Writer, result any) error {
 	switch r := result.(type) {
+	case profileResult:
+		// Profile output (if any) was written via the dispatch writers;
+		// nothing else to emit.
+		return nil
 	case explainResult:
 		// The rule description was written via the dispatch stdout writer;
 		// nothing else to emit.
