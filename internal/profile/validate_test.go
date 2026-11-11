@@ -282,8 +282,8 @@ func TestEmbeddedProfilePinnedManifestHashes(t *testing.T) {
 	}
 	// Expected payload hashes from the reviewed manifest for software-docs-en@0.7.0
 	const wantDictHash = "4b5a856516eb87d69f4fc6d27f9624b576e877247d34f610bed52eda724203b0"
-	const wantLexiconHash = "4e46776f38c7782ebdafe01f1893eae3d5c325741e18df05c6f6f6bc2153d92c"
-	const wantRulesHash = "661173dca0890cc061082576984d0789ea8a5f9ba88bc51fac6064851828d20d"
+	const wantLexiconHash = "ac5b3c82d4a9f27bee63f1adb3fa66eb98143b83a8216ce3021cba4a78d749ea"
+	const wantRulesHash = "7b87cf5f67dd10a4a597e46386e74246f612cb8cf3e90b863eb2edb9bd9a1c1c"
 
 	if got := res.Manifest.PayloadSHA256("dictionary"); got != wantDictHash {
 		t.Errorf("dictionary hash:\n  got:  %s\n  want: %s", got, wantDictHash)

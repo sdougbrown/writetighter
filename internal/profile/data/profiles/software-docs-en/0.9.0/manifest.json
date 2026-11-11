@@ -1,0 +1,63 @@
+{
+  "claims": {
+    "certification": "none",
+    "issue": null,
+    "standard": null
+  },
+  "display_name": "Software Documentation English",
+  "format_version": 3,
+  "id": "software-docs-en",
+  "language": "en",
+  "license": {
+    "spdx": "LicenseRef-Private-Research"
+  },
+  "payloads": {
+    "dictionary": {
+      "sha256": "4b5a856516eb87d69f4fc6d27f9624b576e877247d34f610bed52eda724203b0"
+    },
+    "lexicon.json": {
+      "sha256": "ac5b3c82d4a9f27bee63f1adb3fa66eb98143b83a8216ce3021cba4a78d749ea"
+    },
+    "rules.json": {
+      "sha256": "7b87cf5f67dd10a4a597e46386e74246f612cb8cf3e90b863eb2edb9bd9a1c1c"
+    }
+  },
+  "provenance": [
+    {
+      "license": "LicenseRef-Private-Research",
+      "name": "software-dictionary",
+      "release": "fc39cfb0330d52562cecd28c3e248184c032e527",
+      "source_url": "https://github.com/sdougbrown/software-dictionary"
+    },
+    {
+      "license": "CC0-1.0",
+      "name": "plainlanguage.gov",
+      "release": "fd7694740f19c0ed20ed71c2dd1dc92699e920fa",
+      "source_url": "https://github.com/GSA/plainlanguage.gov"
+    },
+    {
+      "license": "MIT",
+      "name": "no-ai-slop",
+      "release": "61c21c351da4dcb40946a11fead978f2078a2c65",
+      "source_url": "https://github.com/petergyang/no-ai-slop"
+    },
+    {
+      "license": "MIT",
+      "name": "SimpleEnglish",
+      "release": "379728b51981b6d2ee1de0f201164483a9648972",
+      "source_url": "https://github.com/AminBlg/SimpleEnglish"
+    },
+    {
+      "license": "CC-BY-4.0",
+      "name": "google-developer-style-guide",
+      "release": "snapshot-2026-08-18",
+      "source_url": "https://developers.google.com/style"
+    }
+  ],
+  "supported_kinds": [
+    "description",
+    "procedure",
+    "pr"
+  ],
+  "version": "0.9.0"
+}
