@@ -171,6 +171,9 @@ func TestLexicalTokensBareURL(t *testing.T) {
 		{"(see https://example.com.)", []string{"see", "https://example.com"}},
 		{"1.2://x is not a URL", []string{"1.2", "x", "is", "not", "a", "URL"}},
 		{"https://", []string{"https"}},
+		{"ab@://x", []string{"ab", "x"}},
+		{"a://x now", []string{"a", "x", "now"}},
+		{"Visit https://example.com:8080/path now", []string{"Visit", "https://example.com:8080/path", "now"}},
 	}
 	for _, tc := range tests {
 		got := lexicalTokens(tc.input)
