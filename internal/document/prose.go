@@ -772,6 +772,13 @@ func lexicalTokens(s string) []string {
 			i++
 			continue
 		}
+		// A bare URL with an explicit scheme is one token, not its path
+		// segments.
+		if end := urlEnd(runes, i); end > i {
+			tokens = append(tokens, string(runes[i:end]))
+			i = end
+			continue
+		}
 		start := i
 		i++
 		for i < n {
@@ -813,4 +820,44 @@ func lexicalTokens(s string) []string {
 
 func isWordRuneStart(r rune) bool {
 	return unicode.IsLetter(r) || unicode.IsDigit(r)
+}
+
+// urlEnd returns the exclusive end index of a bare URL starting at runes[i],
+// or 0 when the token at i is not a scheme-qualified URL (scheme://...).
+// Trailing prose punctuation (".", ",", closing brackets) is excluded so a
+// URL at the end of a sentence stays a single token.
+func urlEnd(runes []rune, i int) int {
+	j := i
+	for j < len(runes) && runes[j] != ':' && !unicode.IsSpace(runes[j]) {
+		r := runes[j]
+		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '+' && r != '-' && r != '.' {
+			return 0
+		}
+		j++
+	}
+	if j == i || j+2 >= len(runes) || runes[j] != ':' || runes[j+1] != '/' || runes[j+2] != '/' {
+		return 0
+	}
+	if !isURIScheme(string(runes[i:j])) {
+		return 0
+	}
+	// Consume the rest of the URL up to whitespace.
+	end := j
+	for end < len(runes) && !unicode.IsSpace(runes[end]) {
+		end++
+	}
+	for end > i {
+		r := runes[end-1]
+		if r == '.' || r == ',' || r == ';' || r == ':' || r == '!' || r == '?' ||
+			r == ')' || r == ']' || r == '}' || r == '>' || r == '"' || r == '\'' {
+			end--
+			continue
+		}
+		break
+	}
+	// Require at least one character beyond "://" so "https://" is not a URL.
+	if end <= j+3 {
+		return 0
+	}
+	return end
 }

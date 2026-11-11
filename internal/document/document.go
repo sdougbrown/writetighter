@@ -636,11 +636,19 @@ func isAutolinkDestination(inner string) bool {
 	if at := strings.IndexByte(inner, '@'); at > 0 && at < len(inner)-1 {
 		return true
 	}
-	colon := strings.IndexByte(inner, ':')
-	if colon < 2 || colon > 32 || !unicode.IsLetter(rune(inner[0])) {
+	if colon := strings.IndexByte(inner, ':'); colon == -1 || !isURIScheme(inner[:colon]) {
 		return false
 	}
-	for _, r := range inner[1:colon] {
+	return true
+}
+
+// isURIScheme reports whether s matches the RFC 3986 scheme grammar,
+// with the autolink classifier's 2..32 length bounds.
+func isURIScheme(s string) bool {
+	if len(s) < 2 || len(s) > 32 || !unicode.IsLetter(rune(s[0])) {
+		return false
+	}
+	for _, r := range s[1:] {
 		if !unicode.IsLetter(r) && !unicode.IsDigit(r) && r != '+' && r != '.' && r != '-' {
 			return false
 		}

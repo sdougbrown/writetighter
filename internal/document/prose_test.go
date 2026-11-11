@@ -140,6 +140,81 @@ func TestCountLexicalWordsPathLike(t *testing.T) {
 	}
 }
 
+func TestCountLexicalWordsURLs(t *testing.T) {
+	tests := []struct {
+		input string
+		want  int
+	}{
+		{"See https://github.com/afresh-technologies/afresh-app-api/pull/8480 for details.", 4},
+		{"Visit http://example.com/path?q=1&x=2.", 2},
+		{"https://example.com.", 1},
+		{"(see https://example.com/x)", 2},
+		{"go to https://example.com/x, then stop", 5},
+	}
+	for _, tc := range tests {
+		got := CountLexicalWords(tc.input)
+		if got != tc.want {
+			t.Errorf("CountLexicalWords(%q) = %d, want %d", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestLexicalTokensBareURL(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected []string
+	}{
+		{"https://github.com/afresh-technologies/afresh-app-api/pull/8480", []string{"https://github.com/afresh-technologies/afresh-app-api/pull/8480"}},
+		{"Visit https://example.com/x, then stop", []string{"Visit", "https://example.com/x", "then", "stop"}},
+		{"(see http://example.com/x)", []string{"see", "http://example.com/x"}},
+		{"(see HTTPS://Example.com/X.)", []string{"see", "HTTPS://Example.com/X"}},
+		{"(see https://example.com.)", []string{"see", "https://example.com"}},
+		{"1.2://x is not a URL", []string{"1.2", "x", "is", "not", "a", "URL"}},
+		{"https://", []string{"https"}},
+		{"ab@://x", []string{"ab", "x"}},
+		{"a://x now", []string{"a", "x", "now"}},
+		{"Visit https://example.com:8080/path now", []string{"Visit", "https://example.com:8080/path", "now"}},
+	}
+	for _, tc := range tests {
+		got := lexicalTokens(tc.input)
+		if len(got) != len(tc.expected) {
+			t.Errorf("lexicalTokens(%q) = %v, want %v", tc.input, got, tc.expected)
+			continue
+		}
+		for i := range got {
+			if got[i] != tc.expected[i] {
+				t.Errorf("lexicalTokens(%q)[%d] = %q, want %q", tc.input, i, got[i], tc.expected[i])
+			}
+		}
+	}
+}
+
+// Issue #24: CORE.SENTENCE_LENGTH must not tokenize URL path segments as
+// words. A markdown link contributes its anchor text; a bare URL is one token.
+func TestSentenceWordCountLinksAndURLs(t *testing.T) {
+	text := "**Companion PR: [app-api#8480](https://github.com/afresh-technologies/afresh-app-api/pull/8480) — must merge and deploy to staging first.**"
+	doc := testDoc(text)
+	blocks := AnalyzeProse(doc)
+	sentences := SentenceUnits(blocks[0], doc.Content)
+	if len(sentences) != 1 {
+		t.Fatalf("expected 1 sentence, got %d", len(sentences))
+	}
+	if s := sentences[0]; s.WordCount != 11 {
+		t.Errorf("markdown link sentence: WordCount = %d, want 11 (anchor text only)", s.WordCount)
+	}
+
+	text = "Companion PR https://github.com/afresh-technologies/afresh-app-api/pull/8480 must merge and deploy to staging first."
+	doc = testDoc(text)
+	blocks = AnalyzeProse(doc)
+	sentences = SentenceUnits(blocks[0], doc.Content)
+	if len(sentences) != 1 {
+		t.Fatalf("expected 1 sentence, got %d", len(sentences))
+	}
+	if s := sentences[0]; s.WordCount != 10 {
+		t.Errorf("bare URL sentence: WordCount = %d, want 10 (URL as one token)", s.WordCount)
+	}
+}
+
 func TestCountLexicalWordsMarkersAreNotWords(t *testing.T) {
 	tests := []struct {
 		text string
