@@ -827,11 +827,6 @@ func isWordRuneStart(r rune) bool {
 // Trailing prose punctuation (".", ",", closing brackets) is excluded so a
 // URL at the end of a sentence stays a single token.
 func urlEnd(runes []rune, i int) int {
-	// URI schemes start with a letter (RFC 3986); reject "3://x".
-	if !unicode.IsLetter(runes[i]) {
-		return 0
-	}
-	// Scan the scheme: letters, digits, and +/-/. up to the first "://".
 	j := i
 	for j < len(runes) && runes[j] != ':' && !unicode.IsSpace(runes[j]) {
 		r := runes[j]
@@ -841,6 +836,9 @@ func urlEnd(runes []rune, i int) int {
 		j++
 	}
 	if j == i || j+2 >= len(runes) || runes[j] != ':' || runes[j+1] != '/' || runes[j+2] != '/' {
+		return 0
+	}
+	if !isURIScheme(string(runes[i:j])) {
 		return 0
 	}
 	// Consume the rest of the URL up to whitespace.
