@@ -362,7 +362,7 @@ func TestProfileCommands(t *testing.T) {
 		t.Fatalf("expected human profile list, got: %s", humanOut)
 	}
 
-	if got := run([]string{"profile", "verify", "software-docs-en@0.6.0", "--format", "json"}); got != 0 {
+	if got := run([]string{"profile", "verify", "software-docs-en@0.7.0", "--format", "json"}); got != 0 {
 		t.Fatalf("expected exit 0 verifying embedded profile, got %d", got)
 	}
 	if got := run([]string{"profile", "verify", "nonexistent@0.0.0"}); got != 2 {
@@ -376,7 +376,7 @@ func TestProfileVerifyHumanStderr(t *testing.T) {
 	t.Setenv("HOME", root)
 	t.Setenv("XDG_DATA_HOME", root)
 	_, errOut := captureStdoutStderr(t, func() {
-		if got := run([]string{"profile", "verify", "software-docs-en@0.6.0"}); got != 0 {
+		if got := run([]string{"profile", "verify", "software-docs-en@0.7.0"}); got != 0 {
 			t.Fatalf("expected exit 0, got %d", got)
 		}
 	})
@@ -459,7 +459,7 @@ func TestProfileSubcommandValidation(t *testing.T) {
 		{"profile", "bogus"},
 		{"profile", "install"},
 		{"profile", "list", "--format", "yaml"},
-		{"profile", "verify", "software-docs-en@0.6.0", "--format", "yaml"},
+		{"profile", "verify", "software-docs-en@0.7.0", "--format", "yaml"},
 	} {
 		if got := run(args); got != 2 {
 			t.Fatalf("%v: expected exit 2, got %d", args, got)
