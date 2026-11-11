@@ -167,6 +167,10 @@ func TestLexicalTokensBareURL(t *testing.T) {
 		{"https://github.com/afresh-technologies/afresh-app-api/pull/8480", []string{"https://github.com/afresh-technologies/afresh-app-api/pull/8480"}},
 		{"Visit https://example.com/x, then stop", []string{"Visit", "https://example.com/x", "then", "stop"}},
 		{"(see http://example.com/x)", []string{"see", "http://example.com/x"}},
+		{"(see HTTPS://Example.com/X.)", []string{"see", "HTTPS://Example.com/X"}},
+		{"(see https://example.com.)", []string{"see", "https://example.com"}},
+		{"1.2://x is not a URL", []string{"1.2", "x", "is", "not", "a", "URL"}},
+		{"https://", []string{"https"}},
 	}
 	for _, tc := range tests {
 		got := lexicalTokens(tc.input)
