@@ -62,16 +62,16 @@ func copyBundle(src, dst string, r *Resolution) error {
 	}
 	files := []string{"manifest.json", "rules.json"}
 	if r.Manifest.FormatVersion >= 3 {
-		files = append(files, "lexicon.json", "dictionary.json")
-	} else {
-		files = append(files, "dictionary.json")
+		files = append(files, "lexicon.json")
 	}
+	files = append(files, "dictionary.json")
 	for _, n := range files {
 		var b []byte
 		var err error
-		if n == "dictionary.json" && r.Manifest.FormatVersion >= 3 {
-			// Resolved bytes, not a source file: hash-pinned in the manifest.
-			b, err = resolveDictionaryForInstall(r)
+		if n == "dictionary.json" {
+			// Resolved bytes from the validated resolution — the same bytes
+			// LoadBundle just checked against the manifest pin.
+			b = r.dictBytes
 		} else {
 			b, err = os.ReadFile(filepath.Join(src, n))
 		}
@@ -83,24 +83,6 @@ func copyBundle(src, dst string, r *Resolution) error {
 		}
 	}
 	return nil
-}
-
-// resolveDictionaryForInstall re-resolves the content-addressed dictionary
-// for an already-validated resolution. It reads the materialized copy when
-// present and otherwise falls back to the embedded store, mirroring
-// LoadBundle's resolution order.
-func resolveDictionaryForInstall(r *Resolution) ([]byte, error) {
-	if r.Source != "" {
-		if b, err := os.ReadFile(filepath.Join(r.Source, "dictionary.json")); err == nil {
-			return b, nil
-		}
-	}
-	sha := r.Manifest.PayloadSHA256(r.Manifest.DictionaryPayloadName())
-	b, err := resolveEmbeddedDictionary(sha)
-	if err != nil {
-		return nil, fmt.Errorf("resolving dictionary for install: %w", err)
-	}
-	return b, nil
 }
 
 func profileConflictErr(id, version string) error {

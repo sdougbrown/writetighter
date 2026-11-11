@@ -1,6 +1,7 @@
 package profile
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -35,6 +36,14 @@ func TestFormatThreeBundleLoadsInPlace(t *testing.T) {
 	}
 	if res.Dict.Lookup("a lot of") == nil {
 		t.Fatal("expected dictionary entries in merged view")
+	}
+	// Every curated layer must survive the merge: a missed field in the
+	// merge would silently drop the layer with no error.
+	if res.Dict.BannedModalSuggestions["should"] == "" {
+		t.Fatal("expected banned-modal suggestions in merged dictionary view")
+	}
+	if res.Dict.BannedLatinAbbrevSuggestions["e.g."] == "" {
+		t.Fatal("expected latin-abbrev suggestions in merged dictionary view")
 	}
 }
 
@@ -124,6 +133,104 @@ func TestFormatThreeBundleUnresolvableDictionaryRejected(t *testing.T) {
 	_, err := LoadBundle(dir)
 	if err == nil || !strings.Contains(err.Error(), "no embedded dictionary matches") {
 		t.Fatalf("expected unresolvable dictionary rejection, got: %v", err)
+	}
+}
+
+func TestFormatTwoInstallStillWorks(t *testing.T) {
+	dataRoot := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataRoot)
+	src := releaseDir(t)
+
+	// Build a format-2 bundle: the corpus-derived dictionary carried inline
+	// as dictionary.json, no lexicon, payload pins keyed by file name.
+	var m Manifest
+	if err := json.Unmarshal(mustRead(t, src, "manifest.json"), &m); err != nil {
+		t.Fatal(err)
+	}
+	m.FormatVersion = 2
+	m.Version = "9.9.8"
+	dictBytes, err := resolveEmbeddedDictionary(m.PayloadSHA256("dictionary"))
+	if err != nil {
+		t.Fatalf("resolving dictionary: %v", err)
+	}
+	rulesBytes := mustRead(t, src, "rules.json")
+	m.Payloads = Payloads{
+		"dictionary.json": {SHA256: SHA256Bytes(dictBytes)},
+		"rules.json":      {SHA256: SHA256Bytes(rulesBytes)},
+	}
+	manifestBytes, err := json.Marshal(m)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := filepath.Join(dataRoot, "fixture")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for name, b := range map[string][]byte{
+		"manifest.json":   manifestBytes,
+		"rules.json":      rulesBytes,
+		"dictionary.json": dictBytes,
+	} {
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := InstallBundle(dir); err != nil {
+		t.Fatalf("format-2 install failed: %v", err)
+	}
+	installed := filepath.Join(profileRoot(), "software-docs-en", "9.9.8")
+	if _, err := os.Stat(filepath.Join(installed, "dictionary.json")); err != nil {
+		t.Fatal("expected dictionary.json in installed format-2 bundle")
+	}
+	if _, err := LoadBundle(installed); err != nil {
+		t.Fatalf("installed format-2 bundle failed to load: %v", err)
+	}
+}
+
+func mustRead(t *testing.T, dir, name string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join(dir, name))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
+}
+
+func TestFormatThreeBundleMissingPayloadHashRejected(t *testing.T) {
+	src := releaseDir(t)
+	dir := t.TempDir()
+	for _, name := range []string{"rules.json", "lexicon.json"} {
+		b, err := os.ReadFile(filepath.Join(src, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Manifest whose payloads omit the lexicon.json entry entirely.
+	manifest := `{
+  "claims": {"certification": "none", "issue": null, "standard": null},
+  "display_name": "Software Documentation English",
+  "format_version": 3,
+  "id": "software-docs-en",
+  "language": "en",
+  "license": {"spdx": "LicenseRef-Private-Research"},
+  "payloads": {
+    "dictionary": {"sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+    "rules.json": {"sha256": "y"}
+  },
+  "provenance": [{"license": "MIT", "name": "x", "release": "1", "source_url": "https://example.com"}],
+  "supported_kinds": ["description"],
+  "version": "9.9.9"
+}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadBundle(dir)
+	if err == nil || !strings.Contains(err.Error(), `manifest missing payload hash for "lexicon.json"`) {
+		t.Fatalf("expected missing payload hash rejection, got: %v", err)
 	}
 }
 

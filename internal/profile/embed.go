@@ -14,7 +14,7 @@ var embeddedFiles embed.FS
 const embeddedReleaseDir = "data/profiles/software-docs-en/0.7.0"
 
 func loadEmbeddedBundle() (*Resolution, error) {
-	m, err := embeddedFiles.ReadFile(embeddedReleaseDir + "/manifest.json")
+	mBytes, err := embeddedFiles.ReadFile(embeddedReleaseDir + "/manifest.json")
 	if err != nil {
 		return nil, fmt.Errorf("reading embedded manifest: %w", err)
 	}
@@ -26,7 +26,11 @@ func loadEmbeddedBundle() (*Resolution, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading embedded rules: %w", err)
 	}
-	return assembleBundle("embedded", m, l, r, nil, resolveEmbeddedDictionary)
+	m, err := parseManifest(mBytes)
+	if err != nil {
+		return nil, fmt.Errorf("parsing embedded manifest: %w", err)
+	}
+	return assembleBundle("embedded", m, mBytes, l, r, nil, resolveEmbeddedDictionary)
 }
 
 // resolveEmbeddedDictionary finds the content-addressed dictionary whose

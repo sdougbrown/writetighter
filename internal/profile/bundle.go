@@ -50,18 +50,14 @@ func LoadBundle(dir string) (*Resolution, error) {
 		return nil, fmt.Errorf("unsupported manifest format_version %d", m.FormatVersion)
 	}
 
-	return assembleBundle(dir, manifestBytes, lexiconBytes, rulesBytes, dictBytes, resolveEmbeddedDictionary)
+	return assembleBundle(dir, m, manifestBytes, lexiconBytes, rulesBytes, dictBytes, resolveEmbeddedDictionary)
 }
 
 // assembleBundle validates and assembles a bundle from its payload bytes.
 // The manifest pins every payload by sha256. The dictionary arrives inline
 // (format 1/2) or is resolved from the content-addressed store by the caller
 // (format 3, dictBytes nil + resolver).
-func assembleBundle(source string, manifestBytes, lexiconBytes, rulesBytes, dictBytes []byte, resolveDict func(sha string) ([]byte, error)) (*Resolution, error) {
-	m, err := parseManifest(manifestBytes)
-	if err != nil {
-		return nil, fmt.Errorf("parsing manifest: %w", err)
-	}
+func assembleBundle(source string, m *Manifest, manifestBytes, lexiconBytes, rulesBytes, dictBytes []byte, resolveDict func(sha string) ([]byte, error)) (*Resolution, error) {
 	r, err := parseRules(rulesBytes)
 	if err != nil {
 		return nil, fmt.Errorf("parsing rules: %w", err)
@@ -147,7 +143,7 @@ func assembleBundle(source string, manifestBytes, lexiconBytes, rulesBytes, dict
 	// dictionary, lexicon, rules); empty slices are skipped so format 1/2
 	// bundles hash exactly as they did before format 3 existed.
 	sha := SHA256Bytes(concat(manifestBytes, dictBytes, lexiconBytes, rulesBytes))
-	return &Resolution{ID: ProfileID(m.ID), Version: Version(m.Version), SHA256: sha, Source: source, Manifest: m, Dict: d, Rules: r}, nil
+	return &Resolution{ID: ProfileID(m.ID), Version: Version(m.Version), SHA256: sha, Source: source, Manifest: m, dictBytes: dictBytes, Dict: d, Rules: r}, nil
 }
 
 func concat(slices ...[]byte) []byte {
