@@ -25,7 +25,7 @@ findings report; exit code tells CI whether the threshold was reached.
 ```sh
 export XDG_CONFIG_HOME="$WT/cfg"
 # Findings + threshold exit code. The sentence must exceed the kind's limit
-# (description: 25 words in profile 0.6.0) to trip CORE.SENTENCE_LENGTH:
+# (description: 25 words in profile 0.7.0) to trip CORE.SENTENCE_LENGTH:
 printf 'This single overly long demonstration sentence deliberately packs far more words than the description profile permits because it keeps going well past the twenty-five word threshold with clause after clause appended.\n' > "$WT/fixture.md"
 "$WT/writetighter" lint "$WT/fixture.md" --kind description --format json --fail-on warning > "$WT/out.json"
 echo exit=$?   # expect 1

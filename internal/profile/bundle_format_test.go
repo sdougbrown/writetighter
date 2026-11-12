@@ -47,18 +47,21 @@ func TestFormatThreeBundleLoadsInPlace(t *testing.T) {
 	}
 }
 
-func TestFormatThreeBundleTamperedLexiconRejected(t *testing.T) {
+// copyRelease copies named payload files from the embedded release fixture
+// into dst, giving each tamper test a fresh format-3 directory.
+func copyRelease(t *testing.T, dst string, names ...string) {
+	t.Helper()
 	src := releaseDir(t)
-	dir := t.TempDir()
-	for _, name := range []string{"manifest.json", "rules.json", "lexicon.json"} {
-		b, err := os.ReadFile(filepath.Join(src, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
+	for _, name := range names {
+		if err := os.WriteFile(filepath.Join(dst, name), mustRead(t, src, name), 0o644); err != nil {
 			t.Fatal(err)
 		}
 	}
+}
+
+func TestFormatThreeBundleTamperedLexiconRejected(t *testing.T) {
+	dir := t.TempDir()
+	copyRelease(t, dir, "manifest.json", "rules.json", "lexicon.json")
 	lexPath := filepath.Join(dir, "lexicon.json")
 	b, _ := os.ReadFile(lexPath)
 	if err := os.WriteFile(lexPath, append(b, []byte("\n")...), 0o644); err != nil {
@@ -71,17 +74,8 @@ func TestFormatThreeBundleTamperedLexiconRejected(t *testing.T) {
 }
 
 func TestFormatThreeBundleUnknownPayloadRejected(t *testing.T) {
-	src := releaseDir(t)
 	dir := t.TempDir()
-	for _, name := range []string{"manifest.json", "rules.json", "lexicon.json"} {
-		b, err := os.ReadFile(filepath.Join(src, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	copyRelease(t, dir, "manifest.json", "rules.json", "lexicon.json")
 	manifestPath := filepath.Join(dir, "manifest.json")
 	b, _ := os.ReadFile(manifestPath)
 	tampered := strings.Replace(string(b),
@@ -99,17 +93,8 @@ func TestFormatThreeBundleUnknownPayloadRejected(t *testing.T) {
 }
 
 func TestFormatThreeBundleUnresolvableDictionaryRejected(t *testing.T) {
-	src := releaseDir(t)
 	dir := t.TempDir()
-	for _, name := range []string{"rules.json", "lexicon.json"} {
-		b, err := os.ReadFile(filepath.Join(src, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	copyRelease(t, dir, "rules.json", "lexicon.json")
 	// Manifest with a dictionary hash that matches nothing in the store.
 	manifest := `{
   "claims": {"certification": "none", "issue": null, "standard": null},
@@ -140,13 +125,8 @@ func TestFormatThreeBundleUnreadableMaterializedDictionaryRejected(t *testing.T)
 	// A format-3 source whose materialized dictionary.json cannot be read
 	// (here: it is a directory) must fail loudly instead of silently
 	// resolving from the embedded store.
-	src := releaseDir(t)
 	dir := t.TempDir()
-	for _, name := range []string{"manifest.json", "rules.json", "lexicon.json"} {
-		if err := os.WriteFile(filepath.Join(dir, name), mustRead(t, src, name), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	copyRelease(t, dir, "manifest.json", "rules.json", "lexicon.json")
 	if err := os.Mkdir(filepath.Join(dir, "dictionary.json"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -159,18 +139,13 @@ func TestFormatThreeBundleUnreadableMaterializedDictionaryRejected(t *testing.T)
 func TestFormatThreeBundleTamperedMaterializedDictionaryRejected(t *testing.T) {
 	dataRoot := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataRoot)
-	src := releaseDir(t)
 	fixture := filepath.Join(dataRoot, "fixture")
 	if err := os.MkdirAll(fixture, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"manifest.json", "rules.json", "lexicon.json"} {
-		if err := os.WriteFile(filepath.Join(fixture, name), mustRead(t, src, name), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	copyRelease(t, fixture, "manifest.json", "rules.json", "lexicon.json")
 	manifestPath := filepath.Join(fixture, "manifest.json")
-	if err := os.WriteFile(manifestPath, []byte(strings.Replace(string(mustRead(t, src, "manifest.json")), `"version": "0.7.0"`, `"version": "9.9.7"`, 1)), 0o644); err != nil {
+	if err := os.WriteFile(manifestPath, []byte(strings.Replace(string(mustRead(t, fixture, "manifest.json")), `"version": "0.7.0"`, `"version": "9.9.7"`, 1)), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := InstallBundle(fixture); err != nil {
@@ -287,17 +262,8 @@ func mustRead(t *testing.T, dir, name string) []byte {
 }
 
 func TestFormatThreeBundleMissingPayloadHashRejected(t *testing.T) {
-	src := releaseDir(t)
 	dir := t.TempDir()
-	for _, name := range []string{"rules.json", "lexicon.json"} {
-		b, err := os.ReadFile(filepath.Join(src, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(dir, name), b, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	copyRelease(t, dir, "rules.json", "lexicon.json")
 	// Manifest whose payloads omit the lexicon.json entry entirely.
 	manifest := `{
   "claims": {"certification": "none", "issue": null, "standard": null},
@@ -323,25 +289,52 @@ func TestFormatThreeBundleMissingPayloadHashRejected(t *testing.T) {
 	}
 }
 
+func TestFormatThreeBundleMissingDictionaryHashReportedOnce(t *testing.T) {
+	dir := t.TempDir()
+	copyRelease(t, dir, "rules.json", "lexicon.json")
+	// Manifest whose payloads omit the dictionary entry entirely:
+	// validatePayloads owns the missing-hash error, so the joined error
+	// must carry it exactly once and must not mention the resolver.
+	manifest := `{
+  "claims": {"certification": "none", "issue": null, "standard": null},
+  "display_name": "Software Documentation English",
+  "format_version": 3,
+  "id": "software-docs-en",
+  "language": "en",
+  "license": {"spdx": "LicenseRef-Private-Research"},
+  "payloads": {
+    "lexicon.json": {"sha256": "x"},
+    "rules.json": {"sha256": "y"}
+  },
+  "provenance": [{"license": "MIT", "name": "x", "release": "1", "source_url": "https://example.com"}],
+  "supported_kinds": ["description"],
+  "version": "9.9.9"
+}`
+	if err := os.WriteFile(filepath.Join(dir, "manifest.json"), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadBundle(dir)
+	if err == nil {
+		t.Fatal("expected missing dictionary hash rejection")
+	}
+	if got := strings.Count(err.Error(), `manifest missing payload hash for "dictionary"`); got != 1 {
+		t.Fatalf("expected missing dictionary hash message exactly once, got %d: %v", got, err)
+	}
+	if strings.Contains(err.Error(), "no embedded dictionary matches") {
+		t.Fatalf("resolver must not run without a hash, got: %v", err)
+	}
+}
+
 func TestFormatThreeInstallMaterializesDictionary(t *testing.T) {
 	dataRoot := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataRoot)
 	// Copy the release and re-version it so install does not hit the
 	// embedded-equivalence no-op: the point is the materialization path.
-	src := releaseDir(t)
 	fixture := filepath.Join(dataRoot, "fixture")
 	if err := os.MkdirAll(fixture, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	for _, name := range []string{"manifest.json", "rules.json", "lexicon.json"} {
-		b, err := os.ReadFile(filepath.Join(src, name))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(fixture, name), b, 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
+	copyRelease(t, fixture, "manifest.json", "rules.json", "lexicon.json")
 	manifestPath := filepath.Join(fixture, "manifest.json")
 	b, _ := os.ReadFile(manifestPath)
 	if err := os.WriteFile(manifestPath, []byte(strings.Replace(string(b), `"version": "0.7.0"`, `"version": "9.9.9"`, 1)), 0o644); err != nil {

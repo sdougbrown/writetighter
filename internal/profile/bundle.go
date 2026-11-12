@@ -74,18 +74,19 @@ func assembleBundle(source string, m *Manifest, manifestBytes, lexiconBytes, rul
 	}
 
 	// Resolve the dictionary payload for format 3 when the caller did not
-	// hand us bytes.
+	// hand us bytes. A missing payload hash is reported by
+	// Manifest.validatePayloads below; here it just skips resolution.
 	dictName := m.DictionaryPayloadName()
 	if dictBytes == nil && m.FormatVersion >= 3 {
 		sha := m.PayloadSHA256(dictName)
-		if sha == "" {
-			errs = append(errs, fmt.Errorf("manifest missing payload hash for %q", dictName))
-		} else if resolveDict == nil {
-			errs = append(errs, fmt.Errorf("no dictionary resolver available for %q", dictName))
-		} else {
-			dictBytes, err = resolveDict(sha)
-			if err != nil {
-				errs = append(errs, err)
+		if sha != "" {
+			if resolveDict == nil {
+				errs = append(errs, fmt.Errorf("no dictionary resolver available for %q", dictName))
+			} else {
+				dictBytes, err = resolveDict(sha)
+				if err != nil {
+					errs = append(errs, err)
+				}
 			}
 		}
 	}
