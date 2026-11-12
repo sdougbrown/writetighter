@@ -129,8 +129,10 @@ func (m *Manifest) Validate() error {
 
 // bundleLayout owns the file layout of each manifest format version: the
 // payloads the manifest must pin, the files a release directory carries,
-// and the files install materializes from resolved bytes. Adding a format
-// version or renaming a payload edits this table and nothing else.
+// and the files install materializes from resolved bytes. LoadBundle binds
+// these names to their roles (rules/lexicon/dictionary) and rejects any
+// name it cannot bind or validate, so a rename must touch both this table
+// and those bindings — and a mismatch fails loudly, never silently.
 type bundleLayout struct {
 	requiredPayloads []string
 	releaseFiles     []string

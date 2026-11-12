@@ -27,17 +27,21 @@ func LoadBundle(dir string) (*Resolution, error) {
 		return nil, fmt.Errorf("unsupported manifest format_version %d", m.FormatVersion)
 	}
 	var rulesBytes, lexiconBytes, dictBytes []byte
-	slots := map[string]*[]byte{
-		"rules.json":      &rulesBytes,
-		"lexicon.json":    &lexiconBytes,
-		"dictionary.json": &dictBytes,
-	}
 	for _, name := range layout.releaseFiles {
 		b, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
 			return nil, fmt.Errorf("reading %s: %w", name, err)
 		}
-		*slots[name] = b
+		switch name {
+		case "rules.json":
+			rulesBytes = b
+		case "lexicon.json":
+			lexiconBytes = b
+		case "dictionary.json":
+			dictBytes = b
+		default:
+			return nil, fmt.Errorf("release layout names unhandled file %q", name)
+		}
 	}
 	if len(layout.materialized) > 0 {
 		// The corpus-derived dictionary is content-addressed. A materialized
@@ -130,10 +134,15 @@ func assembleBundle(source string, m *Manifest, manifestBytes, lexiconBytes, rul
 		if bytes == nil {
 			return
 		}
-		if want := m.PayloadSHA256(name); want != "" {
-			if got := SHA256Bytes(bytes); got != want {
-				errs = append(errs, fmt.Errorf("%s hash mismatch: got %s want %s", name, got, want))
-			}
+		want := m.PayloadSHA256(name)
+		if want == "" {
+			// Bytes were read but the manifest pins no hash for them:
+			// fail loudly rather than silently skipping validation.
+			errs = append(errs, fmt.Errorf("%s was read but is not pinned in the manifest", name))
+			return
+		}
+		if got := SHA256Bytes(bytes); got != want {
+			errs = append(errs, fmt.Errorf("%s hash mismatch: got %s want %s", name, got, want))
 		}
 	}
 	checkHash("rules.json", rulesBytes)

@@ -287,6 +287,11 @@ func TestFormatThreeBundleMissingPayloadHashRejected(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), `manifest missing payload hash for "lexicon.json"`) {
 		t.Fatalf("expected missing payload hash rejection, got: %v", err)
 	}
+	// The lexicon bytes were read from the release directory, so their
+	// absence from the manifest must be reported loudly, not skipped.
+	if !strings.Contains(err.Error(), `lexicon.json was read but is not pinned in the manifest`) {
+		t.Fatalf("expected unpinned lexicon rejection, got: %v", err)
+	}
 }
 
 func TestFormatThreeBundleMissingDictionaryHashReportedOnce(t *testing.T) {
