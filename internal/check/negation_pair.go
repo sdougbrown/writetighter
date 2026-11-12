@@ -48,8 +48,10 @@ func (negationPairChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 	blocks := document.AnalyzeProse(ctx.Document)
 	var out []report.Finding
 	for _, block := range blocks {
-		// Skip list items, headings, and blockquotes: the tic is a prose
-		// move, and quoted or enumerated contrasts are legitimate.
+		// Skip marked blocks (list items, headings, blockquotes): the tic is a
+		// prose move, and quoted or enumerated contrasts are legitimate. The
+		// exclusion keys on Markdown markers only — HTML blockquote/li/td text
+		// reaches the checker markerless, like in the sibling checkers.
 		if block.Marker != "" {
 			continue
 		}
@@ -57,6 +59,11 @@ func (negationPairChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 		for i := 0; i+1 < len(sentences); i++ {
 			s1, s2 := sentences[i], sentences[i+1]
 			if !isNegationSetup(s1.Text) || !isPositiveRestatement(s2.Text) {
+				continue
+			}
+			// The tic restates with the same pronoun; different pronouns read
+			// as two separate observations, not a setup/restatement pair.
+			if negationPairSubject(s1.Text) != negationPairSubject(s2.Text) {
 				continue
 			}
 			// Quotes are not marked by the sentence splitter, so any
@@ -96,6 +103,17 @@ func (negationPairChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 		}
 	}
 	return out, nil
+}
+
+// negationPairSubject reports the lowercased pronoun subject the text opens
+// with, or "" when it opens with something else. Both template helpers already
+// reject non-subject openers, so callers use this only to compare the pair.
+func negationPairSubject(text string) string {
+	tokens := document.ExportLexicalTokens(text)
+	if len(tokens) == 0 || !negationPairSubjects[lower(tokens[0])] {
+		return ""
+	}
+	return lower(tokens[0])
 }
 
 // isNegationSetup reports whether text matches the setup template:

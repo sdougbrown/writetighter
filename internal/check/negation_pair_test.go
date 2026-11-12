@@ -96,6 +96,8 @@ func TestNegationPairDoesNotFire(t *testing.T) {
 		"hedged complement":    "It is not one of them. It is the only one.",
 		"long sentences":       "It is not a design that the reviewers found acceptable after three rounds of review and argument. It is a design that the reviewers accepted because every alternative had already failed.",
 		"quoted speech":        `The reviewer wrote, "It is not a wrong answer. It is a non-answer."`,
+		"quoted template pair": `It is not a "wrong answer". It is a non-answer.`,
+		"mismatched subjects":  "It is not a mutex. That is a semaphore.",
 		"blockquote":           "> It is not a wrong answer. It is a non-answer.\n",
 		"list item":            "- It is not a wrong answer. It is a non-answer.\n",
 		"negative then detail": "It is not a wrong answer. The scoring layer drops it before it reaches the comparator.",
