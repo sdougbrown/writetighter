@@ -60,25 +60,23 @@ func copyBundle(src, dst string, r *Resolution) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
-	files := []string{"manifest.json", "rules.json"}
-	if r.Manifest.FormatVersion >= 3 {
-		files = append(files, "lexicon.json")
+	layout, ok := layoutFor(r.Manifest.FormatVersion)
+	if !ok {
+		return fmt.Errorf("unsupported manifest format_version %d", r.Manifest.FormatVersion)
 	}
-	files = append(files, "dictionary.json")
-	for _, n := range files {
-		var b []byte
-		var err error
-		if n == "dictionary.json" {
-			// Resolved bytes from the validated resolution — the same bytes
-			// LoadBundle just checked against the manifest pin.
-			b = r.dictBytes
-		} else {
-			b, err = os.ReadFile(filepath.Join(src, n))
-		}
+	for _, n := range append([]string{"manifest.json"}, layout.releaseFiles...) {
+		b, err := os.ReadFile(filepath.Join(src, n))
 		if err != nil {
 			return err
 		}
 		if err := os.WriteFile(filepath.Join(dst, n), b, 0o644); err != nil {
+			return err
+		}
+	}
+	for _, n := range layout.materialized {
+		// Resolved bytes from the validated resolution — the same bytes
+		// LoadBundle just checked against the manifest pin.
+		if err := os.WriteFile(filepath.Join(dst, n), r.dictBytes, 0o644); err != nil {
 			return err
 		}
 	}

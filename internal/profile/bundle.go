@@ -22,23 +22,24 @@ func LoadBundle(dir string) (*Resolution, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parsing manifest: %w", err)
 	}
-	rulesBytes, err := os.ReadFile(filepath.Join(dir, "rules.json"))
-	if err != nil {
-		return nil, fmt.Errorf("reading rules: %w", err)
+	layout, ok := layoutFor(m.FormatVersion)
+	if !ok {
+		return nil, fmt.Errorf("unsupported manifest format_version %d", m.FormatVersion)
 	}
-
-	var lexiconBytes, dictBytes []byte
-	switch m.FormatVersion {
-	case 1, 2:
-		dictBytes, err = os.ReadFile(filepath.Join(dir, "dictionary.json"))
+	var rulesBytes, lexiconBytes, dictBytes []byte
+	slots := map[string]*[]byte{
+		"rules.json":      &rulesBytes,
+		"lexicon.json":    &lexiconBytes,
+		"dictionary.json": &dictBytes,
+	}
+	for _, name := range layout.releaseFiles {
+		b, err := os.ReadFile(filepath.Join(dir, name))
 		if err != nil {
-			return nil, fmt.Errorf("reading dictionary: %w", err)
+			return nil, fmt.Errorf("reading %s: %w", name, err)
 		}
-	case 3:
-		lexiconBytes, err = os.ReadFile(filepath.Join(dir, "lexicon.json"))
-		if err != nil {
-			return nil, fmt.Errorf("reading lexicon: %w", err)
-		}
+		*slots[name] = b
+	}
+	if len(layout.materialized) > 0 {
 		// The corpus-derived dictionary is content-addressed. A materialized
 		// copy next to the manifest (as written by InstallBundle) wins; the
 		// shared embedded store resolves it otherwise, so a repo checkout
@@ -49,8 +50,6 @@ func LoadBundle(dir string) (*Resolution, error) {
 		} else if !errors.Is(readErr, os.ErrNotExist) {
 			return nil, fmt.Errorf("reading dictionary: %w", readErr)
 		}
-	default:
-		return nil, fmt.Errorf("unsupported manifest format_version %d", m.FormatVersion)
 	}
 
 	return assembleBundle(dir, m, manifestBytes, lexiconBytes, rulesBytes, dictBytes, resolveEmbeddedDictionary)

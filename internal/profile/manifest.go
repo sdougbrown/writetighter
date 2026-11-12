@@ -127,25 +127,47 @@ func (m *Manifest) Validate() error {
 	return errors.Join(errs...)
 }
 
-func (m *Manifest) validatePayloads() error {
-	var required []string
-	switch m.FormatVersion {
+// bundleLayout owns the file layout of each manifest format version: the
+// payloads the manifest must pin, the files a release directory carries,
+// and the files install materializes from resolved bytes. Adding a format
+// version or renaming a payload edits this table and nothing else.
+type bundleLayout struct {
+	requiredPayloads []string
+	releaseFiles     []string
+	materialized     []string
+}
+
+func layoutFor(formatVersion int) (bundleLayout, bool) {
+	switch formatVersion {
 	case 1, 2:
-		required = []string{"dictionary.json", "rules.json"}
+		return bundleLayout{
+			requiredPayloads: []string{"dictionary.json", "rules.json"},
+			releaseFiles:     []string{"dictionary.json", "rules.json"},
+		}, true
 	case 3:
-		required = []string{"dictionary", "lexicon.json", "rules.json"}
-	default:
+		return bundleLayout{
+			requiredPayloads: []string{"dictionary", "lexicon.json", "rules.json"},
+			releaseFiles:     []string{"lexicon.json", "rules.json"},
+			materialized:     []string{"dictionary.json"},
+		}, true
+	}
+	return bundleLayout{}, false
+}
+
+func (m *Manifest) validatePayloads() error {
+	layout, ok := layoutFor(m.FormatVersion)
+	if !ok {
 		return fmt.Errorf("unsupported manifest format_version %d", m.FormatVersion)
 	}
 	var errs []error
-	for _, name := range required {
+	for _, name := range layout.requiredPayloads {
 		if m.PayloadSHA256(name) == "" {
 			errs = append(errs, fmt.Errorf("manifest missing payload hash for %q", name))
 		}
 	}
 	for name := range m.Payloads {
 		known := false
-		for _, r := range required {
+		for _, r := range layout.requiredPayloads {
 			if name == r {
 				known = true
 			}
