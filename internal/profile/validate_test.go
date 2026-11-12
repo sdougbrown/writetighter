@@ -301,7 +301,7 @@ func TestEmbeddedProfileCanonicalResolutionHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("embedded profile load failed: %v", err)
 	}
-	const expectedSHA = "057dd79bafb7c97116c5c0d38270d7ed2439501f2ee362f355ccf3dc69a789f8"
+	const expectedSHA = "6e9195da52d96692e1226b7e8f65307b05b9a403a9cc0318f7cf036efdc1107e"
 	if res.SHA256 != expectedSHA {
 		t.Errorf("resolution SHA256:\n  got:  %s\n  want: %s", res.SHA256, expectedSHA)
 	}

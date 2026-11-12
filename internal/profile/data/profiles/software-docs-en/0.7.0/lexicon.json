@@ -1077,6 +1077,24 @@
       "what's",
       "who's",
       "let's"
+    ],
+    "cardinal_number": [
+      "one",
+      "two",
+      "three",
+      "four",
+      "five",
+      "six",
+      "seven",
+      "eight",
+      "nine",
+      "ten",
+      "eleven",
+      "twelve",
+      "twenty",
+      "hundred",
+      "thousand",
+      "million"
     ]
   },
   "banned_modal_suggestions": {
