@@ -151,7 +151,7 @@ func isCountLedFragment(text string, wordCount int, cardinals, finiteVerbs, part
 // isCountLedInventory reports whether text is a comma-separated inventory of
 // count-led phrases: "One GPU, one server build, one sampler, one question set.".
 func isCountLedInventory(text string, wordCount int, cardinals map[string]bool) bool {
-	if wordCount > countFragmentMaxInventoryWords {
+	if wordCount < 1 || wordCount > countFragmentMaxInventoryWords {
 		return false
 	}
 	tokens := document.ExportLexicalTokens(text)
