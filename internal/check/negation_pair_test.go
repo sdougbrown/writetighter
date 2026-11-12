@@ -52,7 +52,27 @@ func TestNegationPairRangeSpansBothSentences(t *testing.T) {
 	}
 }
 
-func TestNegationPairSecondPersonVariant(t *testing.T) {
+// The policy test fails before CORE.NEGATION_PAIR joins testProfile(): the
+// rule lookup finds nothing, so the checker falls back to candidate/info.
+func TestNegationPairHonorsRulePolicy(t *testing.T) {
+	p := testProfile()
+	for i := range p.Rules.Rules {
+		if p.Rules.Rules[i].ID == "CORE.NEGATION_PAIR" {
+			p.Rules.Rules[i].Enforcement = "enforced"
+			p.Rules.Rules[i].Severity = "warning"
+		}
+	}
+	ctx := &RunContext{Document: testDoc("It is not a wrong answer. It is a non-answer."), Profile: p}
+	findings, _ := Get("CORE.NEGATION_PAIR").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].Enforcement != "enforced" || findings[0].Severity != "warning" {
+		t.Fatalf("expected enforced/warning, got %s/%s", findings[0].Enforcement, findings[0].Severity)
+	}
+}
+
+func TestNegationPairDemonstrativeSubject(t *testing.T) {
 	findings := runNegationPair(t, "This is not a repair. This is a workaround.")
 	if len(findings) != 1 {
 		t.Fatalf("expected one finding for 'this' variant, got %d", len(findings))
