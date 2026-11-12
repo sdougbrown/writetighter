@@ -65,8 +65,8 @@ func (countFragmentChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 	}
 	var finiteVerbs, partExc map[string]bool
 	if ctx.Profile != nil && ctx.Profile.Dict != nil {
-		finiteVerbs = ctx.Profile.Dict.WordClassSet("finite_verb")
-		partExc = ctx.Profile.Dict.WordClassSet("participle_head_exception")
+		finiteVerbs = ctx.Profile.Dict.WordClassSet(wordClassFiniteVerb)
+		partExc = ctx.Profile.Dict.WordClassSet(wordClassParticipleHeadException)
 	}
 
 	enforcement, severity := ruleEnforcement(ctx, countFragmentChecker{}.ID())
