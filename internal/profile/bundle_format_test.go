@@ -136,6 +136,95 @@ func TestFormatThreeBundleUnresolvableDictionaryRejected(t *testing.T) {
 	}
 }
 
+func TestFormatThreeBundleUnreadableMaterializedDictionaryRejected(t *testing.T) {
+	// A format-3 source whose materialized dictionary.json cannot be read
+	// (here: it is a directory) must fail loudly instead of silently
+	// resolving from the embedded store.
+	src := releaseDir(t)
+	dir := t.TempDir()
+	for _, name := range []string{"manifest.json", "rules.json", "lexicon.json"} {
+		if err := os.WriteFile(filepath.Join(dir, name), mustRead(t, src, name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Mkdir(filepath.Join(dir, "dictionary.json"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadBundle(dir)
+	if err == nil || !strings.Contains(err.Error(), "reading dictionary") {
+		t.Fatalf("expected unreadable materialized dictionary rejection, got: %v", err)
+	}
+}
+
+func TestFormatThreeBundleTamperedMaterializedDictionaryRejected(t *testing.T) {
+	dataRoot := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", dataRoot)
+	src := releaseDir(t)
+	fixture := filepath.Join(dataRoot, "fixture")
+	if err := os.MkdirAll(fixture, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"manifest.json", "rules.json", "lexicon.json"} {
+		if err := os.WriteFile(filepath.Join(fixture, name), mustRead(t, src, name), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	manifestPath := filepath.Join(fixture, "manifest.json")
+	if err := os.WriteFile(manifestPath, []byte(strings.Replace(string(mustRead(t, src, "manifest.json")), `"version": "0.7.0"`, `"version": "9.9.7"`, 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InstallBundle(fixture); err != nil {
+		t.Fatalf("install failed: %v", err)
+	}
+	installed := filepath.Join(profileRoot(), "software-docs-en", "9.9.7")
+	// Tamper with the materialized copy: its bytes no longer match the
+	// "dictionary" payload pin.
+	if err := os.WriteFile(filepath.Join(installed, "dictionary.json"), append(mustRead(t, installed, "dictionary.json"), '\n'), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err := LoadBundle(installed)
+	if err == nil || !strings.Contains(err.Error(), "dictionary hash mismatch") {
+		t.Fatalf("expected materialized dictionary hash mismatch, got: %v", err)
+	}
+}
+
+func TestFormatThreeBundleInvalidLexiconRejected(t *testing.T) {
+	src := releaseDir(t)
+	for _, lexicon := range []string{
+		`{"format_version": 7, "word_classes": {"banned_modal": ["should"]}}`,
+		`{"word_classes": {"banned_modal": ["should"]}}`,
+	} {
+		dir := t.TempDir()
+		for _, name := range []string{"rules.json"} {
+			if err := os.WriteFile(filepath.Join(dir, name), mustRead(t, src, name), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		lexBytes := []byte(lexicon)
+		if err := os.WriteFile(filepath.Join(dir, "lexicon.json"), lexBytes, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		// Pin the rewritten lexicon so only the format_version check can fire.
+		var m Manifest
+		if err := json.Unmarshal(mustRead(t, src, "manifest.json"), &m); err != nil {
+			t.Fatal(err)
+		}
+		m.Version = "9.9.6"
+		m.Payloads["lexicon.json"] = PayloadHash{SHA256: SHA256Bytes(lexBytes)}
+		manifestBytes, err := json.Marshal(m)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "manifest.json"), manifestBytes, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err = LoadBundle(dir)
+		if err == nil || !strings.Contains(err.Error(), "unsupported lexicon format_version") {
+			t.Fatalf("expected lexicon format_version rejection for %s, got: %v", lexicon, err)
+		}
+	}
+}
+
 func TestFormatTwoInstallStillWorks(t *testing.T) {
 	dataRoot := t.TempDir()
 	t.Setenv("XDG_DATA_HOME", dataRoot)

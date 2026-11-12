@@ -42,9 +42,12 @@ func LoadBundle(dir string) (*Resolution, error) {
 		// The corpus-derived dictionary is content-addressed. A materialized
 		// copy next to the manifest (as written by InstallBundle) wins; the
 		// shared embedded store resolves it otherwise, so a repo checkout
-		// validates in place.
+		// validates in place. Any other read failure is fatal: silently
+		// resolving from the store would mask a broken installed bundle.
 		if b, readErr := os.ReadFile(filepath.Join(dir, "dictionary.json")); readErr == nil {
 			dictBytes = b
+		} else if !errors.Is(readErr, os.ErrNotExist) {
+			return nil, fmt.Errorf("reading dictionary: %w", readErr)
 		}
 	default:
 		return nil, fmt.Errorf("unsupported manifest format_version %d", m.FormatVersion)
@@ -98,6 +101,8 @@ func assembleBundle(source string, m *Manifest, manifestBytes, lexiconBytes, rul
 			lex, err := parseLexicon(lexiconBytes)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("parsing lexicon: %w", err))
+			} else if lex.FormatVersion != 1 {
+				errs = append(errs, fmt.Errorf("unsupported lexicon format_version %d", lex.FormatVersion))
 			} else {
 				d.WordClasses = lex.WordClasses
 				d.BannedModalSuggestions = lex.BannedModalSuggestions
