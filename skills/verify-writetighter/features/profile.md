@@ -3,7 +3,7 @@
 ## Sub-features
 
 - `profile list`: installed profiles including the embedded default
-  (`software-docs-en@0.6.0`), with sha256.
+  (`software-docs-en@0.7.0`), with sha256.
 - `profile verify <ID@VERSION|bundle-path>`: validates a profile or bundle.
 - `profile install <bundle>`: installs a profile bundle into the user config
   area (scratch `XDG_CONFIG_HOME` in verification).
@@ -18,8 +18,8 @@ installs a new profile bundle from a local path.
 ```sh
 export XDG_DATA_HOME="$WT/data"   # profile install writes to $XDG_DATA_HOME/writetighter/profiles
 "$WT/writetighter" profile list
-echo exit=$?   # expect 0; line contains "embedded" and "software-docs-en@0.6.0"
-"$WT/writetighter" profile verify software-docs-en@0.6.0
+echo exit=$?   # expect 0; line contains "embedded" and "software-docs-en@0.7.0"
+"$WT/writetighter" profile verify software-docs-en@0.7.0
 echo exit=$?   # expect 0
 "$WT/writetighter" profile verify software-docs-en@9.9.9; echo exit=$?   # expect 2 (not installed)
 # Install path: build a minimal bundle or use testdata/ if a bundle is present.

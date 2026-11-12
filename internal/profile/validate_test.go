@@ -270,8 +270,8 @@ func TestEmbeddedProfilePinnedIDAndVersion(t *testing.T) {
 	if res.ID != ProfileID("software-docs-en") {
 		t.Errorf("expected pinned ID %q, got %q", "software-docs-en", res.ID)
 	}
-	if res.Version != Version("0.6.0") {
-		t.Errorf("expected pinned version %q, got %q", "0.6.0", res.Version)
+	if res.Version != Version("0.7.0") {
+		t.Errorf("expected pinned version %q, got %q", "0.7.0", res.Version)
 	}
 }
 
@@ -280,17 +280,19 @@ func TestEmbeddedProfilePinnedManifestHashes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("embedded profile load failed: %v", err)
 	}
-	// Expected payload hashes from the reviewed manifest for software-docs-en@0.6.0
-	const wantDictHash = "a753a518a3cba1fa5430fca9b744ead991470e306c6a2b2064d29a0a619e113b"
+	// Expected payload hashes from the reviewed manifest for software-docs-en@0.7.0
+	const wantDictHash = "4b5a856516eb87d69f4fc6d27f9624b576e877247d34f610bed52eda724203b0"
+	const wantLexiconHash = "4e46776f38c7782ebdafe01f1893eae3d5c325741e18df05c6f6f6bc2153d92c"
 	const wantRulesHash = "d7eeccfc9c6ac95943458575f1c4f2949956e0c97b557a5a9b853f5b0216b9a8"
 
-	if res.Manifest.Payloads.DictionarySHA256.SHA256 != wantDictHash {
-		t.Errorf("dictionary hash:\n  got:  %s\n  want: %s",
-			res.Manifest.Payloads.DictionarySHA256.SHA256, wantDictHash)
+	if got := res.Manifest.PayloadSHA256("dictionary"); got != wantDictHash {
+		t.Errorf("dictionary hash:\n  got:  %s\n  want: %s", got, wantDictHash)
 	}
-	if res.Manifest.Payloads.RulesSHA256.SHA256 != wantRulesHash {
-		t.Errorf("rules hash:\n  got:  %s\n  want: %s",
-			res.Manifest.Payloads.RulesSHA256.SHA256, wantRulesHash)
+	if got := res.Manifest.PayloadSHA256("lexicon.json"); got != wantLexiconHash {
+		t.Errorf("lexicon hash:\n  got:  %s\n  want: %s", got, wantLexiconHash)
+	}
+	if got := res.Manifest.PayloadSHA256("rules.json"); got != wantRulesHash {
+		t.Errorf("rules hash:\n  got:  %s\n  want: %s", got, wantRulesHash)
 	}
 }
 
@@ -299,7 +301,7 @@ func TestEmbeddedProfileCanonicalResolutionHash(t *testing.T) {
 	if err != nil {
 		t.Fatalf("embedded profile load failed: %v", err)
 	}
-	const expectedSHA = "cc92a7ac98ca9d5049fff3db7d166db7bc30d35d99cfcccaf4d0b6cada40ac1b"
+	const expectedSHA = "29de4679a6791729f573c9b5f99e6f02eab4a91aa019c3736976f477314e5a92"
 	if res.SHA256 != expectedSHA {
 		t.Errorf("resolution SHA256:\n  got:  %s\n  want: %s", res.SHA256, expectedSHA)
 	}

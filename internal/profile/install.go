@@ -37,7 +37,7 @@ func InstallBundle(dir string) (*Resolution, error) {
 		return nil, fmt.Errorf("creating temp: %w", err)
 	}
 	defer os.RemoveAll(tmp)
-	if err := copyDir(dir, tmp); err != nil {
+	if err := copyBundle(dir, tmp, r); err != nil {
 		return nil, fmt.Errorf("copying: %w", err)
 	}
 	if _, err := LoadBundle(tmp); err != nil {
@@ -51,11 +51,20 @@ func InstallBundle(dir string) (*Resolution, error) {
 	}
 	return r, nil
 }
-func copyDir(src, dst string) error {
+
+// copyBundle materializes the resolved bundle into dst. Format 3 source
+// directories reference the content-addressed dictionary rather than carry
+// it, so the resolved bytes are written alongside the manifest — the
+// installed bundle is self-contained and LoadBundle needs no resolver.
+func copyBundle(src, dst string, r *Resolution) error {
 	if err := os.MkdirAll(dst, 0o755); err != nil {
 		return fmt.Errorf("mkdir: %w", err)
 	}
-	for _, n := range []string{"manifest.json", "dictionary.json", "rules.json"} {
+	layout, ok := layoutFor(r.Manifest.FormatVersion)
+	if !ok {
+		return fmt.Errorf("unsupported manifest format_version %d", r.Manifest.FormatVersion)
+	}
+	for _, n := range append([]string{"manifest.json"}, layout.releaseFiles...) {
 		b, err := os.ReadFile(filepath.Join(src, n))
 		if err != nil {
 			return err
@@ -64,8 +73,16 @@ func copyDir(src, dst string) error {
 			return err
 		}
 	}
+	for _, n := range layout.materialized {
+		// Resolved bytes from the validated resolution — the same bytes
+		// LoadBundle just checked against the manifest pin.
+		if err := os.WriteFile(filepath.Join(dst, n), r.dictBytes, 0o644); err != nil {
+			return err
+		}
+	}
 	return nil
 }
+
 func profileConflictErr(id, version string) error {
 	return fmt.Errorf("profile %s@%s conflict", id, version)
 }

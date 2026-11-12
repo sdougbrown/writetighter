@@ -17,6 +17,13 @@ var (
 	}
 )
 
+// Manifest format versions:
+//
+//	1, 2 — the release directory is self-contained: dictionary.json and
+//	rules.json sit next to manifest.json and the payloads key names them.
+//	3 — the corpus-derived dictionary is content-addressed in the shared
+//	dictionaries store (payload key "dictionary", matched by sha256); the
+//	release directory carries only rules.json and the curated lexicon.json.
 type Manifest struct {
 	FormatVersion  int             `json:"format_version"`
 	ID             string          `json:"id"`
@@ -44,18 +51,40 @@ type ManifestClaims struct {
 	Issue         *string `json:"issue"`
 	Certification string  `json:"certification"`
 }
-type Payloads struct {
-	DictionarySHA256 PayloadHash `json:"dictionary.json"`
-	RulesSHA256      PayloadHash `json:"rules.json"`
-}
+
+// Payloads maps a payload name to its content hash. Format 1/2 manifests use
+// the file names ("dictionary.json", "rules.json"); format 3 manifests use
+// "rules.json", "lexicon.json", and the content-addressed "dictionary".
+type Payloads map[string]PayloadHash
 
 type PayloadHash struct {
 	SHA256 string `json:"sha256"`
 }
 
+// PayloadSHA256 returns the pinned hash for a payload name, or "" when the
+// manifest does not carry it.
+func (m *Manifest) PayloadSHA256(name string) string {
+	if m == nil || m.Payloads == nil {
+		return ""
+	}
+	return m.Payloads[name].SHA256
+}
+
+// DictionaryPayloadName reports the payload key that pins the dictionary for
+// this manifest's format version: "dictionary.json" (inline, format 1/2) or
+// "dictionary" (content-addressed reference, format 3).
+func (m *Manifest) DictionaryPayloadName() string {
+	if m.FormatVersion >= 3 {
+		return "dictionary"
+	}
+	return "dictionary.json"
+}
+
 func (m *Manifest) Validate() error {
 	var errs []error
-	if m.FormatVersion != 1 && m.FormatVersion != 2 {
+	switch m.FormatVersion {
+	case 1, 2, 3:
+	default:
 		errs = append(errs, fmt.Errorf("unsupported manifest format_version %d", m.FormatVersion))
 	}
 	if !profileIDRe.MatchString(m.ID) {
@@ -73,8 +102,8 @@ func (m *Manifest) Validate() error {
 	if m.Claims.Certification != "none" {
 		errs = append(errs, errors.New("manifest certification must be none"))
 	}
-	if m.Payloads.DictionarySHA256.SHA256 == "" || m.Payloads.RulesSHA256.SHA256 == "" {
-		errs = append(errs, fmt.Errorf("manifest missing payload hashes"))
+	if err := m.validatePayloads(); err != nil {
+		errs = append(errs, err)
 	}
 	// Rejection rule 8: Unsupported language
 	if m.Language != "" && m.Language != "en" {
@@ -88,11 +117,65 @@ func (m *Manifest) Validate() error {
 	}
 	// Rejection rule 9: Absent license/provenance
 	if len(m.Provenance) == 0 {
-		errs = append(errs, fmt.Errorf("manifest requires at least one provenance entry"))
+		errs = append(errs, errors.New("manifest requires at least one provenance entry"))
 	}
 	for i, p := range m.Provenance {
 		if p.Name == "" || p.Release == "" || p.SourceURL == "" || p.License == "" {
 			errs = append(errs, fmt.Errorf("provenance[%d]: name, release, source_url, and license are required", i))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+// bundleLayout owns the file layout of each manifest format version: the
+// payloads the manifest must pin, the files a release directory carries,
+// and the files install materializes from resolved bytes. LoadBundle binds
+// these names to their roles (rules/lexicon/dictionary) and rejects any
+// name it cannot bind or validate, so a rename must touch both this table
+// and those bindings — and a mismatch fails loudly, never silently.
+type bundleLayout struct {
+	requiredPayloads []string
+	releaseFiles     []string
+	materialized     []string
+}
+
+func layoutFor(formatVersion int) (bundleLayout, bool) {
+	switch formatVersion {
+	case 1, 2:
+		return bundleLayout{
+			requiredPayloads: []string{"dictionary.json", "rules.json"},
+			releaseFiles:     []string{"dictionary.json", "rules.json"},
+		}, true
+	case 3:
+		return bundleLayout{
+			requiredPayloads: []string{"dictionary", "lexicon.json", "rules.json"},
+			releaseFiles:     []string{"lexicon.json", "rules.json"},
+			materialized:     []string{"dictionary.json"},
+		}, true
+	}
+	return bundleLayout{}, false
+}
+
+func (m *Manifest) validatePayloads() error {
+	layout, ok := layoutFor(m.FormatVersion)
+	if !ok {
+		return fmt.Errorf("unsupported manifest format_version %d", m.FormatVersion)
+	}
+	var errs []error
+	for _, name := range layout.requiredPayloads {
+		if m.PayloadSHA256(name) == "" {
+			errs = append(errs, fmt.Errorf("manifest missing payload hash for %q", name))
+		}
+	}
+	for name := range m.Payloads {
+		known := false
+		for _, r := range layout.requiredPayloads {
+			if name == r {
+				known = true
+			}
+		}
+		if !known {
+			errs = append(errs, fmt.Errorf("manifest carries unknown payload %q for format_version %d", name, m.FormatVersion))
 		}
 	}
 	return errors.Join(errs...)
