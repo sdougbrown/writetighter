@@ -29,8 +29,10 @@ var negationPairSubjects = map[string]bool{"it": true, "this": true, "that": tru
 var negationPairCopulas = map[string]bool{"is": true, "are": true, "was": true, "were": true}
 
 // negationPairDeterminers are the determiners allowed before the complement
-// noun in both sentences. Contractions ("it isn't") are deliberately outside
-// the template: CORE.CONTRACTION already flags them.
+// noun in both sentences. Deliberately the article set the tic's copular
+// shape actually uses, not the lexicon's broader determiner class, so the
+// template stays independent of lexicon tuning. Contractions ("it isn't")
+// are deliberately outside the template: CORE.CONTRACTION already flags them.
 var negationPairDeterminers = map[string]bool{"a": true, "an": true, "the": true}
 
 // negationPairMaxWords caps each sentence of the pair. Long sentences that
@@ -66,9 +68,13 @@ func (negationPairChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 			if negationPairSubject(s1.Text) != negationPairSubject(s2.Text) {
 				continue
 			}
-			// Quotes are not marked by the sentence splitter, so any
-			// quotation punctuation means we cannot tell quoted speech
-			// from author prose — abstain.
+			// Quotes are not marked by the sentence splitter, so double-quote
+			// punctuation (straight or curly) means we cannot tell quoted
+			// speech from author prose — abstain. Apostrophes and single
+			// quotes stay outside the guard: they are contractions and
+			// possessives far more often than single-quoted speech, so a
+			// single-quoted pair is an accepted residual, like the technical
+			// contrast below.
 			if containsQuotePunctuation(s1.Text) || containsQuotePunctuation(s2.Text) {
 				continue
 			}
@@ -99,7 +105,6 @@ func (negationPairChecker) Run(ctx *RunContext) ([]report.Finding, error) {
 				Message:        "Negative setup followed by a positive restatement. Consider leading with the distinction.",
 				Confidence:     1,
 			})
-			i++ // the pair consumes both sentences; do not chain findings
 		}
 	}
 	return out, nil
@@ -130,7 +135,7 @@ func isNegationSetup(text string) bool {
 		return false
 	}
 	// The complement must be noun-like content, not another function word
-	// ("It is not a way to..." is a hedge, not the reveal).
+	// ("It is not the one. It is the other one." is a hedge, not the reveal).
 	return !isNegationPairFunctionWord(lower(tokens[4]))
 }
 

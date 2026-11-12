@@ -29,6 +29,13 @@ func TestNegationPairFiresOnCanonicalExample(t *testing.T) {
 	if !strings.Contains(f.Message, "Negative setup") {
 		t.Fatalf("unexpected message: %s", f.Message)
 	}
+	// The range is the user-facing underline; pin its exact bytes on the
+	// single-line canonical example so range-building mutations fail loud.
+	r := f.Range
+	if r.StartByte != 0 || r.EndByte != 45 || r.StartLine != 1 || r.EndLine != 1 || r.StartColumn != 1 || r.EndColumn != 46 {
+		t.Fatalf("unexpected exact range: bytes %d-%d, line %d col %d to line %d col %d",
+			r.StartByte, r.EndByte, r.StartLine, r.StartColumn, r.EndLine, r.EndColumn)
+	}
 }
 
 func TestNegationPairRangeSpansBothSentences(t *testing.T) {
@@ -80,29 +87,39 @@ func TestNegationPairDemonstrativeSubject(t *testing.T) {
 }
 
 func TestNegationPairKnownResidualFalsePositive(t *testing.T) {
-	// Documented residual: a legitimate technical contrast is structurally
-	// identical to the tic. The rule ships candidate/info precisely so this
-	// stays advisory.
-	findings := runNegationPair(t, "It is not a mutex. It is a semaphore.")
-	if len(findings) != 1 {
-		t.Fatalf("expected the accepted residual finding, got %d", len(findings))
+	// Documented residuals: a legitimate technical contrast is structurally
+	// identical to the tic, and the guard abstains only on double-quote
+	// punctuation, so single-quoted speech slips through — apostrophes are
+	// contractions and possessives far more often than quotations. The rule
+	// ships candidate/info precisely so these stay advisory.
+	for name, text := range map[string]string{
+		"technical contrast":   "It is not a mutex. It is a semaphore.",
+		"single-quoted speech": `'It is not a bug. It is a feature.' he said.`,
+	} {
+		findings := runNegationPair(t, text)
+		if len(findings) != 1 {
+			t.Errorf("%s: expected the accepted residual finding, got %d", name, len(findings))
+		}
 	}
 }
 
 func TestNegationPairDoesNotFire(t *testing.T) {
 	cases := map[string]string{
-		"adjective complement": "It is not safe to retry. It is necessary to reconnect.",
-		"different subjects":   "The response is not JSON. It is plain text.",
-		"hedged complement":    "It is not one of them. It is the only one.",
-		"long sentences":       "It is not a design that the reviewers found acceptable after three rounds of review and argument. It is a design that the reviewers accepted because every alternative had already failed.",
-		"quoted speech":        `The reviewer wrote, "It is not a wrong answer. It is a non-answer."`,
-		"quoted template pair": `It is not a "wrong answer". It is a non-answer.`,
-		"mismatched subjects":  "It is not a mutex. That is a semaphore.",
-		"blockquote":           "> It is not a wrong answer. It is a non-answer.\n",
-		"list item":            "- It is not a wrong answer. It is a non-answer.\n",
-		"negative then detail": "It is not a wrong answer. The scoring layer drops it before it reaches the comparator.",
-		"no determiner":        "It is not wrong. It is worse than wrong.",
-		"table row":            "| It is not a wrong answer. It is a non-answer. | x |\n|---|---|\n| a | b |",
+		"adjective complement":         "It is not safe to retry. It is necessary to reconnect.",
+		"different subjects":           "The response is not JSON. It is plain text.",
+		"hedged complement":            "It is not one of them. It is the only one.",
+		"function-word complement":     "It is not the one. It is the other one.",
+		"long sentences":               "It is not a design that the reviewers found acceptable after three rounds of review and argument. It is a design that the reviewers accepted because every alternative had already failed.",
+		"quoted speech":                `The reviewer wrote, "It is not a wrong answer. It is a non-answer."`,
+		"quoted template pair":         `It is not a "wrong answer". It is a non-answer.`,
+		"mismatched subjects":          "It is not a mutex. That is a semaphore.",
+		"blockquote":                   "> It is not a wrong answer. It is a non-answer.\n",
+		"list item":                    "- It is not a wrong answer. It is a non-answer.\n",
+		"negative then detail":         "It is not a wrong answer. The scoring layer drops it before it reaches the comparator.",
+		"no determiner in setup":       "It is not perfect yet. It is a work in progress.",
+		"no determiner in restatement": "It is not wrong. It is worse than wrong.",
+		"curly-quoted template pair":   "“It is not a wrong answer. It is a non-answer.”",
+		"table row":                    "| It is not a wrong answer. It is a non-answer. | x |\n|---|---|\n| a | b |",
 	}
 	for name, text := range cases {
 		findings := runNegationPair(t, text)
