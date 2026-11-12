@@ -205,6 +205,11 @@ func testWordClasses() map[string][]string {
 			"css", "js", "ts", "tsx", "jsx", "json", "xml", "csv", "yaml",
 			"yml", "toml", "sql", "cli", "sdk", "ui", "ux", "id", "ids",
 		},
+		"cardinal_number": {
+			"one", "two", "three", "four", "five", "six", "seven", "eight",
+			"nine", "ten", "eleven", "twelve", "twenty", "hundred",
+			"thousand", "million",
+		},
 	}
 }
 

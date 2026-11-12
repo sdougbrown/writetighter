@@ -51,6 +51,13 @@
     {
       "enabled": true,
       "enforcement": "candidate",
+      "id": "CORE.COUNT_FRAGMENT",
+      "severity": "info",
+      "version": 1
+    },
+    {
+      "enabled": true,
+      "enforcement": "candidate",
       "id": "CORE.TERM_DISCOURAGED",
       "severity": "info",
       "version": 1
