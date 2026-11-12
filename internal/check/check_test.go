@@ -43,6 +43,7 @@ func testProfile() *profile.Resolution {
 		{ID: "CORE.PROCEDURE_MULTI_ACTION", Enabled: true},
 		{ID: "CORE.NOUN_STACK", Enabled: true, Parameters: map[string]any{"min_stack_length": 3}},
 		{ID: "CORE.GERUND_OPENER", Enabled: true},
+		{ID: "CORE.NEGATION_PAIR", Enabled: true},
 		{ID: "CORE.CONTRACTION", Enabled: true},
 		{ID: "CORE.BANNED_MODAL", Enabled: true},
 		{ID: "CORE.LATIN_ABBREV", Enabled: true},

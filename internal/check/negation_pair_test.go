@@ -1,0 +1,130 @@
+package check
+
+import (
+	"strings"
+	"testing"
+
+	"github.com/sdougbrown/writetighter/internal/report"
+)
+
+func runNegationPair(t *testing.T, text string) []report.Finding {
+	t.Helper()
+	ctx := &RunContext{Document: testDoc(text), Profile: testProfile()}
+	findings, err := Get("CORE.NEGATION_PAIR").Run(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	return findings
+}
+
+func TestNegationPairFiresOnCanonicalExample(t *testing.T) {
+	findings := runNegationPair(t, "It is not a wrong answer. It is a non-answer.")
+	if len(findings) != 1 {
+		t.Fatalf("expected exactly one finding, got %d", len(findings))
+	}
+	f := findings[0]
+	if f.Enforcement != "candidate" || f.Severity != "info" {
+		t.Fatalf("expected candidate/info, got %s/%s", f.Enforcement, f.Severity)
+	}
+	if !strings.Contains(f.Message, "Negative setup") {
+		t.Fatalf("unexpected message: %s", f.Message)
+	}
+	// The range is the user-facing underline; pin its exact bytes on the
+	// single-line canonical example so range-building mutations fail loud.
+	r := f.Range
+	if r.StartByte != 0 || r.EndByte != 45 || r.StartLine != 1 || r.EndLine != 1 || r.StartColumn != 1 || r.EndColumn != 46 {
+		t.Fatalf("unexpected exact range: bytes %d-%d, line %d col %d to line %d col %d",
+			r.StartByte, r.EndByte, r.StartLine, r.StartColumn, r.EndLine, r.EndColumn)
+	}
+}
+
+func TestNegationPairRangeSpansBothSentences(t *testing.T) {
+	// Wrapped lines: the finding range must cover the full pair across the
+	// line break, with byte offsets into the original content.
+	text := "The result surprised the team. It is not a wrong answer.\nIt is a non-answer, and the distinction matters here."
+	ctx := &RunContext{Document: testDoc(text), Profile: testProfile()}
+	findings, err := Get("CORE.NEGATION_PAIR").Run(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding, got %d", len(findings))
+	}
+	r := findings[0].Range
+	if r.StartLine == r.EndLine {
+		t.Fatalf("expected range to span wrapped lines, got lines %d-%d", r.StartLine, r.EndLine)
+	}
+	if r.StartByte < 0 || r.EndByte > len(text) {
+		t.Fatalf("range out of bounds: %d-%d", r.StartByte, r.EndByte)
+	}
+}
+
+// The policy test fails before CORE.NEGATION_PAIR joins testProfile(): the
+// rule lookup finds nothing, so the checker falls back to candidate/info.
+func TestNegationPairHonorsRulePolicy(t *testing.T) {
+	p := testProfile()
+	for i := range p.Rules.Rules {
+		if p.Rules.Rules[i].ID == "CORE.NEGATION_PAIR" {
+			p.Rules.Rules[i].Enforcement = "enforced"
+			p.Rules.Rules[i].Severity = "warning"
+		}
+	}
+	ctx := &RunContext{Document: testDoc("It is not a wrong answer. It is a non-answer."), Profile: p}
+	findings, _ := Get("CORE.NEGATION_PAIR").Run(ctx)
+	if len(findings) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(findings))
+	}
+	if findings[0].Enforcement != "enforced" || findings[0].Severity != "warning" {
+		t.Fatalf("expected enforced/warning, got %s/%s", findings[0].Enforcement, findings[0].Severity)
+	}
+}
+
+func TestNegationPairDemonstrativeSubject(t *testing.T) {
+	findings := runNegationPair(t, "This is not a repair. This is a workaround.")
+	if len(findings) != 1 {
+		t.Fatalf("expected one finding for 'this' variant, got %d", len(findings))
+	}
+}
+
+func TestNegationPairKnownResidualFalsePositive(t *testing.T) {
+	// Documented residuals: a legitimate technical contrast is structurally
+	// identical to the tic, and the guard abstains only on double-quote
+	// punctuation, so single-quoted speech slips through — apostrophes are
+	// contractions and possessives far more often than quotations. The rule
+	// ships candidate/info precisely so these stay advisory.
+	for name, text := range map[string]string{
+		"technical contrast":   "It is not a mutex. It is a semaphore.",
+		"single-quoted speech": `'It is not a bug. It is a feature.' he said.`,
+	} {
+		findings := runNegationPair(t, text)
+		if len(findings) != 1 {
+			t.Errorf("%s: expected the accepted residual finding, got %d", name, len(findings))
+		}
+	}
+}
+
+func TestNegationPairDoesNotFire(t *testing.T) {
+	cases := map[string]string{
+		"adjective complement":         "It is not safe to retry. It is necessary to reconnect.",
+		"different subjects":           "The response is not JSON. It is plain text.",
+		"hedged complement":            "It is not one of them. It is the only one.",
+		"function-word complement":     "It is not the one. It is the other one.",
+		"long sentences":               "It is not a design that the reviewers found acceptable after three rounds of review and argument. It is a design that the reviewers accepted because every alternative had already failed.",
+		"quoted speech":                `The reviewer wrote, "It is not a wrong answer. It is a non-answer."`,
+		"quoted template pair":         `It is not a "wrong answer". It is a non-answer.`,
+		"mismatched subjects":          "It is not a mutex. That is a semaphore.",
+		"blockquote":                   "> It is not a wrong answer. It is a non-answer.\n",
+		"list item":                    "- It is not a wrong answer. It is a non-answer.\n",
+		"negative then detail":         "It is not a wrong answer. The scoring layer drops it before it reaches the comparator.",
+		"no determiner in setup":       "It is not perfect yet. It is a work in progress.",
+		"no determiner in restatement": "It is not wrong. It is worse than wrong.",
+		"curly-quoted template pair":   "“It is not a wrong answer. It is a non-answer.”",
+		"table row":                    "| It is not a wrong answer. It is a non-answer. | x |\n|---|---|\n| a | b |",
+	}
+	for name, text := range cases {
+		findings := runNegationPair(t, text)
+		if len(findings) != 0 {
+			t.Errorf("%s: expected no findings, got %d (%s)", name, len(findings), findings[0].Evidence)
+		}
+	}
+}
