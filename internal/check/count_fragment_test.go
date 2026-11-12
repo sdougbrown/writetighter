@@ -57,6 +57,18 @@ func TestCountFragmentAbstainsWithoutCardinalClass(t *testing.T) {
 	}
 }
 
+func TestCountFragmentPunctuationOnlyInventoryDoesNotPanic(t *testing.T) {
+	// A punctuation-only sentence yields WordCount 0 and an empty lexical
+	// token slice; the inventory predicate must bail, not index tokens[0].
+	if isCountLedInventory("...", 0, map[string]bool{"one": true}) {
+		t.Fatal("expected punctuation-only inventory to be rejected")
+	}
+	findings := runCountFragment(t, "Six legs. ?!")
+	if len(findings) != 0 {
+		t.Fatalf("expected no findings for punctuation-only follow-up, got %d", len(findings))
+	}
+}
+
 func TestCountFragmentDoesNotFire(t *testing.T) {
 	cases := map[string]string{
 		"complete clauses":      "Six legs were tested. One GPU served all requests.",
