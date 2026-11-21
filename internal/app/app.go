@@ -1012,7 +1012,9 @@ func (a *App) RunReviseTo(w io.Writer, params ReviseParams) error {
 					return fmt.Errorf("%w: could not auto-detect context window for model %q from %s/models: %v; use --context-tokens to specify it explicitly", ErrLLMConfigRequired, llmModel, llmBaseURL, lookupErr)
 				}
 				fmt.Fprintf(os.Stderr, "Warning: could not auto-detect context window for model %q: %v\n", llmModel, lookupErr)
-			} else if cw == 0 {
+			} else if cw == 0 && refPack == nil {
+				// Reference revision without a window is fatal below; only
+				// code-comment revision actually falls back to the legacy budget.
 				fmt.Fprintf(os.Stderr, "Warning: model %q reports no context window metadata; revision falls back to the legacy %d-byte request budget\n", llmModel, llm.MaxInputChars)
 			} else {
 				llmCfg.ContextWindowTokens = cw

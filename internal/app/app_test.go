@@ -81,6 +81,20 @@ func captureStdout(t *testing.T, fn func()) *bytes.Buffer {
 	return &buf
 }
 
+// captureStderr captures os.Stderr output into a buffer.
+func captureStderr(t *testing.T, fn func()) *bytes.Buffer {
+	t.Helper()
+	old := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+	fn()
+	w.Close()
+	os.Stderr = old
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+	return &buf
+}
+
 // --- Version / Version info tests ---
 
 func TestVersionNonEmpty(t *testing.T) {
@@ -848,6 +862,36 @@ func TestRunReviseProducesStructuredClarificationWithoutLintFinding(t *testing.T
 	}
 	if response.Revisions[0].Kind != "clarification" || response.Revisions[0].Question == nil {
 		t.Fatalf("expected structured clarification: %#v", response.Revisions[0])
+	}
+}
+
+func TestRunReviseReferenceNoMetadataFailsWithoutFallbackWarning(t *testing.T) {
+	// Reference revision cannot proceed on an unknown context window: the
+	// run must fail with the config error and must not first print a
+	// "falls back to the legacy budget" warning for a fallback it never
+	// takes (umpire round 1, run 2722, finding a6d97f517d73b84c).
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "test-model"}}})
+			return
+		}
+		t.Errorf("unexpected request before the context window is known: %s", r.URL.Path)
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	path := writeTempFile(t, "Plain prose awaits revision.")
+	ref := writeTempFile(t, "Reference prose establishes the house style.")
+	stderr := captureStderr(t, func() {
+		err := (&App{}).RunRevise(ReviseParams{Paths: []string{path}, ReferencePaths: []string{ref}, Kind: "description"})
+		if !errors.Is(err, ErrLLMConfigRequired) {
+			t.Fatalf("expected ErrLLMConfigRequired, got %v", err)
+		}
+		if !strings.Contains(err.Error(), "requires a known context window") {
+			t.Fatalf("expected the reference-window error, got %v", err)
+		}
+	})
+	if strings.Contains(stderr.String(), "falls back to the legacy") {
+		t.Fatalf("reference revision must not claim a legacy fallback before the fatal error: %q", stderr.String())
 	}
 }
 
