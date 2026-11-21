@@ -18,11 +18,16 @@ type ModelInfo struct {
 	ContextLength    int    `json:"context_length,omitempty"`
 	MaxContextLength int    `json:"max_context_length,omitempty"`
 	MaxModelLen      int    `json:"max_model_len,omitempty"`
+	MaxInputTokens   int    `json:"max_input_tokens,omitempty"`
 }
 
 // SuggestedContextWindow returns the suggested context window from model
 // metadata, or 0 if no metadata is available. The precedence order is:
-// context_length, max_context_length, max_model_len.
+// context_length, max_context_length, max_model_len, max_input_tokens.
+// max_input_tokens is the last choice because it is an input-only cap,
+// reported by LiteLLM-style gateways; treating it as the window keeps
+// requests conservative, since budgets subtract output and safety tokens
+// before anything is sent.
 func (m ModelInfo) SuggestedContextWindow() int {
 	if m.ContextLength > 0 {
 		return m.ContextLength
@@ -32,6 +37,9 @@ func (m ModelInfo) SuggestedContextWindow() int {
 	}
 	if m.MaxModelLen > 0 {
 		return m.MaxModelLen
+	}
+	if m.MaxInputTokens > 0 {
+		return m.MaxInputTokens
 	}
 	return 0
 }
