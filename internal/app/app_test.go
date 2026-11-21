@@ -81,6 +81,33 @@ func captureStdout(t *testing.T, fn func()) *bytes.Buffer {
 	return &buf
 }
 
+// captureStderr captures os.Stderr output into a buffer. The restore runs in
+// defers so a t.Fatalf inside fn (Goexit) cannot strand stderr on the pipe,
+// and the drain runs concurrently so large writes cannot block.
+func captureStderr(t *testing.T, fn func()) *bytes.Buffer {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	buf := &bytes.Buffer{}
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(buf, r)
+		close(done)
+	}()
+	defer func() {
+		os.Stderr = old
+		_ = w.Close()
+		<-done
+		_ = r.Close()
+	}()
+	fn()
+	return buf
+}
+
 // --- Version / Version info tests ---
 
 func TestVersionNonEmpty(t *testing.T) {
@@ -848,6 +875,38 @@ func TestRunReviseProducesStructuredClarificationWithoutLintFinding(t *testing.T
 	}
 	if response.Revisions[0].Kind != "clarification" || response.Revisions[0].Question == nil {
 		t.Fatalf("expected structured clarification: %#v", response.Revisions[0])
+	}
+}
+
+func TestRunReviseReferenceNoMetadataFailsWithoutFallbackWarning(t *testing.T) {
+	// Reference revision cannot proceed on an unknown context window: the
+	// run must fail with the reference-window config error and must not
+	// first claim a legacy-budget fallback it never takes.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "test-model"}}})
+			return
+		}
+		t.Errorf("unexpected request before the context window is known: %s", r.URL.Path)
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	path := writeTempFile(t, "Plain prose awaits revision.")
+	ref := writeTempFile(t, "Reference prose establishes the house style.")
+	stderr := captureStderr(t, func() {
+		err := (&App{}).RunRevise(ReviseParams{Paths: []string{path}, ReferencePaths: []string{ref}, Kind: "description"})
+		if !errors.Is(err, ErrLLMConfigRequired) {
+			t.Fatalf("expected ErrLLMConfigRequired, got %v", err)
+		}
+		// The reference-window fatal, not any other config error, must fire.
+		if !strings.Contains(err.Error(), "requires a known context window") {
+			t.Fatalf("expected the reference-window error, got %v", err)
+		}
+	})
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if strings.HasPrefix(line, "Warning:") {
+			t.Fatalf("reference revision must print no warning before the fatal error: %q", line)
+		}
 	}
 }
 

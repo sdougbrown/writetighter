@@ -113,8 +113,8 @@ time.sleep(0.8); os.read(fd, 65536)          # drain banner
 os.write(fd, b"127.0.0.1:8731\n")            # URL/port prompt
 time.sleep(0.6); os.read(fd, 65536)          # auth menu
 os.write(fd, b"1\n")                         # 1 = No API key
-time.sleep(1.2); os.read(fd, 65536)          # model list (stub-model)
-os.write(fd, b"\n")                          # accept first model
+time.sleep(1.2); os.read(fd, 65536)          # model list (3 stub models)
+os.write(fd, b"3\n")                          # 3 = stub-model (1-2 are metadata fixtures)
 time.sleep(1.5); out = os.read(fd, 65536)    # "Wrote .../config.toml with mode json_schema"
 ```
 

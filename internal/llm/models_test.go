@@ -161,10 +161,52 @@ func TestSuggestedContextWindowPrecedence(t *testing.T) {
 		ContextLength:    16384,
 		MaxContextLength: 32768,
 		MaxModelLen:      65536,
+		MaxInputTokens:   131072,
 	}
 
 	if got := m.SuggestedContextWindow(); got != 16384 {
 		t.Fatalf("SuggestedContextWindow = %d, want 16384 (from ContextLength)", got)
+	}
+}
+
+func TestSuggestedContextWindowFallsBackToMaxInputTokens(t *testing.T) {
+	// LiteLLM-style gateways expose the input cap as max_input_tokens and
+	// report none of the other context fields. It is the last-choice
+	// fallback: earlier fields win when the endpoint reports several.
+	m := ModelInfo{ID: "test-model", MaxInputTokens: 262144}
+	if got := m.SuggestedContextWindow(); got != 262144 {
+		t.Fatalf("SuggestedContextWindow = %d, want 262144 (from MaxInputTokens)", got)
+	}
+
+	both := ModelInfo{ID: "test-model", MaxModelLen: 4096, MaxInputTokens: 262144}
+	if got := both.SuggestedContextWindow(); got != 4096 {
+		t.Fatalf("SuggestedContextWindow = %d, want 4096 (MaxModelLen outranks MaxInputTokens)", got)
+	}
+
+	ctxRank := ModelInfo{ID: "test-model", MaxContextLength: 8192, MaxInputTokens: 262144}
+	if got := ctxRank.SuggestedContextWindow(); got != 8192 {
+		t.Fatalf("SuggestedContextWindow = %d, want 8192 (MaxContextLength outranks MaxInputTokens)", got)
+	}
+}
+
+func TestLookupContextWindowReadsMaxInputTokens(t *testing.T) {
+	// Reproduces the gateway shape that silently defeated auto-detection:
+	// a model whose only context metadata is max_input_tokens returned a
+	// zero window, so revision fell back to the 32,000-byte legacy budget.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// max_output_tokens is distinct so a wrong-field read is visible.
+		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+			{"id": "gemma4", "max_input_tokens": 262144, "max_output_tokens": 8192},
+		}})
+	}))
+	defer server.Close()
+
+	cw, err := LookupContextWindow(server.URL, "", "gemma4", 10*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cw != 262144 {
+		t.Fatalf("LookupContextWindow = %d, want 262144", cw)
 	}
 }
 

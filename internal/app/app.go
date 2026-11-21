@@ -1011,6 +1011,11 @@ func (a *App) RunReviseTo(w io.Writer, params ReviseParams) error {
 				if refPack != nil {
 					return fmt.Errorf("%w: could not auto-detect context window for model %q from %s/models: %v; use --context-tokens to specify it explicitly", ErrLLMConfigRequired, llmModel, llmBaseURL, lookupErr)
 				}
+				fmt.Fprintf(os.Stderr, "Warning: could not auto-detect context window for model %q: %v\n", llmModel, lookupErr)
+			} else if cw == 0 && refPack == nil {
+				// Reference revision without a window is fatal below; only runs
+				// without a reference pack reach the legacy fallback.
+				fmt.Fprintf(os.Stderr, "Warning: model %q is not listed by the endpoint or reports no context window metadata; revision falls back to the legacy %d-byte request budget\n", llmModel, llm.MaxInputChars)
 			} else {
 				llmCfg.ContextWindowTokens = cw
 			}
@@ -1049,6 +1054,8 @@ func (a *App) RunReviseTo(w io.Writer, params ReviseParams) error {
 			if lookupErr != nil {
 				// Fall back to legacy byte budget for code comment revision.
 				fmt.Fprintf(os.Stderr, "Warning: could not auto-detect context window for code model %q: %v\n", codeModel, lookupErr)
+			} else if cw == 0 {
+				fmt.Fprintf(os.Stderr, "Warning: code model %q is not listed by the endpoint or reports no context window metadata; code-comment revision falls back to the legacy %d-byte request budget\n", codeModel, llm.MaxInputChars)
 			} else {
 				codeLlmCfg.ContextWindowTokens = cw
 			}
