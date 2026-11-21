@@ -42,8 +42,8 @@ def rd(t=0.8):
 assert "OpenAI-compatible API URL" in rd()          # banner + URL prompt
 os.write(fd, b"127.0.0.1:8731\n"); assert "Authentication" in rd()
 os.write(fd, b"1\n")                                # 1 = No API key
-assert "Select a model" in rd(1.2)                  # stub-model listed
-os.write(fd, b"\n")                                 # accept first model
+assert "Select a model" in rd(1.2)                  # stub-bare, stub-litellm, stub-model listed
+os.write(fd, b"3\n")                               # 3 = stub-model (1-2 are metadata fixtures)
 out = rd(1.5)
 assert "Wrote" in out and "with mode json_schema" in out
 ```

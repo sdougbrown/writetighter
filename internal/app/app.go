@@ -1013,9 +1013,9 @@ func (a *App) RunReviseTo(w io.Writer, params ReviseParams) error {
 				}
 				fmt.Fprintf(os.Stderr, "Warning: could not auto-detect context window for model %q: %v\n", llmModel, lookupErr)
 			} else if cw == 0 && refPack == nil {
-				// Reference revision without a window is fatal below; only
-				// code-comment revision actually falls back to the legacy budget.
-				fmt.Fprintf(os.Stderr, "Warning: model %q reports no context window metadata; revision falls back to the legacy %d-byte request budget\n", llmModel, llm.MaxInputChars)
+				// Reference revision without a window is fatal below; only runs
+				// without a reference pack reach the legacy fallback.
+				fmt.Fprintf(os.Stderr, "Warning: model %q is not listed by the endpoint or reports no context window metadata; revision falls back to the legacy %d-byte request budget\n", llmModel, llm.MaxInputChars)
 			} else {
 				llmCfg.ContextWindowTokens = cw
 			}
@@ -1055,7 +1055,7 @@ func (a *App) RunReviseTo(w io.Writer, params ReviseParams) error {
 				// Fall back to legacy byte budget for code comment revision.
 				fmt.Fprintf(os.Stderr, "Warning: could not auto-detect context window for code model %q: %v\n", codeModel, lookupErr)
 			} else if cw == 0 {
-				fmt.Fprintf(os.Stderr, "Warning: code model %q reports no context window metadata; code-comment revision falls back to the legacy %d-byte request budget\n", codeModel, llm.MaxInputChars)
+				fmt.Fprintf(os.Stderr, "Warning: code model %q is not listed by the endpoint or reports no context window metadata; code-comment revision falls back to the legacy %d-byte request budget\n", codeModel, llm.MaxInputChars)
 			} else {
 				codeLlmCfg.ContextWindowTokens = cw
 			}

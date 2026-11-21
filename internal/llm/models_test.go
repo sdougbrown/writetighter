@@ -182,6 +182,11 @@ func TestSuggestedContextWindowFallsBackToMaxInputTokens(t *testing.T) {
 	if got := both.SuggestedContextWindow(); got != 4096 {
 		t.Fatalf("SuggestedContextWindow = %d, want 4096 (MaxModelLen outranks MaxInputTokens)", got)
 	}
+
+	ctxRank := ModelInfo{ID: "test-model", MaxContextLength: 8192, MaxInputTokens: 262144}
+	if got := ctxRank.SuggestedContextWindow(); got != 8192 {
+		t.Fatalf("SuggestedContextWindow = %d, want 8192 (MaxContextLength outranks MaxInputTokens)", got)
+	}
 }
 
 func TestLookupContextWindowReadsMaxInputTokens(t *testing.T) {
@@ -189,8 +194,9 @@ func TestLookupContextWindowReadsMaxInputTokens(t *testing.T) {
 	// a model whose only context metadata is max_input_tokens returned a
 	// zero window, so revision fell back to the 32,000-byte legacy budget.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// max_output_tokens is distinct so a wrong-field read is visible.
 		_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
-			{"id": "gemma4", "max_input_tokens": 262144, "max_output_tokens": 262144},
+			{"id": "gemma4", "max_input_tokens": 262144, "max_output_tokens": 8192},
 		}})
 	}))
 	defer server.Close()

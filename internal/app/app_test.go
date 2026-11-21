@@ -81,18 +81,31 @@ func captureStdout(t *testing.T, fn func()) *bytes.Buffer {
 	return &buf
 }
 
-// captureStderr captures os.Stderr output into a buffer.
+// captureStderr captures os.Stderr output into a buffer. The restore runs in
+// defers so a t.Fatalf inside fn (Goexit) cannot strand stderr on the pipe,
+// and the drain runs concurrently so large writes cannot block.
 func captureStderr(t *testing.T, fn func()) *bytes.Buffer {
 	t.Helper()
 	old := os.Stderr
-	r, w, _ := os.Pipe()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 	os.Stderr = w
+	buf := &bytes.Buffer{}
+	done := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(buf, r)
+		close(done)
+	}()
+	defer func() {
+		os.Stderr = old
+		_ = w.Close()
+		<-done
+		_ = r.Close()
+	}()
 	fn()
-	w.Close()
-	os.Stderr = old
-	var buf bytes.Buffer
-	buf.ReadFrom(r)
-	return &buf
+	return buf
 }
 
 // --- Version / Version info tests ---
@@ -867,9 +880,8 @@ func TestRunReviseProducesStructuredClarificationWithoutLintFinding(t *testing.T
 
 func TestRunReviseReferenceNoMetadataFailsWithoutFallbackWarning(t *testing.T) {
 	// Reference revision cannot proceed on an unknown context window: the
-	// run must fail with the config error and must not first print a
-	// "falls back to the legacy budget" warning for a fallback it never
-	// takes (umpire round 1, run 2722, finding a6d97f517d73b84c).
+	// run must fail with the reference-window config error and must not
+	// first claim a legacy-budget fallback it never takes.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" {
 			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{{"id": "test-model"}}})
@@ -886,12 +898,15 @@ func TestRunReviseReferenceNoMetadataFailsWithoutFallbackWarning(t *testing.T) {
 		if !errors.Is(err, ErrLLMConfigRequired) {
 			t.Fatalf("expected ErrLLMConfigRequired, got %v", err)
 		}
+		// The reference-window fatal, not any other config error, must fire.
 		if !strings.Contains(err.Error(), "requires a known context window") {
 			t.Fatalf("expected the reference-window error, got %v", err)
 		}
 	})
-	if strings.Contains(stderr.String(), "falls back to the legacy") {
-		t.Fatalf("reference revision must not claim a legacy fallback before the fatal error: %q", stderr.String())
+	for _, line := range strings.Split(stderr.String(), "\n") {
+		if strings.HasPrefix(line, "Warning:") {
+			t.Fatalf("reference revision must print no warning before the fatal error: %q", line)
+		}
 	}
 }
 

@@ -355,6 +355,39 @@ func TestRunReviseCodeModelOverride(t *testing.T) {
 	}
 }
 
+func TestRunReviseCodeModelNoMetadataWarnsLegacyBudget(t *testing.T) {
+	// The code model is listed with no context metadata: code-comment revision
+	// falls back to the legacy budget and the warning names the code model.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/models" {
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": []map[string]any{
+				{"id": "test-model", "context_length": 8192},
+				{"id": "bare-code"},
+			}})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"choices": []any{map[string]any{"message": map[string]string{"content": `{"findings":[{"comment_id":"c0001","action":"clarification","principle_ids":["CORE.EXPLICIT_RELATIONSHIPS"],"reason":"Missing context.","replacement":null,"question":"What does this protect?","confidence":0.9}]}`}}}})
+	}))
+	defer server.Close()
+	writeReviseUserConfig(t, server.URL, "")
+	path := filepath.Join(t.TempDir(), "sample.go")
+	if err := os.WriteFile(path, []byte("package p\n// real\nfunc f() {}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	stderr := captureStderr(t, func() {
+		if err := (&App{}).RunRevise(ReviseParams{
+			Paths:     []string{path},
+			Kind:      "code-comment",
+			CodeModel: "bare-code",
+		}); err != nil {
+			t.Fatalf("code-comment revision should complete on the legacy budget, got %v", err)
+		}
+	})
+	if !strings.Contains(stderr.String(), `code model "bare-code"`) || !strings.Contains(stderr.String(), "legacy") {
+		t.Fatalf("expected the legacy-budget warning naming the code model, got: %q", stderr.String())
+	}
+}
+
 func TestRunReviseRejectsOutputTokensExceedingCodeModelContextWindow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/models" {
