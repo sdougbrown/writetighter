@@ -43,7 +43,7 @@ const (
 
 // numberLikeToken reports whether tok consists solely of digits and hyphens
 // with at least one digit ("3", "000", "3-5", "2026-11-20"). Tokens containing
-// any other character ("Level-1", "1st") are content words.
+// any other character ("`Level-1`", "`1st`") are content words.
 func numberLikeToken(tok string) bool {
 	hasDigit := false
 	for _, r := range tok {
@@ -61,10 +61,10 @@ func numberLikeToken(tok string) bool {
 // scanNounStackRuns walks a sentence and returns maximal runs of consecutive
 // content words. A word is content if it is NOT in the given stopword set.
 // Runs are split at clause boundaries, so a window never spans an em/en dash,
-// semicolon, or colon, and at any comma following content words, so serial
-// lists ("water, mold, structural", quoted or bolded items included) never
-// collapse into one window. Number-like tokens ("1", "3-5") end a run and
-// never join a stack. Each run carries the stopword that preceded it, if any.
+// semicolon, or colon. Any comma after content words also ends a run, so
+// serial lists never collapse into one window, whether items are plain,
+// quoted, or bolded. Number-like tokens ("1", "3-5") end a run and never
+// join a stack. Each run carries the stopword that preceded it, if any.
 func scanNounStackRuns(text string, stopwords map[string]bool) []stackRun {
 	runes := []rune(text)
 	n := len(runes)
