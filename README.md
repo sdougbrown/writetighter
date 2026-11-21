@@ -110,9 +110,12 @@ it first appears with no parenthetical expansion anywhere in the document
 (common technical abbreviations such as `API`/`ID`/`URL` are excluded, and an
 expansion in either order — `EI (Ending Inventory)` or `Ending Inventory (EI)`
 — suppresses the finding). Noun-stack detection stops at clause boundaries
-(em/en dash, semicolon, colon), rejects windows that read as clauses or end in
-a participle (`unit conversions use`, `barcode registered`), and in
-`code-comment`/`pr` prose ignores identifier- or acronym-heavy stacks
+(em/en dash, semicolon, colon) and coordination commas, so serial lists
+(`water, mold, structural`) never collapse into one window, rejects windows
+that read as clauses or end in
+a participle (`unit conversions use`, `barcode registered`), and excludes
+number tokens (`1,000 requests`, `Kafka 3.7 cluster settings`). In
+`code-comment`/`pr` prose it ignores identifier- or acronym-heavy stacks
 (``primaryCategoryId``, ``Fabric StateWrapper``).
 
 ## Commands

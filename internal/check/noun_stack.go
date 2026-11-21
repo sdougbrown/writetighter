@@ -41,10 +41,28 @@ const (
 	wordClassDeterminer              = "determiner"
 )
 
+// allDigits reports whether tok consists solely of digits ("3", "000").
+// Hyphenated or suffixed tokens ("Level-1", "1st") contain letters and do
+// not count.
+func allDigits(tok string) bool {
+	if tok == "" {
+		return false
+	}
+	for _, r := range tok {
+		if !unicode.IsDigit(r) {
+			return false
+		}
+	}
+	return true
+}
+
 // scanNounStackRuns walks a sentence and returns maximal runs of consecutive
 // content words. A word is content if it is NOT in the given stopword set.
 // Runs are split at clause boundaries, so a window never spans an em/en dash,
-// semicolon, or colon. Each run carries the stopword that preceded it, if any.
+// semicolon, or colon, and at coordination commas between content words, so
+// serial lists ("water, mold, structural") never collapse into one window.
+// Digit-only tokens ("1", "000") end a run and never join a stack.
+// Each run carries the stopword that preceded it, if any.
 func scanNounStackRuns(text string, stopwords map[string]bool) []stackRun {
 	runes := []rune(text)
 	n := len(runes)
@@ -61,6 +79,21 @@ func scanNounStackRuns(text string, stopwords map[string]bool) []stackRun {
 				cur = nil
 			}
 			lastStopword = ""
+			i++
+		case r == ',':
+			// A comma between content words marks coordination, not noun
+			// modification, so it ends the current run. A comma between
+			// digits ("1,000") keeps the number intact.
+			if len(cur) > 0 {
+				j := i + 1
+				for j < n && (runes[j] == ' ' || runes[j] == '\t') {
+					j++
+				}
+				if j < n && unicode.IsLetter(runes[j]) {
+					runs = append(runs, stackRun{tokens: cur, precedingToken: lastStopword})
+					cur = nil
+				}
+			}
 			i++
 		case !(unicode.IsLetter(r) || unicode.IsDigit(r)):
 			i++
@@ -82,6 +115,15 @@ func scanNounStackRuns(text string, stopwords map[string]bool) []stackRun {
 				break
 			}
 			tok := string(runes[start:i])
+			if allDigits(tok) {
+				// Numbers are not nouns; a quantity ("1,000 requests") or a
+				// version-number split ("3.7") must not join a modifier stack.
+				if len(cur) > 0 {
+					runs = append(runs, stackRun{tokens: cur, precedingToken: lastStopword})
+					cur = nil
+				}
+				continue
+			}
 			lowerTok := strings.ToLower(tok)
 			if stopwords[lowerTok] {
 				if len(cur) > 0 {

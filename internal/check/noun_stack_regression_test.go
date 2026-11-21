@@ -149,6 +149,51 @@ func TestNounStackFeedbackNoiseSweep(t *testing.T) {
 	}
 }
 
+func TestNounStackDoesNotCollapseSerialListsAcrossCommas(t *testing.T) {
+	// A comma between content words is coordination, not noun modification.
+	// The claim-type list in "water, mold, structural, or insurance claims"
+	// (quoted from real model output, arXiv:2610.29162 Table 2) must never
+	// collapse into one content-word window.
+	text := "Has the building had water, mold, structural, or insurance claims?"
+	for _, f := range runNounStack(t, text, "description") {
+		t.Fatalf("serial list must not collapse into one stack window: %s", f.Evidence)
+	}
+	// A comma between digits keeps the number; a quantity phrase and a
+	// version-number split are not modifier stacks either.
+	for _, text := range []string{
+		"The limit is 1,000 requests per minute.",
+		"The Kafka 3.7 cluster settings are in the values file.",
+	} {
+		for _, f := range runNounStack(t, text, "description") {
+			t.Fatalf("quantity or version fragments must not become a stack window: %s", f.Evidence)
+		}
+	}
+}
+
+func TestNounStackStillFlagsUnpunctuatedModifierStacks(t *testing.T) {
+	// Unpunctuated modifier stacks quoted from real model output
+	// (arXiv:2610.29162 Table 2) must keep firing after the comma and digit
+	// boundaries land.
+	cases := []struct {
+		text     string
+		expected string
+	}{
+		{"Summer park district classes are a whole thing in Chicago.", "Summer park district classes"},
+		{"Fixed absolute dotfile backup path handling while preserving the marker.", "absolute dotfile backup path handling"},
+	}
+	for _, c := range cases {
+		found := false
+		for _, f := range runNounStack(t, c.text, "description") {
+			if strings.Contains(f.Evidence, c.expected) {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("expected stack %q to still be flagged in %q", c.expected, c.text)
+		}
+	}
+}
+
 func TestUnexpandedAbbrevFindsBareAbbreviation(t *testing.T) {
 	ctx := &RunContext{Document: testDoc("Match the other EI item writes: copy the guard."), Profile: testProfile()}
 	ctx.Document.Kind = "code-comment"
