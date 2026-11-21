@@ -115,11 +115,12 @@ func TestCoreDirectionsCoverStyleGuidePractices(t *testing.T) {
 	}
 }
 
-func TestPrinciplesCoverCompressionConstructions(t *testing.T) {
+func TestGuidanceCoversCompressionConstructions(t *testing.T) {
 	// Directional coverage for constructions that compressed LLM prose
 	// overuses (arXiv:2610.29162): omitted relativizers, stacked noun
-	// modifiers, and figurative verbs on inanimate subjects. Guards the
-	// practice, not the wording.
+	// modifiers, and figurative verbs on inanimate subjects. The pins are
+	// durable anchor terms, so an equivalent rewording passes while a
+	// dropped construction fails.
 	set, err := ForKind(KindDescription)
 	if err != nil {
 		t.Fatal(err)
