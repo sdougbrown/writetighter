@@ -32,15 +32,20 @@ type Set struct {
 	KindDirections []string    `json:"kind_directions"`
 }
 
+// SafeRewriteDirections is the safe-rewrite sentence shared by the revise
+// and whole-passage rewrite prompts. Both modes render this constant so
+// their copies cannot drift apart.
+const SafeRewriteDirections = "Safe rewrite directions include reordering established statements into a causal sequence, replacing compressed framing with an established literal mechanism, and removing redundant prose while preserving every claim and protected token. Also safe, even when the sentence grows longer: restoring an omitted relativizer (that, which), unpacking a stacked noun modifier chain into a stated relationship, or moving an interruption out from between a subject and its verb."
+
 var principles = []Principle{
 	{ID: "CORE.APPROVED_WORDS", Direction: "Use reviewed, unambiguous terms when applicable; preserve unfamiliar technical terms rather than guessing."},
 	{ID: "CORE.ONE_TERM_IDEA", Direction: "Use one term per concept; do not cycle synonyms."},
 	{ID: "CORE.SHORT_SENTENCE", Direction: "Write short sentences, with contextual and code-related exceptions."},
 	{ID: "CORE.ACTIVE_DIRECT_VOICE", Direction: "Use active, direct voice when the actor is known; use the imperative for instructions."},
 	{ID: "CORE.ONE_TOPIC_PARAGRAPH", Direction: "Cover one topic per paragraph."},
-	{ID: "CORE.EXPLICIT_RELATIONSHIPS", Direction: "Make subject, action, object, and effect explicit; unpack compressed technical shorthand."},
+	{ID: "CORE.EXPLICIT_RELATIONSHIPS", Direction: "Make subject, action, object, and effect explicit; unpack compressed technical shorthand. Restore an omitted relativizer (that, which) when the subject and verb inside a relative clause are otherwise hard to see, and unpack stacked noun modifiers into a stated relationship when the source establishes it."},
 	{ID: "CORE.CAUSAL_ORDER", Direction: "When the source establishes the relationships, order context or cause before its implication, resulting action or decision, and effect. Preserve every fact."},
-	{ID: "CORE.PLAIN_MECHANISM", Direction: "Replace clever, figurative, or compressed framing with the literal technical mechanism when the source establishes that mechanism. Do not treat individual words as violations."},
+	{ID: "CORE.PLAIN_MECHANISM", Direction: "Replace clever, figurative, or compressed framing with the literal technical mechanism when the source establishes that mechanism. Do not treat individual words as violations. When the only framing is a figurative verb on an inanimate subject (the check swallows the error), the sentence names no mechanism; state the established behavior, or ask for it."},
 	{ID: "CORE.RELEVANT_DETAIL", Direction: "Use enough detail to transfer mechanical understanding, not the fewest words. Remove repetition or tangents only when no fact or protected technical detail is lost."},
 	{ID: "CORE.TIMELESS_PROSE", Direction: "State the current behavior without time anchors (currently, now, as of this writing) and do not pre-announce planned or future features; document what the product does, not how it has changed or might change."},
 }
@@ -51,7 +56,7 @@ var coreDirections = []string{
 	"Preserve the exact spelling of code spans, identifiers, commands, paths, URLs, numbers, versions, product names, and project terms.",
 	"Do not merely polish grammar while leaving compressed shorthand, an undefined abbreviation, an unclear referent, or an ambiguous transformation unexplained.",
 	"Propose a rewrite only when the supplied prose or glossary establishes enough meaning to improve it without guessing. Otherwise ask a concrete clarification question.",
-	"Safe rewrite directions include reordering established statements into a causal sequence, replacing compressed framing with an established literal mechanism, and removing redundant prose while preserving every claim and protected token.",
+	SafeRewriteDirections,
 	"Do not add a rationale just because one seems likely. If a load-bearing claim needs a reason that the source does not provide, ask for that reason.",
 	"Use sentence case for headings and titles; start task headings with a bare infinitive and conceptual headings with a noun phrase. Do not open a heading with an -ing verb form, skip a heading level, or end one with a period.",
 	"Use numbered lists for sequences and bulleted lists for unordered sets; keep list items parallel and introduce a list with a complete sentence ending in a colon.",

@@ -41,10 +41,30 @@ const (
 	wordClassDeterminer              = "determiner"
 )
 
+// numberLikeToken reports whether tok consists solely of digits and hyphens
+// with at least one digit ("3", "000", "3-5", "2026-11-20"). Tokens containing
+// any other character ("`Level-1`", "`1st`") are content words.
+func numberLikeToken(tok string) bool {
+	hasDigit := false
+	for _, r := range tok {
+		switch {
+		case unicode.IsDigit(r):
+			hasDigit = true
+		case r == '-':
+		default:
+			return false
+		}
+	}
+	return hasDigit
+}
+
 // scanNounStackRuns walks a sentence and returns maximal runs of consecutive
 // content words. A word is content if it is NOT in the given stopword set.
 // Runs are split at clause boundaries, so a window never spans an em/en dash,
-// semicolon, or colon. Each run carries the stopword that preceded it, if any.
+// semicolon, or colon. Any comma after content words also ends a run, so
+// serial lists never collapse into one window, whether items are plain,
+// quoted, or bolded. Number-like tokens ("1", "3-5") end a run and never
+// join a stack. Each run carries the stopword that preceded it, if any.
 func scanNounStackRuns(text string, stopwords map[string]bool) []stackRun {
 	runes := []rune(text)
 	n := len(runes)
@@ -61,6 +81,17 @@ func scanNounStackRuns(text string, stopwords map[string]bool) []stackRun {
 				cur = nil
 			}
 			lastStopword = ""
+			i++
+		case r == ',':
+			// A comma between content words marks coordination, not noun
+			// modification, so it ends the current run. A number's thousands
+			// comma never reaches this branch: the digit token before it
+			// already ended the run.
+			if len(cur) > 0 {
+				runs = append(runs, stackRun{tokens: cur, precedingToken: lastStopword})
+				cur = nil
+				lastStopword = ""
+			}
 			i++
 		case !(unicode.IsLetter(r) || unicode.IsDigit(r)):
 			i++
@@ -82,6 +113,19 @@ func scanNounStackRuns(text string, stopwords map[string]bool) []stackRun {
 				break
 			}
 			tok := string(runes[start:i])
+			if numberLikeToken(tok) {
+				// Numbers are not nouns; a quantity ("1,000 requests"), a
+				// numeric range ("3-5"), or a date ("2026-11-20") must not
+				// join a modifier stack. The run after the number carries no
+				// preceding determiner: the number, not a stopword, came
+				// before it.
+				if len(cur) > 0 {
+					runs = append(runs, stackRun{tokens: cur, precedingToken: lastStopword})
+					cur = nil
+				}
+				lastStopword = ""
+				continue
+			}
 			lowerTok := strings.ToLower(tok)
 			if stopwords[lowerTok] {
 				if len(cur) > 0 {

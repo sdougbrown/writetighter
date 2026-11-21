@@ -33,6 +33,9 @@ func TestBuildRewritePromptContainsKindDirections(t *testing.T) {
 	if !strings.Contains(user, "Some text.") {
 		t.Fatal("expected source text in user content")
 	}
+	if !strings.Contains(sys, guidance.SafeRewriteDirections) {
+		t.Fatal("expected the shared safe-rewrite sentence in the rewrite prompt")
+	}
 }
 
 func TestBuildRewritePromptDoesNotAskForClarifications(t *testing.T) {

@@ -9,9 +9,10 @@ same multilingual source corpus and `gemma4` endpoint:
    source context, comments-only targeting, and deletion support.
 
 Both paths normalize findings into `review.json`. Longe's `gist` evaluator uses
-`nemotron-ultra` on the local OpenAI-compatible endpoint to score validity,
+`glm-flash` on the local OpenAI-compatible endpoint to score validity,
 false positives, estimated recall, target isolation, actionability, replacement
-safety, and overall quality.
+safety, and overall quality. Earlier recorded runs were adjudicated by
+`nemotron-ultra` before that endpoint alias was retired.
 
 ## Setup
 

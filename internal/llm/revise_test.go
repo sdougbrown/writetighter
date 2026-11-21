@@ -253,7 +253,7 @@ func TestBuildRevisePromptBasic(t *testing.T) {
 	if !strings.Contains(prompt, "merely polish grammar") || !strings.Contains(prompt, "clarification question") {
 		t.Fatal("expected semantic-clarity gate before rewriting")
 	}
-	for _, direction := range []string{"CORE.CAUSAL_ORDER", "CORE.PLAIN_MECHANISM", "CORE.RELEVANT_DETAIL", "causal sequence", "Do not add a rationale"} {
+	for _, direction := range []string{"CORE.CAUSAL_ORDER", "CORE.PLAIN_MECHANISM", "CORE.RELEVANT_DETAIL", "causal sequence", "Do not add a rationale", "relativizer"} {
 		if !strings.Contains(prompt, direction) {
 			t.Fatalf("expected explanation direction %q", direction)
 		}
