@@ -153,19 +153,54 @@ func TestNounStackDoesNotCollapseSerialListsAcrossCommas(t *testing.T) {
 	// A comma between content words is coordination, not noun modification.
 	// The claim-type list in "water, mold, structural, or insurance claims"
 	// (quoted from real model output, arXiv:2610.29162 Table 2) must never
-	// collapse into one content-word window.
-	text := "Has the building had water, mold, structural, or insurance claims?"
-	for _, f := range runNounStack(t, text, "description") {
-		t.Fatalf("serial list must not collapse into one stack window: %s", f.Evidence)
+	// collapse into one content-word window — including items wrapped in
+	// quotes, bold markers, parentheses, or followed by a non-breaking
+	// space, which Markdown prose produces regularly.
+	texts := []string{
+		"Has the building had water, mold, structural, or insurance claims?",
+		`The building had "water", "mold", "structural" claims.`,
+		"The building had **water**, **mold**, **structural** claims.",
+		"The building had (water), (mold), (structural) claims.",
+		"Has the building had water,\u00a0mold,\u00a0structural claims?",
 	}
-	// A comma between digits keeps the number; a quantity phrase and a
-	// version-number split are not modifier stacks either.
+	for _, text := range texts {
+		for _, f := range runNounStack(t, text, "description") {
+			t.Fatalf("serial list %q must not collapse into one stack window: %s", text, f.Evidence)
+		}
+	}
+}
+
+func TestNounStackExcludesNumbersFromStackWindows(t *testing.T) {
+	// Number-like tokens are not nouns: quantities, version splits, numeric
+	// ranges, and dates never join a modifier stack.
 	for _, text := range []string{
 		"The limit is 1,000 requests per minute.",
 		"The Kafka 3.7 cluster settings are in the values file.",
+		"The 3-5 minute window is open.",
+		"The 2026-11-20 release checklist is final.",
 	} {
 		for _, f := range runNounStack(t, text, "description") {
-			t.Fatalf("quantity or version fragments must not become a stack window: %s", f.Evidence)
+			t.Fatalf("number fragment in %q must not join a stack window: %s", text, f.Evidence)
+		}
+	}
+}
+
+func TestNounStackGardenPathResetsAfterCommaAndNumberBoundaries(t *testing.T) {
+	// A run opening after a coordination comma or a number-like token
+	// carries no preceding determiner, so it must surface as a plain noun
+	// stack, never as a garden-path ambiguity claim.
+	cases := []struct {
+		text  string
+		stack string
+	}{
+		{"Review the plan, build pipeline config, and deploy settings.", "build pipeline config"},
+		{"The 3 design pattern schema is stale.", "design pattern schema"},
+	}
+	for _, c := range cases {
+		for _, f := range runNounStack(t, c.text, "description") {
+			if strings.Contains(f.Evidence, c.stack) && strings.Contains(f.Evidence, "ambiguous") {
+				t.Fatalf("stack %q after a boundary must not claim a preceding determiner: %s", c.stack, f.Evidence)
+			}
 		}
 	}
 }
@@ -173,13 +208,14 @@ func TestNounStackDoesNotCollapseSerialListsAcrossCommas(t *testing.T) {
 func TestNounStackStillFlagsUnpunctuatedModifierStacks(t *testing.T) {
 	// Unpunctuated modifier stacks quoted from real model output
 	// (arXiv:2610.29162 Table 2) must keep firing after the comma and digit
-	// boundaries land.
+	// boundaries land — including in sentences that also contain a comma
+	// or a number, so the new boundaries cannot over-suppress real stacks.
 	cases := []struct {
 		text     string
 		expected string
 	}{
-		{"Summer park district classes are a whole thing in Chicago.", "Summer park district classes"},
-		{"Fixed absolute dotfile backup path handling while preserving the marker.", "absolute dotfile backup path handling"},
+		{"Summer park district classes, offered citywide, fill fast.", "Summer park district classes"},
+		{"Fixed absolute dotfile backup path handling while preserving 3 retry markers.", "absolute dotfile backup path handling"},
 	}
 	for _, c := range cases {
 		found := false

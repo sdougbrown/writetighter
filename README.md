@@ -114,7 +114,8 @@ expansion in either order — `EI (Ending Inventory)` or `Ending Inventory (EI)`
 (`water, mold, structural`) never collapse into one window, rejects windows
 that read as clauses or end in
 a participle (`unit conversions use`, `barcode registered`), and excludes
-number tokens (`1,000 requests`, `Kafka 3.7 cluster settings`). In
+number-like tokens (`1,000 requests`, `3-5 minute windows`, `Kafka 3.7
+cluster settings`). In
 `code-comment`/`pr` prose it ignores identifier- or acronym-heavy stacks
 (``primaryCategoryId``, ``Fabric StateWrapper``).
 

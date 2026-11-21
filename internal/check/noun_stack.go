@@ -41,28 +41,30 @@ const (
 	wordClassDeterminer              = "determiner"
 )
 
-// allDigits reports whether tok consists solely of digits ("3", "000").
-// Hyphenated or suffixed tokens ("Level-1", "1st") contain letters and do
-// not count.
-func allDigits(tok string) bool {
-	if tok == "" {
-		return false
-	}
+// numberLikeToken reports whether tok consists solely of digits and hyphens
+// with at least one digit ("3", "000", "3-5", "2026-11-20"). Tokens containing
+// any other character ("Level-1", "1st") are content words.
+func numberLikeToken(tok string) bool {
+	hasDigit := false
 	for _, r := range tok {
-		if !unicode.IsDigit(r) {
+		switch {
+		case unicode.IsDigit(r):
+			hasDigit = true
+		case r == '-':
+		default:
 			return false
 		}
 	}
-	return true
+	return hasDigit
 }
 
 // scanNounStackRuns walks a sentence and returns maximal runs of consecutive
 // content words. A word is content if it is NOT in the given stopword set.
 // Runs are split at clause boundaries, so a window never spans an em/en dash,
-// semicolon, or colon, and at coordination commas between content words, so
-// serial lists ("water, mold, structural") never collapse into one window.
-// Digit-only tokens ("1", "000") end a run and never join a stack.
-// Each run carries the stopword that preceded it, if any.
+// semicolon, or colon, and at any comma following content words, so serial
+// lists ("water, mold, structural", quoted or bolded items included) never
+// collapse into one window. Number-like tokens ("1", "3-5") end a run and
+// never join a stack. Each run carries the stopword that preceded it, if any.
 func scanNounStackRuns(text string, stopwords map[string]bool) []stackRun {
 	runes := []rune(text)
 	n := len(runes)
@@ -82,17 +84,13 @@ func scanNounStackRuns(text string, stopwords map[string]bool) []stackRun {
 			i++
 		case r == ',':
 			// A comma between content words marks coordination, not noun
-			// modification, so it ends the current run. A comma between
-			// digits ("1,000") keeps the number intact.
+			// modification, so it ends the current run. A number's thousands
+			// comma never reaches this branch: the digit token before it
+			// already ended the run.
 			if len(cur) > 0 {
-				j := i + 1
-				for j < n && (runes[j] == ' ' || runes[j] == '\t') {
-					j++
-				}
-				if j < n && unicode.IsLetter(runes[j]) {
-					runs = append(runs, stackRun{tokens: cur, precedingToken: lastStopword})
-					cur = nil
-				}
+				runs = append(runs, stackRun{tokens: cur, precedingToken: lastStopword})
+				cur = nil
+				lastStopword = ""
 			}
 			i++
 		case !(unicode.IsLetter(r) || unicode.IsDigit(r)):
@@ -115,13 +113,17 @@ func scanNounStackRuns(text string, stopwords map[string]bool) []stackRun {
 				break
 			}
 			tok := string(runes[start:i])
-			if allDigits(tok) {
-				// Numbers are not nouns; a quantity ("1,000 requests") or a
-				// version-number split ("3.7") must not join a modifier stack.
+			if numberLikeToken(tok) {
+				// Numbers are not nouns; a quantity ("1,000 requests"), a
+				// numeric range ("3-5"), or a date ("2026-11-20") must not
+				// join a modifier stack. The run after the number carries no
+				// preceding determiner: the number, not a stopword, came
+				// before it.
 				if len(cur) > 0 {
 					runs = append(runs, stackRun{tokens: cur, precedingToken: lastStopword})
 					cur = nil
 				}
+				lastStopword = ""
 				continue
 			}
 			lowerTok := strings.ToLower(tok)
