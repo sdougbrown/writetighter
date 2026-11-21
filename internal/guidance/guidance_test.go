@@ -115,6 +115,27 @@ func TestCoreDirectionsCoverStyleGuidePractices(t *testing.T) {
 	}
 }
 
+func TestPrinciplesCoverCompressionConstructions(t *testing.T) {
+	// Directional coverage for constructions that compressed LLM prose
+	// overuses (arXiv:2610.29162): omitted relativizers, stacked noun
+	// modifiers, and figurative verbs on inanimate subjects. Guards the
+	// practice, not the wording.
+	set, err := ForKind(KindDescription)
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := ""
+	for _, p := range set.Principles {
+		joined += p.Direction + "\n"
+	}
+	joined += strings.Join(set.CoreDirections, "\n")
+	for _, practice := range []string{"relativizer", "stacked noun modifiers", "inanimate subject", "grows longer"} {
+		if !strings.Contains(joined, practice) {
+			t.Fatalf("guidance missing compression-construction coverage %q: %s", practice, joined)
+		}
+	}
+}
+
 func TestTimelessProsePrincipleExists(t *testing.T) {
 	set, err := ForKind(KindDescription)
 	if err != nil {

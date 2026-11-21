@@ -69,7 +69,7 @@ func BuildRewritePrompt(doc *document.Document, res *profile.Resolution, finding
 		"Preserve the exact spelling of code spans, identifiers, commands, paths, URLs, numbers, versions, product names, and project terms.",
 		"Do not merely polish grammar while leaving compressed shorthand, an undefined abbreviation, an unclear referent, or an ambiguous transformation unexplained.",
 		"Rewrite the passage to be tighter and more precise. When a section's meaning is too ambiguous to rewrite safely, preserve it as-is rather than guessing or fabricating.",
-		"Safe rewrite directions include reordering established statements into a causal sequence, replacing compressed framing with an established literal mechanism, and removing redundant prose while preserving every claim and protected token.",
+		"Safe rewrite directions include reordering established statements into a causal sequence, replacing compressed framing with an established literal mechanism, and removing redundant prose while preserving every claim and protected token. Also safe, even when the sentence grows longer: restoring an omitted relativizer (that, which), unpacking a stacked noun modifier chain into a stated relationship, or moving an interruption out from between a subject and its verb.",
 		"Do not add a rationale just because one seems likely. If a load-bearing claim needs a reason that the source does not provide, preserve the claim without the invented reason.",
 		"Treat the rewrite as advisory. Do not claim to modify the source.",
 	}

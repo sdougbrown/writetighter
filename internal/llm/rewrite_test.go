@@ -33,6 +33,9 @@ func TestBuildRewritePromptContainsKindDirections(t *testing.T) {
 	if !strings.Contains(user, "Some text.") {
 		t.Fatal("expected source text in user content")
 	}
+	if !strings.Contains(sys, "relativizer") {
+		t.Fatal("expected compression-construction rewrite direction in system prompt")
+	}
 }
 
 func TestBuildRewritePromptDoesNotAskForClarifications(t *testing.T) {
